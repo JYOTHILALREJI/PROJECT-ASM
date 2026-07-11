@@ -357,6 +357,7 @@ export function CancellationRequestPage() {
           employeeId: formData.employeeId,
           reason: formData.reason || undefined,
           createdById: user.id,
+          actorDisplayName: user.name || user.email,
         }),
       });
       const json = await res.json();
@@ -387,6 +388,7 @@ export function CancellationRequestPage() {
         body: JSON.stringify({
           status: reviewAction,
           reviewedBy: user.id,
+          actorDisplayName: user.name || user.email,
         }),
       });
       const json = await res.json();

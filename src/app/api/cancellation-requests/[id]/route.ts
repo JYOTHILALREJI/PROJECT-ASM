@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { cascadeSoftDeleteEmployee } from '@/lib/soft-delete';
+import { logActivity } from '@/lib/activity-logger';
 
 export async function PUT(
   request: NextRequest,
@@ -9,7 +10,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { status, reviewedBy } = body;
+    const { status, reviewedBy, actorDisplayName } = body;
 
     if (!status || !reviewedBy) {
       return NextResponse.json(
@@ -128,6 +129,19 @@ export async function PUT(
     if (status === 'approved') {
       await cascadeSoftDeleteEmployee(existing.employeeId);
     }
+
+    // Log the activity
+    await logActivity({
+      userId: finalReviewedById,
+      displayName: actorDisplayName || reviewer?.name || reviewer?.email || 'Admin',
+      action: status === 'approved' ? 'cancellation_request_approve' : 'cancellation_request_reject',
+      entityType: 'cancellation_request',
+      entityId: id,
+      entityName: result.employee.fullName,
+      description: `${status === 'approved' ? 'Approved' : 'Rejected'} cancellation request for ${result.employee.fullName} (${result.employee.employeeId})${status === 'approved' ? ' — employee soft-deleted with cascade' : ' — employee restored to active'}`,
+      details: { status, employeeId: existing.employeeId, reason: existing.reason },
+      request,
+    });
 
     return NextResponse.json({
       success: true,

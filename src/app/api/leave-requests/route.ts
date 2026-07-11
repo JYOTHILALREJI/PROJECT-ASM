@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { logActivity } from '@/lib/activity-logger';
 
 export async function GET(request: NextRequest) {
   try {
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { employeeId, type, otherTypeText, startDate, endDate, totalDays, reason, createdById } = body;
+    const { employeeId, type, otherTypeText, startDate, endDate, totalDays, reason, createdById, actorDisplayName } = body;
 
     if (!employeeId || !type || !startDate || !endDate || !totalDays || !reason || !createdById) {
       return NextResponse.json(
@@ -181,6 +182,19 @@ export async function POST(request: NextRequest) {
       }
 
       return newRequest;
+    });
+
+    // Log the activity
+    await logActivity({
+      userId: finalCreatedById,
+      displayName: actorDisplayName || creator?.name || creator?.email || 'Admin',
+      action: 'leave_request_create',
+      entityType: 'leave_request',
+      entityId: leaveRequest.id,
+      entityName: leaveRequest.employee.fullName,
+      description: `Created ${type} leave request for ${leaveRequest.employee.fullName} (${leaveRequest.employee.employeeId}) — ${totalDays} day(s)`,
+      details: { leaveType: type, otherTypeText: otherTypeText || null, startDate, endDate, totalDays, reason },
+      request,
     });
 
     return NextResponse.json(

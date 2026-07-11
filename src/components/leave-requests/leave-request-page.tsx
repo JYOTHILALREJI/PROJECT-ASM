@@ -651,6 +651,7 @@ export function LeaveRequestPage() {
           totalDays: formData.totalDays,
           reason: formData.reason,
           createdById: user.id,
+          actorDisplayName: user.name || user.email,
         }),
       });
       const json = await res.json();
@@ -680,6 +681,7 @@ export function LeaveRequestPage() {
         body: JSON.stringify({
           status: reviewAction,
           reviewedBy: user.id,
+          actorDisplayName: user.name || user.email,
         }),
       });
       const json = await res.json();

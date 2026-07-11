@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { logActivity } from '@/lib/activity-logger';
 
 export async function PUT(
   request: NextRequest,
@@ -8,7 +9,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { status, reviewedBy } = body;
+    const { status, reviewedBy, actorDisplayName } = body;
 
     if (!status || !reviewedBy) {
       return NextResponse.json(
@@ -103,6 +104,19 @@ export async function PUT(
       });
 
       return updatedRequest;
+    });
+
+    // Log the activity
+    await logActivity({
+      userId: finalReviewedById,
+      displayName: actorDisplayName || reviewer?.name || reviewer?.email || 'Admin',
+      action: status === 'approved' ? 'leave_request_approve' : 'leave_request_reject',
+      entityType: 'leave_request',
+      entityId: id,
+      entityName: result.employee.fullName,
+      description: `${status === 'approved' ? 'Approved' : 'Rejected'} ${result.leaveType} leave request for ${result.employee.fullName} (${result.employee.employeeId})`,
+      details: { leaveType: result.leaveType, totalDays: result.totalDays, status },
+      request,
     });
 
     return NextResponse.json({

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { logActivity } from '@/lib/activity-logger';
 
 export async function GET(request: NextRequest) {
   try {
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { employeeId, reason, createdById } = body;
+    const { employeeId, reason, createdById, actorDisplayName } = body;
 
     if (!employeeId || !createdById) {
       return NextResponse.json(
@@ -176,6 +177,19 @@ export async function POST(request: NextRequest) {
       }
 
       return newRequest;
+    });
+
+    // Log the activity
+    await logActivity({
+      userId: finalRequestedById,
+      displayName: actorDisplayName || requester?.name || requester?.email || 'Admin',
+      action: 'cancellation_request_create',
+      entityType: 'cancellation_request',
+      entityId: cancellationRequest.id,
+      entityName: cancellationRequest.employee.fullName,
+      description: `Created cancellation request for ${cancellationRequest.employee.fullName} (${cancellationRequest.employee.employeeId})${reason ? ` — Reason: ${reason}` : ''}`,
+      details: { employeeId, reason: reason || null },
+      request,
     });
 
     return NextResponse.json(
