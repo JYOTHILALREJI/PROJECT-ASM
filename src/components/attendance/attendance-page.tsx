@@ -260,6 +260,7 @@ interface SiteListViewProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void;
+  onBulkMark: (siteId: string, siteName: string, date: string, status: 'present' | 'absent', employeeIds: string[]) => Promise<void>;
   onShare: () => void;
   onAttendanceSheet: () => void;
 }
@@ -277,6 +278,7 @@ function SiteListView({
   isCollapsed,
   onToggleCollapse,
   onStatusChange,
+  onBulkMark,
   onShare,
   onAttendanceSheet,
 }: SiteListViewProps) {
@@ -287,6 +289,15 @@ function SiteListView({
     overtimeHours: number | null;
     position: { top: number; left: number };
   } | null>(null);
+
+  // ── Bulk-mark state ──
+  // Defaults to today's date (in YYYY-MM-DD) so the admin can mark "today"
+  // with one click. The date input is constrained to the current month
+  // being viewed (the parent passes monthStr/yearStr).
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [bulkMarkDate, setBulkMarkDate] = useState<string>(todayStr);
+  const [bulkMarkStatus, setBulkMarkStatus] = useState<'present' | 'absent'>('present');
+  const [bulkMarkLoading, setBulkMarkLoading] = useState(false);
 
   // Sort: Team Leaders first, then Supervisors, then everyone else
   // alphabetically by name within each group.
@@ -345,6 +356,21 @@ function SiteListView({
     }
     return { present, absent, unmarked, total: employees.length };
   }, [employees, attendanceMap, isCurrentMonthView, monthStr, yearStr]);
+
+  // Handle bulk mark for this site
+  const handleBulkMark = useCallback(async () => {
+    if (employees.length === 0) return;
+    if (!bulkMarkDate) {
+      toast({ title: 'Date required', description: 'Please pick a date first.', variant: 'destructive' });
+      return;
+    }
+    setBulkMarkLoading(true);
+    try {
+      await onBulkMark(site.id, site.name, bulkMarkDate, bulkMarkStatus, employees.map((e) => e.id));
+    } finally {
+      setBulkMarkLoading(false);
+    }
+  }, [employees, bulkMarkDate, bulkMarkStatus, onBulkMark, site.id, site.name]);
 
   return (
     <Card className="bg-slate-800/50 border-slate-700/50 overflow-hidden">
@@ -438,6 +464,76 @@ function SiteListView({
           </Button>
         </div>
       </div>
+
+      {/* Bulk-mark bar (only when site is expanded) */}
+      {!isCollapsed && (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-900/30 border-b border-slate-700/50">
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wide font-medium">
+            <Calendar className="h-3 w-3" />
+            Mark all
+          </div>
+          <input
+            type="date"
+            value={bulkMarkDate}
+            onChange={(e) => setBulkMarkDate(e.target.value)}
+            className="h-7 px-2 text-xs bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-emerald-500/50"
+            // Constrain to the month currently being viewed
+            min={`${yearStr}-${monthStr}-01`}
+            max={`${yearStr}-${monthStr}-${String(daysInMonth).padStart(2, '0')}`}
+            title="Date to mark all employees"
+          />
+          <div className="flex items-center bg-slate-800 rounded-md border border-slate-700 p-0.5">
+            <button
+              type="button"
+              onClick={() => setBulkMarkStatus('present')}
+              className={cn(
+                'flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors',
+                bulkMarkStatus === 'present'
+                  ? 'bg-emerald-500 text-white'
+                  : 'text-slate-400 hover:text-white'
+              )}
+            >
+              <Check className="h-3 w-3" />
+              Present
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkMarkStatus('absent')}
+              className={cn(
+                'flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors',
+                bulkMarkStatus === 'absent'
+                  ? 'bg-red-500 text-white'
+                  : 'text-slate-400 hover:text-white'
+              )}
+            >
+              <X className="h-3 w-3" />
+              Absent
+            </button>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleBulkMark}
+            disabled={bulkMarkLoading || employees.length === 0 || !bulkMarkDate}
+            className={cn(
+              'h-7 text-[11px] gap-1.5',
+              bulkMarkStatus === 'present'
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                : 'bg-red-600 hover:bg-red-700 text-white',
+            )}
+            title={`Mark all ${employees.length} employee(s) as ${bulkMarkStatus} on ${bulkMarkDate}`}
+          >
+            {bulkMarkLoading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Check className="h-3 w-3" />
+            )}
+            Mark all {employees.length} as {bulkMarkStatus === 'present' ? 'Present' : 'Absent'}
+          </Button>
+          <p className="text-[10px] text-slate-500 ml-auto hidden md:block">
+            Overtime records are preserved when marking Present.
+          </p>
+        </div>
+      )}
 
       {/* Collapsible table */}
       {!isCollapsed && (
@@ -834,6 +930,49 @@ export function AttendancePage() {
     []
   );
 
+  // Bulk-mark all employees at a site as present/absent for a given date.
+  // Calls the existing /api/attendance/bulk-mark endpoint (which already
+  // accepts a custom status + employeeIds array, preserves overtime records
+  // when marking present, captures a version snapshot per site, and runs the
+  // 10-hour salary sync for each present mark).
+  const handleBulkMark = useCallback(
+    async (siteId: string, siteName: string, date: string, status: 'present' | 'absent', employeeIds: string[]) => {
+      if (employeeIds.length === 0) return;
+      try {
+        const res = await fetch('/api/attendance/bulk-mark', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, status, employeeIds }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          // Refetch all attendance records for the current month so the grid
+          // reflects the bulk-marked statuses immediately. This is simpler
+          // than hand-updating N records in local state and guarantees
+          // consistency with what the server wrote (including the overtime
+          // preservation logic).
+          const monthParam = `${yearStr}-${monthStr}`;
+          const attRes = await fetch(`/api/attendance?month=${monthParam}&year=${yearStr}`);
+          const attData = await attRes.json();
+          if (attData.success) {
+            setAttendanceRecords(attData.data.records || []);
+          }
+          const updated = data.data.updated || 0;
+          const skipped = data.data.skipped || 0;
+          toast({
+            title: 'Bulk mark complete',
+            description: `${updated} employee(s) marked as ${status} for ${siteName} on ${date}${skipped > 0 ? `. ${skipped} skipped (already ${status === 'present' ? 'overtime' : 'marked'}).` : ''}`,
+          });
+        } else {
+          toast({ title: 'Error', description: data.error || 'Failed to bulk mark attendance', variant: 'destructive' });
+        }
+      } catch {
+        toast({ title: 'Error', description: 'Failed to bulk mark attendance', variant: 'destructive' });
+      }
+    },
+    [yearStr, monthStr]
+  );
+
   // Navigation handlers
   const goToPrevMonth = () => {
     let m = month - 1;
@@ -1091,6 +1230,7 @@ export function AttendancePage() {
                 isCollapsed={collapsedSites.has(site.name)}
                 onToggleCollapse={() => toggleSiteCollapse(site.name)}
                 onStatusChange={handleStatusChange}
+                onBulkMark={handleBulkMark}
                 onShare={() => openShareDialog(site)}
                 onAttendanceSheet={() => openAttendanceSheet(site)}
               />
