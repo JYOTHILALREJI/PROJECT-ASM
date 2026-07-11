@@ -28,7 +28,7 @@ const HEADER_MAP: Record<string, string[]> = {
   customHourlyRate: ['custom rate', 'custom_rate', 'hourly rate', 'hourly_rate', 'custom hourly rate', 'custom_hourly_rate', 'rate'],
 };
 
-const ALLOWED_EXTENSIONS = ['.txt', '.csv', '.xlsx', '.xls', '.pdf', '.docx', '.doc'];
+const ALLOWED_EXTENSIONS = ['.txt', '.csv', '.tsv', '.xlsx', '.xls', '.pdf', '.docx', '.doc', '.json'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -142,13 +142,17 @@ function parseString(value: string | number | undefined | null): string | null {
 // File Parsers
 // ---------------------------------------------------------------------------
 
-/** Parse CSV / TXT – comma or tab separated */
-function parseCsvTxt(content: string): Record<string, string | number | null>[] {
-  // Detect separator: tab vs comma
-  const firstLine = content.split(/\r?\n/)[0] || '';
-  const tabCount = (firstLine.match(/\t/g) || []).length;
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const separator = tabCount > commaCount ? '\t' : ',';
+/** Parse CSV / TSV / TXT – comma or tab separated.
+ *  If `separator` is omitted, the function sniffs the first line to decide
+ *  between tab and comma. Pass an explicit separator to override the sniff. */
+function parseCsvTxt(content: string, separator?: string): Record<string, string | number | null>[] {
+  // Detect separator if not provided: tab vs comma
+  if (!separator) {
+    const firstLine = content.split(/\r?\n/)[0] || '';
+    const tabCount = (firstLine.match(/\t/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    separator = tabCount > commaCount ? '\t' : ',';
+  }
 
   const lines = content.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];
@@ -166,6 +170,45 @@ function parseCsvTxt(content: string): Record<string, string | number | null>[] 
   }
 
   return rows;
+}
+
+/** Parse JSON – accepts either an array of objects or an object with an
+ *  `employees` (or `data`) array property. */
+function parseJson(content: string): Record<string, string | number | null>[] {
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return [];
+  }
+
+  let arr: unknown[] = [];
+  if (Array.isArray(parsed)) {
+    arr = parsed;
+  } else if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.employees)) arr = obj.employees;
+    else if (Array.isArray(obj.data)) arr = obj.data;
+    else arr = [obj]; // single object
+  }
+
+  return arr.map((item) => {
+    if (item && typeof item === 'object') {
+      // Coerce all values to string|number|null
+      const out: Record<string, string | number | null> = {};
+      for (const [k, v] of Object.entries(item as Record<string, unknown>)) {
+        if (v === null || v === undefined) out[k] = null;
+        else if (typeof v === 'number') out[k] = v;
+        else if (typeof v === 'string') out[k] = v;
+        else out[k] = String(v);
+      }
+      return out;
+    }
+    return {};
+  });
 }
 
 /** Parse Excel (.xlsx / .xls) */
@@ -269,6 +312,11 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file');
+    // Optional explicit format hint from the client. When provided, this
+    // overrides extension-based detection so the user can tell us, e.g.,
+    // "this .txt file is actually a CSV" or "this .csv file uses tabs".
+    // Accepted values: 'csv', 'tsv', 'xlsx', 'pdf', 'docx', 'json'
+    const formatHint = (formData.get('format') as string | null)?.toLowerCase().trim() || null;
 
     if (!file || !(file instanceof File)) {
       return NextResponse.json(
@@ -280,11 +328,12 @@ export async function POST(request: NextRequest) {
     // Validate extension
     const fileName = file.name.toLowerCase();
     const ext = '.' + fileName.split('.').pop();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    const allowedExtensions = ALLOWED_EXTENSIONS.concat(['.json']);
+    if (!allowedExtensions.includes(ext)) {
       return NextResponse.json(
         {
           success: false,
-          error: `Unsupported file type "${ext}". Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`,
+          error: `Unsupported file type "${ext}". Allowed: ${allowedExtensions.join(', ')}`,
         },
         { status: 400 },
       );
@@ -294,19 +343,53 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Parse based on extension
+    // Determine the parser to use. Priority:
+    //   1. Explicit format hint from client
+    //   2. File extension
+    let parserKind: 'csv' | 'tsv' | 'xlsx' | 'pdf' | 'docx' | 'json';
+
+    if (formatHint === 'csv' || formatHint === 'tsv' || formatHint === 'xlsx' || formatHint === 'pdf' || formatHint === 'docx' || formatHint === 'json') {
+      parserKind = formatHint;
+    } else if (ext === '.csv') {
+      parserKind = 'csv';
+    } else if (ext === '.txt') {
+      // .txt is ambiguous — sniff the first line for tab vs comma
+      const firstLine = buffer.toString('utf-8').split(/\r?\n/)[0] || '';
+      parserKind = (firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length ? 'tsv' : 'csv';
+    } else if (ext === '.xlsx' || ext === '.xls') {
+      parserKind = 'xlsx';
+    } else if (ext === '.pdf') {
+      parserKind = 'pdf';
+    } else if (ext === '.docx' || ext === '.doc') {
+      parserKind = 'docx';
+    } else if (ext === '.json') {
+      parserKind = 'json';
+    } else {
+      return NextResponse.json(
+        { success: false, error: `Cannot determine parser for file type "${ext}"` },
+        { status: 400 },
+      );
+    }
+
+    // Parse based on chosen parser
     let rawRows: Record<string, string | number | null>[] = [];
 
     try {
-      if (ext === '.csv' || ext === '.txt') {
+      if (parserKind === 'csv') {
         const content = buffer.toString('utf-8');
-        rawRows = parseCsvTxt(content);
-      } else if (ext === '.xlsx' || ext === '.xls') {
+        rawRows = parseCsvTxt(content, ',');
+      } else if (parserKind === 'tsv') {
+        const content = buffer.toString('utf-8');
+        rawRows = parseCsvTxt(content, '\t');
+      } else if (parserKind === 'xlsx') {
         rawRows = parseExcel(buffer);
-      } else if (ext === '.pdf') {
+      } else if (parserKind === 'pdf') {
         rawRows = await parsePdf(buffer);
-      } else if (ext === '.docx' || ext === '.doc') {
+      } else if (parserKind === 'docx') {
         rawRows = await parseDocx(buffer);
+      } else if (parserKind === 'json') {
+        const content = buffer.toString('utf-8');
+        rawRows = parseJson(content);
       }
     } catch (parseError: unknown) {
       const message = parseError instanceof Error ? parseError.message : 'Failed to parse file';

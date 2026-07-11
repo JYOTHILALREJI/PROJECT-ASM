@@ -43,6 +43,10 @@ import {
   CheckCircle2,
   XCircle,
   DollarSign,
+  FileJson,
+  File as FileIcon,
+  Table2,
+  FileType2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -81,6 +85,7 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore } from '@/store/app-store';
+import { cn } from '@/lib/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -835,6 +840,9 @@ export function EmployeePage() {
     failed: number;
     errors: { row: number; message: string }[];
   } | null>(null);
+  // Selected upload format — drives both the accepted file types and the
+  // example preview shown in the dialog. null = not yet chosen.
+  const [batchFormat, setBatchFormat] = useState<'csv' | 'tsv' | 'xlsx' | 'json' | 'pdf' | 'docx' | null>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1261,21 +1269,107 @@ export function EmployeePage() {
   const openBatchDialog = () => {
     setBatchFile(null);
     setBatchResult(null);
+    setBatchFormat(null);
     setBatchDialogOpen(true);
+  };
+
+  // Format definitions — keyed by the format id. Used for both the format
+  // selector buttons and the example preview rendering.
+  const batchFormatDefs: Record<
+    'csv' | 'tsv' | 'xlsx' | 'json' | 'pdf' | 'docx',
+    {
+      label: string;
+      icon: React.ElementType;
+      exts: string[];
+      accept: string;
+      color: string;
+      bgColor: string;
+      borderColor: string;
+    }
+  > = {
+    csv: {
+      label: 'CSV (.csv)',
+      icon: FileText,
+      exts: ['.csv'],
+      accept: '.csv',
+      color: 'text-emerald-400',
+      bgColor: 'bg-emerald-500/10',
+      borderColor: 'border-emerald-500/40',
+    },
+    tsv: {
+      label: 'TSV (.tsv / .txt)',
+      icon: Table2,
+      exts: ['.tsv', '.txt'],
+      accept: '.tsv,.txt',
+      color: 'text-teal-400',
+      bgColor: 'bg-teal-500/10',
+      borderColor: 'border-teal-500/40',
+    },
+    xlsx: {
+      label: 'Excel (.xlsx)',
+      icon: FileSpreadsheet,
+      exts: ['.xlsx', '.xls'],
+      accept: '.xlsx,.xls',
+      color: 'text-blue-400',
+      bgColor: 'bg-blue-500/10',
+      borderColor: 'border-blue-500/40',
+    },
+    json: {
+      label: 'JSON (.json)',
+      icon: FileJson,
+      exts: ['.json'],
+      accept: '.json',
+      color: 'text-amber-400',
+      bgColor: 'bg-amber-500/10',
+      borderColor: 'border-amber-500/40',
+    },
+    pdf: {
+      label: 'PDF (.pdf)',
+      icon: FileType2,
+      exts: ['.pdf'],
+      accept: '.pdf',
+      color: 'text-red-400',
+      bgColor: 'bg-red-500/10',
+      borderColor: 'border-red-500/40',
+    },
+    docx: {
+      label: 'Word (.docx)',
+      icon: FileIcon,
+      exts: ['.docx', '.doc'],
+      accept: '.docx,.doc',
+      color: 'text-sky-400',
+      bgColor: 'bg-sky-500/10',
+      borderColor: 'border-sky-500/40',
+    },
   };
 
   const handleBatchFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      const allowed = ['txt', 'csv', 'xlsx', 'xls', 'pdf', 'docx', 'doc'];
-      if (!ext || !allowed.includes(ext)) {
-        toast({
-          title: 'Invalid File Type',
-          description: `Supported formats: ${allowed.join(', ')}`,
-          variant: 'destructive',
-        });
-        return;
+      // If a format is selected, validate the file extension matches it
+      if (batchFormat) {
+        const def = batchFormatDefs[batchFormat];
+        const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+        if (!def.exts.includes(ext)) {
+          toast({
+            title: 'Wrong File Type',
+            description: `You selected "${def.label}" format. Please upload a file with extension: ${def.exts.join(', ')}`,
+            variant: 'destructive',
+          });
+          return;
+        }
+      } else {
+        // No format selected — do a basic check against all allowed extensions
+        const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+        const allowed = ['.csv', '.tsv', '.txt', '.xlsx', '.xls', '.json', '.pdf', '.docx', '.doc'];
+        if (!allowed.includes(ext)) {
+          toast({
+            title: 'Invalid File Type',
+            description: `Supported formats: ${allowed.join(', ')}`,
+            variant: 'destructive',
+          });
+          return;
+        }
       }
       setBatchFile(file);
       setBatchResult(null);
@@ -1289,6 +1383,12 @@ export function EmployeePage() {
     try {
       const formData = new FormData();
       formData.append('file', batchFile);
+      // Send the explicit format hint so the server uses the right parser.
+      // For 'pdf' and 'docx' the format hint matches; for 'tsv' we send 'tsv';
+      // for everything else we send the format id directly.
+      if (batchFormat) {
+        formData.append('format', batchFormat);
+      }
       const res = await fetch('/api/employees/batch-upload', {
         method: 'POST',
         body: formData,
@@ -1311,6 +1411,33 @@ export function EmployeePage() {
       toast({ title: 'Error', description: 'Failed to upload file. Please try again.', variant: 'destructive' });
     } finally {
       setIsBatchUploading(false);
+    }
+  };
+
+  // Download a sample file in the selected format from the backend
+  const handleDownloadSample = async (format: 'csv' | 'tsv' | 'xlsx' | 'json') => {
+    try {
+      const res = await fetch(`/api/employees/batch-upload/template?format=${format}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to download sample');
+      }
+      const blob = await res.blob();
+      const ext = format === 'tsv' ? 'tsv' : format;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `employees-sample.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({
+        title: 'Download Failed',
+        description: err instanceof Error ? err.message : 'Could not download sample file',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -2864,81 +2991,163 @@ export function EmployeePage() {
       </Dialog>
 
       {/* Batch Add Dialog */}
-      <Dialog open={batchDialogOpen} onOpenChange={(open) => { setBatchDialogOpen(open); if (!open) { setBatchFile(null); setBatchResult(null); } }}>
-        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-lg">
+      <Dialog open={batchDialogOpen} onOpenChange={(open) => { setBatchDialogOpen(open); if (!open) { setBatchFile(null); setBatchResult(null); setBatchFormat(null); } }}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-white">
               <FileSpreadsheet className="h-5 w-5 text-blue-400" />
               Batch Add Employees
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Upload a file with employee details. Supported formats: CSV, TXT, Excel, PDF, Word.
+              Choose the file format you&apos;re uploading, then drag the file in. An example of each format is shown below the selector.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* File Upload Area */}
-            <div
-              className="border-2 border-dashed border-slate-600 rounded-xl p-6 text-center hover:border-blue-500/50 transition-colors cursor-pointer"
-              onClick={() => batchFileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const file = e.dataTransfer.files?.[0];
-                if (file) {
-                  const ext = file.name.split('.').pop()?.toLowerCase();
-                  const allowed = ['txt', 'csv', 'xlsx', 'xls', 'pdf', 'docx', 'doc'];
-                  if (!ext || !allowed.includes(ext)) {
-                    toast({ title: 'Invalid File Type', description: `Supported: ${allowed.join(', ')}`, variant: 'destructive' });
-                    return;
-                  }
-                  setBatchFile(file);
-                  setBatchResult(null);
-                }
-              }}
-            >
-              <input
-                ref={batchFileInputRef}
-                type="file"
-                accept=".txt,.csv,.xlsx,.xls,.pdf,.docx,.doc"
-                className="hidden"
-                onChange={handleBatchFileSelect}
-              />
-              {batchFile ? (
-                <div className="space-y-2">
-                  <FileSpreadsheet className="h-10 w-10 text-blue-400 mx-auto" />
-                  <p className="text-sm font-medium text-white">{batchFile.name}</p>
-                  <p className="text-xs text-slate-400">{(batchFile.size / 1024).toFixed(1)} KB</p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-slate-400 hover:text-red-400"
-                    onClick={(e) => { e.stopPropagation(); setBatchFile(null); setBatchResult(null); }}
-                  >
-                    <X className="h-4 w-4 mr-1" />
-                    Remove
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <FileUp className="h-10 w-10 text-slate-500 mx-auto" />
-                  <p className="text-sm text-slate-400">
-                    <span className="text-blue-400 font-medium">Click to upload</span> or drag and drop
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    CSV, TXT, Excel (.xlsx/.xls), PDF, Word (.docx/.doc)
-                  </p>
-                </div>
-              )}
+            {/* ── Step 1: Format selector ── */}
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-400 uppercase tracking-wide">
+                Step 1 · Select file format
+              </Label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['csv', 'tsv', 'xlsx', 'json', 'pdf', 'docx'] as const).map((fmt) => {
+                  const def = batchFormatDefs[fmt];
+                  const Icon = def.icon;
+                  const isSelected = batchFormat === fmt;
+                  return (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={() => {
+                        setBatchFormat(fmt);
+                        setBatchFile(null);
+                        setBatchResult(null);
+                      }}
+                      className={cn(
+                        'flex flex-col items-center gap-1.5 rounded-lg border p-3 transition-all text-center',
+                        isSelected
+                          ? cn(def.bgColor, def.borderColor, 'ring-1 ring-offset-0')
+                          : 'border-slate-700 bg-slate-900/40 hover:border-slate-600 hover:bg-slate-900/70',
+                      )}
+                    >
+                      <Icon className={cn('h-5 w-5', isSelected ? def.color : 'text-slate-400')} />
+                      <span className={cn('text-[11px] font-medium leading-tight', isSelected ? def.color : 'text-slate-300')}>
+                        {def.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* ── Step 2: Example preview (shown after a format is selected) ── */}
+            {batchFormat && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-slate-400 uppercase tracking-wide">
+                    Step 2 · Preview of {batchFormatDefs[batchFormat].label}
+                  </Label>
+                  {/* Download a real sample file */}
+                  {['csv', 'tsv', 'xlsx', 'json'].includes(batchFormat) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDownloadSample(batchFormat as 'csv' | 'tsv' | 'xlsx' | 'json')}
+                      className="h-7 text-[11px] text-slate-400 hover:text-white gap-1"
+                    >
+                      <Download className="h-3 w-3" />
+                      Download sample
+                    </Button>
+                  )}
+                </div>
+                <div className={cn('rounded-lg border overflow-hidden', batchFormatDefs[batchFormat].borderColor, batchFormatDefs[batchFormat].bgColor)}>
+                  {batchFormat === 'csv' && <CsvPreview />}
+                  {batchFormat === 'tsv' && <TsvPreview />}
+                  {batchFormat === 'xlsx' && <XlsxPreview />}
+                  {batchFormat === 'json' && <JsonPreview />}
+                  {batchFormat === 'pdf' && <PdfPreview />}
+                  {batchFormat === 'docx' && <DocxPreview />}
+                </div>
+              </div>
+            )}
+
+            {/* ── Step 3: Upload ── */}
+            {batchFormat && (
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-400 uppercase tracking-wide">
+                  Step 3 · Upload your {batchFormatDefs[batchFormat].label} file
+                </Label>
+                <div
+                  className={cn(
+                    'border-2 border-dashed rounded-xl p-6 text-center hover:border-blue-500/50 transition-colors cursor-pointer',
+                    batchFile ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-600',
+                  )}
+                  onClick={() => batchFileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) {
+                      const def = batchFormatDefs[batchFormat];
+                      const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+                      if (!def.exts.includes(ext)) {
+                        toast({
+                          title: 'Wrong File Type',
+                          description: `You selected "${def.label}" format. Please upload a file with extension: ${def.exts.join(', ')}`,
+                          variant: 'destructive',
+                        });
+                        return;
+                      }
+                      setBatchFile(file);
+                      setBatchResult(null);
+                    }
+                  }}
+                >
+                  <input
+                    ref={batchFileInputRef}
+                    type="file"
+                    accept={batchFormatDefs[batchFormat].accept}
+                    className="hidden"
+                    onChange={handleBatchFileSelect}
+                  />
+                  {batchFile ? (
+                    <div className="space-y-2">
+                      <FileSpreadsheet className="h-10 w-10 text-emerald-400 mx-auto" />
+                      <p className="text-sm font-medium text-white">{batchFile.name}</p>
+                      <p className="text-xs text-slate-400">{(batchFile.size / 1024).toFixed(1)} KB</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-slate-400 hover:text-red-400"
+                        onClick={(e) => { e.stopPropagation(); setBatchFile(null); setBatchResult(null); }}
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <FileUp className="h-10 w-10 text-slate-500 mx-auto" />
+                      <p className="text-sm text-slate-400">
+                        <span className="text-blue-400 font-medium">Click to upload</span> or drag and drop
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Accepted: {batchFormatDefs[batchFormat].exts.join(', ')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Supported Headers Info */}
             <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50">
-              <p className="text-xs font-medium text-slate-300 mb-1.5">Expected column headers:</p>
+              <p className="text-xs font-medium text-slate-300 mb-1.5">Expected column headers (any order):</p>
               <p className="text-xs text-slate-500 leading-relaxed">
                 Full Name (required), Nationality, Date of Birth, Phone, Email, Trade/Position, Join Date,
-                Company Name, Passport Number, Passport Status, ID Number, ID Status, Current Site, Address, Emergency Contact
+                Company Name, Passport Number, Passport Status, ID Number, ID Status, Current Site, Address, Emergency Contact, Employee ID, Role, Custom Hourly Rate
               </p>
             </div>
 
@@ -2974,7 +3183,7 @@ export function EmployeePage() {
           <DialogFooter className="gap-2">
             <Button
               variant="ghost"
-              onClick={() => { setBatchDialogOpen(false); setBatchFile(null); setBatchResult(null); }}
+              onClick={() => { setBatchDialogOpen(false); setBatchFile(null); setBatchResult(null); setBatchFormat(null); }}
               className="text-slate-400 hover:text-white"
             >
               {batchResult ? 'Close' : 'Cancel'}
@@ -3002,5 +3211,203 @@ export function EmployeePage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ─── Batch Upload Format Previews ─────────────────────────────────────────
+// Each preview component renders a small, faithful mockup of what the user's
+// file should look like. They are styled to resemble the real format (CSV
+// shows raw comma-separated text, XLSX shows a spreadsheet grid, JSON shows
+// syntax-highlighted JSON, etc.) so the user knows exactly what to upload.
+
+const PREVIEW_HEADERS = [
+  'Full Name', 'Nationality', 'Trade', 'Phone', 'Current Site', 'Employee ID',
+];
+const PREVIEW_ROWS = [
+  ['John Doe', 'Indian', 'Mason', '+971501234567', 'Site A', 'ASM-2024-001'],
+  ['Ahmed Ali', 'Pakistani', 'Electrician', '+971502345678', 'Site B', 'ASM-2024-002'],
+  ['Ravi Kumar', 'Indian', 'Welder', '+971503456789', 'Site A', 'ASM-2024-003'],
+];
+
+function PreviewShell({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-slate-950/60 rounded-md">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-700/40">
+        <div className="flex gap-1">
+          <span className="h-2 w-2 rounded-full bg-red-400/60" />
+          <span className="h-2 w-2 rounded-full bg-amber-400/60" />
+          <span className="h-2 w-2 rounded-full bg-green-400/60" />
+        </div>
+        <span className="text-[10px] text-slate-400 font-mono ml-1">{title}</span>
+      </div>
+      <div className="p-3 overflow-x-auto">{children}</div>
+    </div>
+  );
+}
+
+function CsvPreview() {
+  const text = [PREVIEW_HEADERS.join(','), ...PREVIEW_ROWS.map((r) => r.join(','))].join('\n');
+  return (
+    <PreviewShell title="employees.csv">
+      <pre className="text-[10px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+        {text}
+      </pre>
+    </PreviewShell>
+  );
+}
+
+function TsvPreview() {
+  const text = [PREVIEW_HEADERS.join('\t'), ...PREVIEW_ROWS.map((r) => r.join('\t'))].join('\n');
+  return (
+    <PreviewShell title="employees.tsv">
+      <pre className="text-[10px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+        {text}
+      </pre>
+      <p className="mt-2 text-[10px] text-slate-500">
+        Tip: Tab-separated. Export from Excel using &ldquo;Text (Tab delimited)&rdquo;.
+      </p>
+    </PreviewShell>
+  );
+}
+
+function XlsxPreview() {
+  return (
+    <PreviewShell title="employees.xlsx — Sheet1">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px] border-collapse">
+          <thead>
+            <tr className="bg-emerald-500/15">
+              <th className="border border-slate-600/60 px-2 py-1 text-emerald-300 font-semibold text-left">
+                {PREVIEW_HEADERS[0]}
+              </th>
+              {PREVIEW_HEADERS.slice(1).map((h) => (
+                <th key={h} className="border border-slate-600/60 px-2 py-1 text-emerald-300 font-semibold text-left">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PREVIEW_ROWS.map((row, i) => (
+              <tr key={i} className={cn(i % 2 === 1 && 'bg-slate-800/40')}>
+                {row.map((cell, j) => (
+                  <td key={j} className="border border-slate-600/60 px-2 py-1 text-slate-300 font-mono">
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[10px] text-slate-500">
+        Spreadsheet with headers in row 1. Extra columns are ignored; missing columns are left blank.
+      </p>
+    </PreviewShell>
+  );
+}
+
+function JsonPreview() {
+  const obj = PREVIEW_ROWS.map((row) => {
+    const o: Record<string, string> = {};
+    PREVIEW_HEADERS.forEach((h, i) => (o[h] = row[i]));
+    return o;
+  });
+  const text = JSON.stringify({ employees: obj }, null, 2);
+  const lines = text.split('\n');
+  return (
+    <PreviewShell title="employees.json">
+      <pre className="text-[10px] leading-relaxed font-mono whitespace-pre">
+        {lines.map((line, i) => (
+          <div key={i}>
+            {line.split(/("(?:[^"\\]|\\.)*")/g).map((part, j) => {
+              if (part.startsWith('"')) {
+                return (
+                  <span key={j} className="text-amber-200">
+                    {part}
+                  </span>
+                );
+              }
+              return <span key={j} className="text-slate-400">{part}</span>;
+            })}
+          </div>
+        ))}
+      </pre>
+      <p className="mt-2 text-[10px] text-slate-500">
+        Top-level array, or an object with an <code className="text-slate-400">employees</code> array.
+      </p>
+    </PreviewShell>
+  );
+}
+
+function PdfPreview() {
+  return (
+    <PreviewShell title="employees.pdf">
+      <div className="bg-white text-black rounded p-4 mx-auto max-w-sm shadow-md">
+        <div className="text-center font-bold text-sm border-b border-black/30 pb-2 mb-2">
+          EMPLOYEE LIST
+        </div>
+        <table className="w-full text-[9px] border-collapse">
+          <thead>
+            <tr className="bg-gray-200">
+              {PREVIEW_HEADERS.map((h) => (
+                <th key={h} className="border border-black/40 px-1 py-0.5 text-left font-semibold">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PREVIEW_ROWS.map((row, i) => (
+              <tr key={i}>
+                {row.map((cell, j) => (
+                  <td key={j} className="border border-black/40 px-1 py-0.5">
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[10px] text-slate-500 text-center">
+        PDF with a tabular layout. Table cells should be aligned in columns so the parser can detect them.
+      </p>
+    </PreviewShell>
+  );
+}
+
+function DocxPreview() {
+  return (
+    <PreviewShell title="employees.docx">
+      <div className="bg-white text-black rounded p-4 mx-auto max-w-sm shadow-md">
+        <div className="text-center font-bold text-sm underline mb-2">Employees</div>
+        <table className="w-full text-[9px] border-collapse">
+          <thead>
+            <tr className="bg-gray-100">
+              {PREVIEW_HEADERS.map((h) => (
+                <th key={h} className="border border-black/40 px-1 py-0.5 text-left font-semibold">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PREVIEW_ROWS.map((row, i) => (
+              <tr key={i}>
+                {row.map((cell, j) => (
+                  <td key={j} className="border border-black/40 px-1 py-0.5">
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[10px] text-slate-500 text-center">
+        Word document with a table. The parser reads the table cells; plain-text paragraphs may also work if columns are tab-separated.
+      </p>
+    </PreviewShell>
   );
 }
