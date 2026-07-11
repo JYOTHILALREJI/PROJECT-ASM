@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { allocateEmployeeHours, type AllocationResult } from '@/lib/allocation-engine';
 import { recalcEmployeeFromMonth } from '@/lib/recalculation';
+import { logActivity } from '@/lib/activity-logger';
 
 // ---------------------------------------------------------------------------
 // POST /api/accounts/salary/bulk-save
@@ -56,8 +57,10 @@ interface BulkSaveRequest {
 
 export async function POST(request: NextRequest) {
   try {
-    const body: BulkSaveRequest = await request.json();
+    const body: BulkSaveRequest & { actorUserId?: string; actorDisplayName?: string } = await request.json();
     const { records, runAllocation = true } = body;
+    const actorUserId = body.actorUserId;
+    const actorDisplayName = body.actorDisplayName;
 
     // ------------------------------------------------------------------
     // 1. Validate inputs
@@ -564,6 +567,26 @@ export async function POST(request: NextRequest) {
           month: { in: Array.from(affectedMonthStrs) },
           isDeleted: false,
         },
+      });
+
+      // ── Log the salary bulk-save activity ──
+      const monthsSet = new Set(savedRecords.map((r) => r.month));
+      await logActivity({
+        userId: actorUserId || null,
+        displayName: actorDisplayName || 'Admin',
+        action: 'salary_bulk_save',
+        entityType: 'salary_record',
+        entityId: null,
+        entityName: `${savedRecords.length} record(s)`,
+        description: `Saved ${savedRecords.length} salary record(s) for ${Array.from(monthsSet).join(', ')}${advancesApplied > 0 ? ` (${advancesApplied} advance(s) applied)` : ''}`,
+        details: {
+          recordCount: savedRecords.length,
+          months: Array.from(monthsSet),
+          advancesApplied,
+          advancesSkipped,
+          runAllocation,
+        },
+        request,
       });
 
       return NextResponse.json({

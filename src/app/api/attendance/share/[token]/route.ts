@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 import { captureAttendanceVersion } from '@/lib/attendance-version';
+import { logActivity } from '@/lib/activity-logger';
 
 // ---------------------------------------------------------------------------
 // /api/attendance/share/[token]
@@ -255,9 +256,9 @@ export async function POST(
     // submission in the version history. The shareToken is recorded so
     // per-link history can be filtered.
     let versionCapture: { id: string; versionNumber: number } | null = null;
+    const presentCount = entries.filter((e) => e.status === 'present').length;
+    const absentCount = entries.filter((e) => e.status === 'absent').length;
     try {
-      const present = entries.filter((e) => e.status === 'present').length;
-      const absent = entries.filter((e) => e.status === 'absent').length;
       versionCapture = await captureAttendanceVersion({
         siteId: share.siteId,
         siteName: share.siteName,
@@ -265,11 +266,32 @@ export async function POST(
         source: 'share_link',
         shareToken: share.token,
         changedByName: submittedByName || 'Team Leader / Supervisor',
-        summary: `${present} present, ${absent} absent via share link`,
+        summary: `${presentCount} present, ${absentCount} absent via share link`,
       });
     } catch (err) {
       console.error('[share submit] version capture failed:', err);
     }
+
+    // ── Log the share-link submission activity ──
+    await logActivity({
+      userId: null, // Share links are auth-free — no userId
+      displayName: submittedByName || 'Team Leader / Supervisor',
+      actorType: 'user',
+      action: 'share_link_submit',
+      entityType: 'attendance_share',
+      entityId: share.id,
+      entityName: share.siteName,
+      description: `Submitted attendance via share link for ${share.siteName} on ${share.date} (${presentCount} present, ${absentCount} absent)`,
+      details: {
+        shareToken: share.token,
+        siteId: share.siteId,
+        date: share.date,
+        presentCount,
+        absentCount,
+        submittedByName: submittedByName || null,
+      },
+      request,
+    });
 
     const successCount = written.filter((w) => w.ok).length;
     const failedCount = written.length - successCount;

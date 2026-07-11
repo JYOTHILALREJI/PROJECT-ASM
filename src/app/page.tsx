@@ -12,6 +12,7 @@ import { DashboardPage } from '@/components/dashboard/dashboard-page';
 import { EmployeePage } from '@/components/employees/employee-page';
 import { AttendancePage } from '@/components/attendance/attendance-page';
 import { AttendanceCopyPage } from '@/components/attendance-copy/attendance-copy-page';
+import { AllLogsPage } from '@/components/all-logs/all-logs-page';
 import { NotificationPage } from '@/components/notifications/notification-page';
 import { AdminPage } from '@/components/admins/admin-page';
 import { SitesPage } from '@/components/sites/sites-page';
@@ -60,7 +61,7 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'uniform_registry', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId } = useAppStore();
@@ -117,6 +118,7 @@ function MainLayout() {
     employee_hours_ledger: 'employees', // Uses employees permission
     advance: 'accounts', // Advance is a sub-feature of Accounts
     attendance_copy: 'attendance', // Attendance Copy is a sub-feature of Attendance
+    all_logs: 'admins', // All Logs is a sub-feature of Admin Management
   };
 
   // Dynamic view permission check
@@ -173,6 +175,8 @@ function MainLayout() {
         return <NotificationPage />;
       case 'admins':
         return <AdminPage />;
+      case 'all_logs':
+        return <AllLogsPage />;
       case 'employee_hours_ledger':
         return selectedEmployeeId ? (
           <EmployeeHoursLedger

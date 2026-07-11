@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 import { captureAttendanceVersion } from '@/lib/attendance-version';
+import { logActivity } from '@/lib/activity-logger';
 
 // Calculate total working days in a month (excluding Fridays)
 function getWorkingDaysInMonth(year: number, month: number): number {
@@ -132,7 +133,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { employeeId, date, status, overtimeHours } = body;
+    const { employeeId, date, status, overtimeHours, actorUserId, actorDisplayName } = body;
 
     if (!employeeId || !date || !status) {
       return NextResponse.json(
@@ -286,13 +287,26 @@ export async function POST(request: NextRequest) {
           siteName: employee.currentSite || '',
           date,
           source: 'website',
-          changedByName: 'Admin (website)',
+          changedByName: actorDisplayName || 'Admin (website)',
           summary: `Marked ${employee.fullName} as ${status}${status === 'overtime' && overtimeHours ? ` (${overtimeHours}h OT)` : ''}`,
         });
       } catch (err) {
         console.error('[attendance POST] version capture failed:', err);
       }
     }
+
+    // ── Log the activity ──
+    await logActivity({
+      userId: actorUserId || null,
+      displayName: actorDisplayName || 'Admin (website)',
+      action: 'mark_attendance',
+      entityType: 'attendance',
+      entityId: employeeId,
+      entityName: employee.fullName,
+      description: `Marked ${employee.fullName} as ${status} for ${date}${status === 'overtime' && overtimeHours ? ` (${overtimeHours}h OT)` : ''}`,
+      details: { date, status, overtimeHours: overtimeHours || null, site: employee.currentSite || null },
+      request,
+    });
 
     return NextResponse.json({
       success: true,

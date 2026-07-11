@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { comparePassword } from '@/lib/auth';
+import { logLogin } from '@/lib/activity-logger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,6 +34,10 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    // Log the login — display name prefers user.name, falls back to email
+    const displayName = user.name || user.email;
+    await logLogin(user.id, displayName, request);
 
     return NextResponse.json({
       success: true,

@@ -19,6 +19,7 @@ import {
   Calculator,
   Clock,
   Link2,
+  History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -67,6 +68,7 @@ const navItems: NavItem[] = [
   { id: 'cancellation_requests', label: 'Cancellations', icon: Ban, permissionSlug: 'cancellation_requests', roles: ['super_admin'] },
   { id: 'notifications', label: 'Notifications', icon: Bell, permissionSlug: 'notifications', roles: ['super_admin'] },
   { id: 'admins', label: 'Admin Management', icon: Shield, permissionSlug: 'admins', roles: ['super_admin'] },
+  { id: 'all_logs', label: 'All Logs', icon: History, permissionSlug: 'admins', roles: ['super_admin'] },
 ];
 
 // Menus always visible to all users (including admin)
@@ -240,16 +242,17 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
                 ? 'bg-amber-500/20 text-amber-400'
                 : 'bg-blue-500/20 text-blue-400'
             )}>
-              {user.name
+              {(user.name || user.email)
                 .split(' ')
                 .map((n) => n[0])
                 .join('')
+                .slice(0, 2)
                 .toUpperCase()}
             </div>
             {!collapsed && (
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-sm font-medium text-white truncate">
-                  {user.name}
+                  {user.name || user.email}
                 </span>
                 <Badge
                   variant="secondary"

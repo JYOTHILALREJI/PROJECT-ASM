@@ -44,6 +44,7 @@ model User {
   menuPermissions              AdminMenuPermission[]
   adminPermissions             AdminPermission[]
   attendanceVersions           AttendanceVersion[]
+  activityLogs                 ActivityLog[]
 }
 
 model AdminMenuPermission {
@@ -608,4 +609,54 @@ model AttendanceVersion {
   @@index([date])
   @@index([shareToken])
   @@index([changedById])
+}
+
+// ---------------------------------------------------------------------------
+// ActivityLog
+// ---------------------------------------------------------------------------
+// A universal audit log. Every mutating action (create/update/delete) on any
+// data in the app is recorded here with:
+//   - who did it (userId + displayName — name if set, else email)
+//   - what they did (action: create/update/delete/login/etc.)
+//   - which entity was affected (entityType + entityId)
+//   - a human-readable description (e.g. "Marked John Doe as present")
+//   - a JSON snapshot of relevant details (optional, for context)
+//   - timestamp
+//
+// The All Logs sidebar page groups these by user so an admin can see, per
+// account holder, every activity they performed.
+// ---------------------------------------------------------------------------
+model ActivityLog {
+  id           String   @id @default(cuid())
+  // Who performed the action. userId may be null for system-generated actions
+  // (e.g. auto-warnings) — in that case actorType is 'system'.
+  userId       String?
+  // Display name shown in the UI — prefers User.name, falls back to email.
+  // Stored denormalized so the log still reads correctly even if the user is
+  // later deleted.
+  displayName  String
+  actorType    String   @default("user") // "user" | "system"
+  // What they did, e.g. "create", "update", "delete", "mark_attendance",
+  // "bulk_mark", "share_link_submit", "login", "advance_create", etc.
+  action       String
+  // Which entity was affected, e.g. "employee", "site", "attendance",
+  // "salary_record", "advance", "attendance_share", "user", etc.
+  entityType   String
+  entityId     String?
+  entityName   String?  // Human-readable name of the affected entity
+  // Human-readable summary, e.g. "Marked John Doe as present for 2026-07-15"
+  description  String
+  // Optional JSON details for context (before/after values, etc.)
+  details      String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  user User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+  @@index([entityType, entityId])
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { cascadeSoftDeleteSite } from '@/lib/soft-delete';
+import { logActivity } from '@/lib/activity-logger';
 
 export async function GET() {
   try {
@@ -51,7 +52,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, clientName, projectName, projectId, isActive } = body;
+    const { name, clientName, projectName, projectId, isActive, actorUserId, actorDisplayName } = body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json(
@@ -84,6 +85,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await logActivity({
+      userId: actorUserId || null,
+      displayName: actorDisplayName || 'Admin',
+      action: 'create',
+      entityType: 'site',
+      entityId: site.id,
+      entityName: site.name,
+      description: `Created site "${site.name}"${site.clientName ? ` (client: ${site.clientName})` : ''}`,
+      details: { name: site.name, clientName: site.clientName, projectName: site.projectName, projectId: site.projectId, isActive: site.isActive },
+      request,
+    });
+
     return NextResponse.json(
       {
         success: true,
@@ -108,7 +121,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, clientName, projectName, projectId, isActive } = body;
+    const { id, name, clientName, projectName, projectId, isActive, actorUserId, actorDisplayName } = body;
 
     if (!id || !name || typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json(
@@ -175,6 +188,18 @@ export async function PUT(request: NextRequest) {
       });
     }
 
+    await logActivity({
+      userId: actorUserId || null,
+      displayName: actorDisplayName || 'Admin',
+      action: 'update',
+      entityType: 'site',
+      entityId: site.id,
+      entityName: site.name,
+      description: `Updated site "${site.name}"${oldName !== trimmedName ? ` (renamed from "${oldName}")` : ''}`,
+      details: { oldName, newName: site.name, clientName: site.clientName, projectName: site.projectName, projectId: site.projectId, isActive: site.isActive },
+      request,
+    });
+
     return NextResponse.json({
       success: true,
       data: {
@@ -197,7 +222,7 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name } = body;
+    const { id, name, actorUserId, actorDisplayName } = body;
 
     if (!id && !name) {
       return NextResponse.json(
@@ -223,6 +248,18 @@ export async function DELETE(request: NextRequest) {
     // unassigns all employees currently attached to this site. No rows are
     // ever hard-deleted.
     await cascadeSoftDeleteSite(site.id);
+
+    await logActivity({
+      userId: actorUserId || null,
+      displayName: actorDisplayName || 'Admin',
+      action: 'delete',
+      entityType: 'site',
+      entityId: site.id,
+      entityName: site.name,
+      description: `Deleted site "${site.name}"`,
+      details: { siteId: site.id, siteName: site.name },
+      request,
+    });
 
     return NextResponse.json({
       success: true,

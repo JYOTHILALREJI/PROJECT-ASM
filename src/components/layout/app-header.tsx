@@ -31,11 +31,17 @@ const viewTitles: Record<string, string> = {
   employees: 'Employee Management',
   sites: 'Sites',
   attendance: 'Attendance Tracking',
+  attendance_copy: 'Attendance Copy',
+  all_logs: 'All Logs',
   uniform_registry: 'Uniform Registry',
   leave_requests: 'Leave Requests',
   cancellation_requests: 'Cancellation Requests',
   notifications: 'Notifications',
   admins: 'Admin Management',
+  accounts: 'Accounts',
+  advance: 'Advance Management',
+  consolidated_salary: 'Consolidated Salary',
+  employee_hours_ledger: 'Employee Hours Ledger',
   profile: 'Profile',
 };
 
@@ -119,14 +125,15 @@ export function AppHeader() {
                   className="flex items-center gap-2 px-2 md:px-3 text-slate-300 hover:text-white hover:bg-slate-800"
                 >
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 font-semibold text-xs">
-                    {user.name
+                    {(user.name || user.email)
                       .split(' ')
                       .map((n) => n[0])
                       .join('')
+                      .slice(0, 2)
                       .toUpperCase()}
                   </div>
                   <span className="hidden md:inline text-sm font-medium truncate max-w-[120px]">
-                    {user.name}
+                    {user.name || user.email}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
@@ -136,7 +143,7 @@ export function AppHeader() {
               >
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium text-white">{user.name}</p>
+                    <p className="text-sm font-medium text-white">{user.name || user.email}</p>
                     <p className="text-xs text-slate-400">{user.email}</p>
                     <Badge
                       variant="secondary"

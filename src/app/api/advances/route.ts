@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { logActivity } from '@/lib/activity-logger';
 
 // ---------------------------------------------------------------------------
 // /api/advances
@@ -214,6 +215,26 @@ export async function POST(request: NextRequest) {
           });
         }),
       );
+
+      // Log the bulk advance creation
+      const totalAmount = items.reduce((s, it) => s + it.amount, 0);
+      await logActivity({
+        userId: resolvedCreatedById,
+        displayName: creator?.name || creator?.email || 'Admin',
+        action: 'advance_create',
+        entityType: 'advance',
+        entityId: null,
+        entityName: `${created.length} advance(s)`,
+        description: `Created ${created.length} advance(s) totaling ${totalAmount.toFixed(2)} DHS for ${items[0]?.effectiveMonth || 'N/A'}`,
+        details: {
+          count: created.length,
+          totalAmount,
+          effectiveMonth: items[0]?.effectiveMonth,
+          effectiveYear: items[0]?.effectiveYear,
+          employees: items.map((it) => ({ empId: it.empId, empName: it.empName, amount: it.amount })),
+        },
+        request,
+      });
 
       return NextResponse.json({
         success: true,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 import { captureAttendanceVersion } from '@/lib/attendance-version';
+import { logActivity } from '@/lib/activity-logger';
 
 // POST /api/attendance/bulk-mark - Mark employees as present for a specific date
 // If employeeIds array is provided, only mark those employees.
@@ -9,7 +10,7 @@ import { captureAttendanceVersion } from '@/lib/attendance-version';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { date, status = 'present', employeeIds } = body;
+    const { date, status = 'present', employeeIds, actorUserId, actorDisplayName } = body;
 
     if (!date) {
       return NextResponse.json(
@@ -124,6 +125,19 @@ export async function POST(request: NextRequest) {
         console.error('[bulk-mark] version capture failed for', siteId, err);
       }
     }
+
+    // ── Log the bulk-mark activity ──
+    await logActivity({
+      userId: actorUserId || null,
+      displayName: actorDisplayName || 'Admin (bulk mark)',
+      action: 'bulk_mark',
+      entityType: 'attendance',
+      entityId: null,
+      entityName: `${updated} employee(s)`,
+      description: `Bulk marked ${updated} employee(s) as ${status} for ${date}`,
+      details: { date, status, employeeCount: employees.length, updated, skipped, sites: Array.from(bySite.values()).map((s) => s.siteName) },
+      request,
+    });
 
     return NextResponse.json({
       success: true,
