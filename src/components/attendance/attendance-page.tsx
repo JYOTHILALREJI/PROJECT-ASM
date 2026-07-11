@@ -348,11 +348,23 @@ function SiteListView({
 
   return (
     <Card className="bg-slate-800/50 border-slate-700/50 overflow-hidden">
-      {/* Site header (clickable to collapse/expand) */}
-      <button
-        type="button"
+      {/* Site header (clickable to collapse/expand).
+          Note: this is a <div> with role="button" rather than a real <button>
+          because it contains action buttons (Share / Sheet) as children, and
+          HTML forbids nesting <button> inside <button>. Using a div keeps the
+          action buttons as real buttons for accessibility while still
+          allowing the whole header to be clickable for collapse/expand. */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggleCollapse}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-900/40 hover:bg-slate-900/60 transition-colors text-left border-b border-slate-700/50"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleCollapse();
+          }
+        }}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-900/40 hover:bg-slate-900/60 transition-colors text-left border-b border-slate-700/50 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
       >
         <div className="flex items-center gap-3 min-w-0">
           {isCollapsed ? (
@@ -425,7 +437,7 @@ function SiteListView({
             <span className="hidden sm:inline">Sheet</span>
           </Button>
         </div>
-      </button>
+      </div>
 
       {/* Collapsible table */}
       {!isCollapsed && (

@@ -11,6 +11,7 @@ import { ProfilePage } from '@/components/auth/profile-page';
 import { DashboardPage } from '@/components/dashboard/dashboard-page';
 import { EmployeePage } from '@/components/employees/employee-page';
 import { AttendancePage } from '@/components/attendance/attendance-page';
+import { AttendanceCopyPage } from '@/components/attendance-copy/attendance-copy-page';
 import { NotificationPage } from '@/components/notifications/notification-page';
 import { AdminPage } from '@/components/admins/admin-page';
 import { SitesPage } from '@/components/sites/sites-page';
@@ -58,7 +59,7 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'uniform_registry', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins'];
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId } = useAppStore();
@@ -110,6 +111,7 @@ function MainLayout() {
   const VIEW_PERMISSION_MAP: Record<string, string> = {
     employee_hours_ledger: 'employees', // Uses employees permission
     advance: 'accounts', // Advance is a sub-feature of Accounts
+    attendance_copy: 'attendance', // Attendance Copy is a sub-feature of Attendance
   };
 
   // Dynamic view permission check
@@ -148,6 +150,8 @@ function MainLayout() {
         return <SitesPage />;
       case 'attendance':
         return <AttendancePage />;
+      case 'attendance_copy':
+        return <AttendanceCopyPage />;
       case 'accounts':
         return <AccountsPage />;
       case 'advance':

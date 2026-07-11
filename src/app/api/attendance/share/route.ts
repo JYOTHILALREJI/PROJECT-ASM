@@ -128,10 +128,15 @@ export async function POST(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/attendance/share?siteId=...&date=...
+// GET /api/attendance/share
 // ---------------------------------------------------------------------------
-// Returns the most recent share (any status) for the given site + date.
-// Useful for the admin UI to show whether a share is already open/submitted.
+// Two modes:
+//   1. ?siteId=...&date=YYYY-MM-DD   → returns the most recent shares for the
+//                                       given site + date (max 5).
+//   2. (no params)                    → returns ALL shares grouped by site,
+//                                       newest first. Used by the
+//                                       'Attendance Copy' sidebar page to
+//                                       list every link in the system.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
@@ -140,33 +145,83 @@ export async function GET(request: NextRequest) {
     const siteId = sp.get('siteId');
     const date = sp.get('date');
 
-    if (!siteId || !date || !isValidDate(date)) {
-      return NextResponse.json(
-        { success: false, error: 'siteId and date (YYYY-MM-DD) are required' },
-        { status: 400 },
-      );
+    // ── Mode 1: per-site+date lookup ──
+    if (siteId && date && isValidDate(date)) {
+      const shares = await db.attendanceShare.findMany({
+        where: { siteId, date },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          shares: shares.map((s) => ({
+            id: s.id,
+            token: s.token,
+            siteId: s.siteId,
+            siteName: s.siteName,
+            date: s.date,
+            status: s.status,
+            submittedByName: s.submittedByName,
+            createdAt: s.createdAt.toISOString(),
+            url: `/attendance/share/${s.token}`,
+          })),
+        },
+      });
     }
 
-    const shares = await db.attendanceShare.findMany({
-      where: { siteId, date },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
+    // ── Mode 2: list all shares, grouped by site ──
+    const allShares = await db.attendanceShare.findMany({
+      orderBy: [{ siteName: 'asc' }, { date: 'desc' }, { createdAt: 'desc' }],
+      take: 500, // Safety cap
     });
+
+    // Group by siteId → { site info, shares[] }
+    const groupedMap = new Map<string, {
+      siteId: string;
+      siteName: string;
+      shares: Array<{
+        id: string;
+        token: string;
+        date: string;
+        status: string;
+        submittedByName: string | null;
+        createdAt: string;
+        url: string;
+      }>;
+    }>();
+
+    for (const s of allShares) {
+      if (!groupedMap.has(s.siteId)) {
+        groupedMap.set(s.siteId, {
+          siteId: s.siteId,
+          siteName: s.siteName,
+          shares: [],
+        });
+      }
+      groupedMap.get(s.siteId)!.shares.push({
+        id: s.id,
+        token: s.token,
+        date: s.date,
+        status: s.status,
+        submittedByName: s.submittedByName,
+        createdAt: s.createdAt.toISOString(),
+        url: `/attendance/share/${s.token}`,
+      });
+    }
+
+    // Convert to array, sort shares within each site by date desc
+    const sites = Array.from(groupedMap.values()).map((g) => ({
+      ...g,
+      shares: g.shares.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    }));
 
     return NextResponse.json({
       success: true,
       data: {
-        shares: shares.map((s) => ({
-          id: s.id,
-          token: s.token,
-          siteId: s.siteId,
-          siteName: s.siteName,
-          date: s.date,
-          status: s.status,
-          submittedByName: s.submittedByName,
-          createdAt: s.createdAt.toISOString(),
-          url: `/attendance/share/${s.token}`,
-        })),
+        sites,
+        totalShares: allShares.length,
       },
     });
   } catch (error: unknown) {
