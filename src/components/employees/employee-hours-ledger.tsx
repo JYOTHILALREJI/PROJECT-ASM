@@ -123,6 +123,7 @@ interface EmployeeDetails {
   isSupervisor: boolean;
   customHourlyRate: number | null;
   currentSite: string | null;
+  currentSiteId: string | null;
   companyName: string | null;
 }
 
@@ -243,6 +244,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
           isSupervisor: emp.isSupervisor,
           customHourlyRate: emp.customHourlyRate,
           currentSite: emp.currentSite,
+          currentSiteId: emp.currentSiteId,
           companyName: emp.companyName,
         });
         if (emp.customHourlyRate != null) {
@@ -310,7 +312,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
         grid.push({
           logId: 0,
           employeeId,
-          siteId: employeeDetails?.currentSite || '',
+          siteId: employeeDetails?.currentSiteId || '',
           siteName: '',
           year: selectedYear,
           month: m,
@@ -430,7 +432,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
     try {
       const changedRows = editableRows.filter((r) => changedMonths.has(r.monthKey));
       const entries = changedRows.map((row) => ({
-        siteId: row.siteId || employeeDetails?.currentSite || '',
+        siteId: row.siteId || employeeDetails?.currentSiteId || '',
         year: row.year,
         month: row.month,
         hoursWorked: row.totalHours ? parseFloat(row.totalHours) : 0,

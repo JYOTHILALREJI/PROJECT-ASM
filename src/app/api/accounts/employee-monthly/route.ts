@@ -195,6 +195,7 @@ export async function PUT(request: NextRequest) {
         isTeamLeader: true,
         isSupervisor: true,
         currentSite: true,
+        currentSiteId: true,
       },
     });
 
@@ -327,8 +328,8 @@ export async function PUT(request: NextRequest) {
           if (siteRecords.length > 0) {
             siteId = siteRecords[0].siteId;
             siteName = siteRecords[0].site.name;
-          } else if (employee.currentSite) {
-            const site = await db.site.findUnique({ where: { id: employee.currentSite } });
+          } else if (employee.currentSiteId) {
+            const site = await db.site.findUnique({ where: { id: employee.currentSiteId } });
             if (site) {
               siteId = site.id;
               siteName = site.name;

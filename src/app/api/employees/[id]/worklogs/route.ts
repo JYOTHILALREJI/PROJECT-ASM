@@ -508,7 +508,7 @@ export async function PUT(
       const yearNum = parseInt(String(year), 10);
       const monthNum = parseInt(String(month), 10);
       const hours = parseFloat(String(hoursWorked ?? 0));
-      const effectiveSiteId = siteId || employee.currentSite;
+      const effectiveSiteId = siteId || employee.currentSiteId;
 
       if (!effectiveSiteId) {
         results.push({ month: `${yearNum}-${String(monthNum).padStart(2, '0')}`, action: 'skipped_no_site' });
@@ -552,7 +552,7 @@ export async function PUT(
     }
 
     // Trigger recalculation from the earliest changed month
-    let recalcResult = null;
+    let recalcResult: { monthsRecalculated: number; employeeId: string } | null = null;
     if (earliestYear < Infinity) {
       recalcResult = await recalcEmployeeFromMonth(id, earliestYear, earliestMonth);
     }
