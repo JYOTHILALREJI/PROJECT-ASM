@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Building2,
   Users,
@@ -12,6 +12,7 @@ import {
   Star,
   AlertTriangle,
   ChevronLeft,
+  ChevronDown,
   Pencil,
   UserPlus,
   MapPin,
@@ -23,6 +24,7 @@ import {
   Power,
   PowerOff,
   MoreHorizontal,
+  CheckCircle2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -513,6 +515,160 @@ function AddEmployeeCombobox({
   );
 }
 
+/* ───────── Client Name Combobox ───────── */
+function ClientCombobox({
+  clients,
+  value,
+  onChange,
+}: {
+  clients: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Track whether the user is currently typing a brand-new client name that
+  // doesn't match any existing entry. Used to show the "Add new" hint.
+  const trimmedFilter = filter.trim();
+  const isNewClient = trimmedFilter.length > 0 && !clients.some(
+    (c) => c.toLowerCase() === trimmedFilter.toLowerCase(),
+  );
+
+  const filtered = useMemo(() => {
+    if (!trimmedFilter) return clients;
+    const q = trimmedFilter.toLowerCase();
+    return clients.filter((c) => c.toLowerCase().includes(q));
+  }, [clients, trimmedFilter]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setFilter('');
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (open && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [open]);
+
+  const selectClient = (client: string) => {
+    onChange(client);
+    setOpen(false);
+    setFilter('');
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={cn(
+          'flex items-center justify-between w-full h-10 rounded-lg border px-3 text-sm transition-colors text-left',
+          value
+            ? 'bg-slate-900/60 border-slate-600 text-white'
+            : 'bg-slate-900/40 border-slate-600 text-slate-400',
+          'hover:border-blue-500/50 hover:bg-slate-900/80',
+        )}
+      >
+        <span className="truncate flex-1">
+          {value || 'Select or type a new client...'}
+        </span>
+        <ChevronDown className="h-4 w-4 text-slate-500 shrink-0 ml-2" />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl shadow-black/40 overflow-hidden">
+          {/* Search / new-client input */}
+          <div className="p-2 border-b border-slate-700">
+            <input
+              ref={inputRef}
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search or type a new client name..."
+              className="w-full h-8 px-3 bg-slate-900 border border-slate-600 rounded-md text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && trimmedFilter) {
+                  e.preventDefault();
+                  selectClient(trimmedFilter);
+                }
+              }}
+            />
+          </div>
+
+          <div className="max-h-56 overflow-y-auto">
+            {/* Add new client option (if the typed text isn't an existing client) */}
+            {isNewClient && (
+              <button
+                type="button"
+                onClick={() => selectClient(trimmedFilter)}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-blue-500/10 text-blue-300 border-b border-slate-700/50"
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  Add new client: <span className="font-medium">&ldquo;{trimmedFilter}&rdquo;</span>
+                </span>
+              </button>
+            )}
+
+            {filtered.length === 0 && !isNewClient ? (
+              <div className="px-3 py-6 text-center text-sm text-slate-500">
+                No clients found. Type above to add a new one.
+              </div>
+            ) : (
+              <div>
+                {filtered.length > 0 && (
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                    Existing clients
+                  </div>
+                )}
+                {filtered.map((client) => (
+                  <button
+                    key={client}
+                    type="button"
+                    onClick={() => selectClient(client)}
+                    className={cn(
+                      'flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-slate-700/50',
+                      client === value ? 'bg-slate-700/70 text-emerald-400' : 'text-slate-300',
+                    )}
+                  >
+                    <Building2 className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    <span className="truncate flex-1">{client}</span>
+                    {client === value && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Clear selection button */}
+          {value && (
+            <div className="border-t border-slate-700 p-1.5">
+              <button
+                type="button"
+                onClick={() => selectClient('')}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+              >
+                <X className="h-3 w-3" />
+                Clear client
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ───────── Main Component ───────── */
 export function SitesPage() {
   // Sub view management
@@ -574,6 +730,9 @@ export function SitesPage() {
   }>({ open: false, emp: null, existingSupervisor: null });
   const [assignLoading, setAssignLoading] = useState(false);
 
+  // Available clients (for the Client Name combobox in Add/Edit dialogs)
+  const [availableClients, setAvailableClients] = useState<string[]>([]);
+
   /* ── Fetch sites ── */
   const fetchSites = useCallback(async () => {
     try {
@@ -590,9 +749,23 @@ export function SitesPage() {
     }
   }, []);
 
+  /* ── Fetch available clients (distinct client names) ── */
+  const fetchClients = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sites/clients');
+      const json = await res.json();
+      if (json.success) {
+        setAvailableClients(json.data.clients || []);
+      }
+    } catch {
+      setAvailableClients([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSites();
-  }, [fetchSites]);
+    fetchClients();
+  }, [fetchSites, fetchClients]);
 
   /* ── Split sites by active status ── */
   const activeSites = useMemo(() => sites.filter((s) => s.isActive), [sites]);
@@ -717,6 +890,7 @@ export function SitesPage() {
         setAddSiteProjectId('');
         setShowAddDialog(false);
         fetchSites();
+        fetchClients();
         toast({ title: 'Site Created', description: `"${addSiteName.trim()}" has been added.` });
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to create site', variant: 'destructive' });
@@ -726,7 +900,7 @@ export function SitesPage() {
     } finally {
       setAddLoading(false);
     }
-  }, [addSiteName, addSiteClientName, addSiteProjectName, addSiteProjectId, fetchSites]);
+  }, [addSiteName, addSiteClientName, addSiteProjectName, addSiteProjectId, fetchSites, fetchClients]);
 
   /* ── Edit site ── */
   const handleEditSite = useCallback(async () => {
@@ -752,6 +926,7 @@ export function SitesPage() {
         setEditSiteProjectName('');
         setEditSiteProjectId('');
         fetchSites();
+        fetchClients();
         // Update viewSite name if we're viewing this site's employees
         if (viewSite && viewSite.id === editSiteTarget.id) {
           setViewSite((prev) => prev ? { ...prev, name: editSiteName.trim(), clientName: editSiteClientName.trim(), projectName: editSiteProjectName.trim(), projectId: editSiteProjectId.trim() } : null);
@@ -765,7 +940,7 @@ export function SitesPage() {
     } finally {
       setEditLoading(false);
     }
-  }, [editSiteTarget, editSiteName, editSiteClientName, editSiteProjectName, editSiteProjectId, fetchSites, viewSite]);
+  }, [editSiteTarget, editSiteName, editSiteClientName, editSiteProjectName, editSiteProjectId, fetchSites, fetchClients, viewSite]);
 
   /* ── Delete site ── */
   const handleDeleteSite = useCallback(async () => {
@@ -781,6 +956,7 @@ export function SitesPage() {
       if (json.success) {
         setDeleteSiteTarget(null);
         fetchSites();
+        fetchClients();
         toast({ title: 'Site Deleted', description: `"${deleteSiteTarget.name}" has been removed.` });
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to delete site', variant: 'destructive' });
@@ -790,7 +966,7 @@ export function SitesPage() {
     } finally {
       setDeleteLoading(false);
     }
-  }, [deleteSiteTarget, fetchSites]);
+  }, [deleteSiteTarget, fetchSites, fetchClients]);
 
   /* ── Remove selected employees from site ── */
   const handleRemoveEmployees = useCallback(async () => {
@@ -1489,11 +1665,10 @@ export function SitesPage() {
             </div>
             <div className="space-y-2">
               <Label className="text-slate-300">Client Name</Label>
-              <Input
-                placeholder="e.g. NPC"
+              <ClientCombobox
+                clients={availableClients}
                 value={addSiteClientName}
-                onChange={(e) => setAddSiteClientName(e.target.value)}
-                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 focus:ring-emerald-500/20 focus:border-emerald-500/50"
+                onChange={setAddSiteClientName}
               />
             </div>
             <div className="space-y-2">
@@ -1565,11 +1740,10 @@ export function SitesPage() {
             </div>
             <div className="space-y-2">
               <Label className="text-slate-300">Client Name</Label>
-              <Input
-                placeholder="Client name"
+              <ClientCombobox
+                clients={availableClients}
                 value={editSiteClientName}
-                onChange={(e) => setEditSiteClientName(e.target.value)}
-                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 focus:ring-emerald-500/20 focus:border-emerald-500/50"
+                onChange={setEditSiteClientName}
               />
             </div>
             <div className="space-y-2">

@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   title: "ASM - Arabian Shield Manpower",
   description: "Comprehensive employee management system for workforce administration",
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo_asm.png",
   },
 };
 
