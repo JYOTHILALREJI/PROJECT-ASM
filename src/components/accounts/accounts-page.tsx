@@ -948,7 +948,7 @@ export function AccountsPage() {
                   value={String(selectedYear)}
                   onValueChange={(v) => setSelectedYear(parseInt(v, 10))}
                 >
-                  <SelectTrigger className="w-[100px] bg-slate-700/50 border-slate-600 text-white">
+                  <SelectTrigger className="w-[140px] bg-slate-700/50 border-slate-600 text-white">
                     <CalendarDays className="h-4 w-4 mr-2 text-slate-400" />
                     <SelectValue />
                   </SelectTrigger>
