@@ -282,7 +282,7 @@ model CancellationRequest {
 
 model UniformRegistry {
   id              String   @id @default(cuid())
-  uniformId       Int      @unique // Separate ID field for reuse when deleting main record
+  uniformId       Int      @unique // Auto-assigned in the POST route (max + 1)
   tokenNumber     Int
   employeeName    String
   employeeId      String

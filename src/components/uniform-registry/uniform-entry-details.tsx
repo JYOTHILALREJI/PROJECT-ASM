@@ -44,6 +44,7 @@ import { toast } from '@/hooks/use-toast';
 
 interface UniformEntry {
   id: string;
+  uniformId: number;
   tokenNumber: number;
   employeeName: string;
   employeeId: string;

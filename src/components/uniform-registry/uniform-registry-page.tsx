@@ -86,6 +86,7 @@ import { UniformEntryDetails } from './uniform-entry-details';
 
 interface UniformEntry {
   id: string;
+  uniformId: number;
   tokenNumber: number;
   employeeName: string;
   employeeId: string;

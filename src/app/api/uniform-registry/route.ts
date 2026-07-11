@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { logActivity } from '@/lib/activity-logger';
 
 // GET /api/uniform-registry - List all uniform registry entries
 export async function GET(request: NextRequest) {
@@ -92,6 +93,8 @@ export async function POST(request: NextRequest) {
       teamLeaderName,
       isRenewal,
       previousTokenId,
+      actorUserId,
+      actorDisplayName,
     } = body;
 
     // Validate required fields
@@ -129,6 +132,13 @@ export async function POST(request: NextRequest) {
     });
     const tokenNumber = (maxToken?.tokenNumber ?? 0) + 1;
 
+    // Auto-increment uniformId: find max uniformId and add 1
+    const maxUniformId = await db.uniformRegistry.findFirst({
+      orderBy: { uniformId: 'desc' },
+      select: { uniformId: true },
+    });
+    const uniformId = (maxUniformId?.uniformId ?? 0) + 1;
+
     // Use provided createdAt or default to now
     const createdAtDate = body.createdAt ? new Date(body.createdAt) : new Date();
     // Calculate renewalDate = createdAt + 6 months
@@ -145,6 +155,7 @@ export async function POST(request: NextRequest) {
 
     const entry = await db.uniformRegistry.create({
       data: {
+        uniformId,
         tokenNumber,
         employeeName,
         employeeId,
@@ -170,6 +181,19 @@ export async function POST(request: NextRequest) {
           },
         },
       },
+    });
+
+    // Log the activity
+    await logActivity({
+      userId: body.actorUserId || null,
+      displayName: body.actorDisplayName || 'Admin',
+      action: 'create',
+      entityType: 'uniform_registry',
+      entityId: entry.id,
+      entityName: entry.employeeName,
+      description: `Created uniform registry entry #${entry.tokenNumber} for ${entry.employeeName}`,
+      details: { tokenNumber: entry.tokenNumber, uniformId: entry.uniformId, documentType: entry.documentType, siteName: entry.siteName },
+      request,
     });
 
     return NextResponse.json(
