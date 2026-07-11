@@ -322,7 +322,10 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
     employees.map((emp) => ({
       id: emp.id,
       fullName: emp.fullName,
-      code: '',
+      // Pre-fill the EMP. CODE column with the employee's employeeId from the DB
+      // (e.g. ASM-2026-001). The cell remains editable so the user can override
+      // for print/PDF if needed.
+      code: emp.employeeId || '',
       position: emp.position || '',
       isTeamLeader: emp.isTeamLeader,
       isSupervisor: emp.position?.toLowerCase().includes('supervisor') ?? false,

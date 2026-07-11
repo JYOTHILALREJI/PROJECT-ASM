@@ -122,6 +122,7 @@ model Site {
   name        String   @unique
   clientName  String?
   projectName String?
+  projectId   String? // Free-text project ID (e.g. client's internal project code)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   deletedAt   DateTime?

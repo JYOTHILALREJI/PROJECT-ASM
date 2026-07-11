@@ -92,6 +92,7 @@ interface Site {
   name: string;
   clientName?: string | null;
   projectName?: string | null;
+  projectId?: string | null;
   isActive: boolean;
   createdAt: string;
   employeeCount: number;
@@ -188,7 +189,8 @@ function SiteCardsGrid({
   const filteredSites = sites.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     (s.clientName && s.clientName.toLowerCase().includes(search.toLowerCase())) ||
-    (s.projectName && s.projectName.toLowerCase().includes(search.toLowerCase()))
+    (s.projectName && s.projectName.toLowerCase().includes(search.toLowerCase())) ||
+    (s.projectId && s.projectId.toLowerCase().includes(search.toLowerCase()))
   );
 
   const formatDate = (dateStr: string) => {
@@ -202,6 +204,30 @@ function SiteCardsGrid({
       return dateStr;
     }
   };
+
+  // Group filtered sites by clientName. Sites with no client go into a
+  // dedicated "Unassigned Client" group so they're still visible.
+  const groupedByClient = useMemo(() => {
+    const groups = new Map<string, Site[]>();
+    const unassignedKey = '__unassigned__';
+    for (const s of filteredSites) {
+      const key = (s.clientName && s.clientName.trim()) ? s.clientName.trim() : unassignedKey;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(s);
+    }
+    // Convert to array and sort alphabetically by client name, with the
+    // "unassigned" group always last.
+    return Array.from(groups.entries())
+      .sort((a, b) => {
+        if (a[0] === unassignedKey) return 1;
+        if (b[0] === unassignedKey) return -1;
+        return a[0].localeCompare(b[0]);
+      })
+      .map(([client, sitesList]) => ({
+        client,
+        sites: sitesList.sort((x, y) => x.name.localeCompare(y.name)),
+      }));
+  }, [filteredSites]);
 
   if (loading) {
     return (
@@ -226,122 +252,150 @@ function SiteCardsGrid({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {filteredSites.map((site) => (
-        <Card
-          key={site.id}
-          className={cn(
-            "border-slate-700/50 hover:border-slate-600/50 transition-all group",
-            site.isActive ? "bg-slate-800/50" : "bg-slate-800/30 opacity-80"
-          )}
-        >
-          <CardHeader className="pb-3">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-lg transition-colors",
-                  site.isActive
-                    ? "bg-emerald-500/10 group-hover:bg-emerald-500/20"
-                    : "bg-slate-600/20 group-hover:bg-slate-600/30"
-                )}>
-                  <Building2 className={cn(
-                    "h-5 w-5",
-                    site.isActive ? "text-emerald-400" : "text-slate-500"
-                  )} />
-                </div>
-                <div className="min-w-0">
-                  <CardTitle className="text-base text-white truncate">
-                    {site.name}
-                  </CardTitle>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Created {formatDate(site.createdAt)}
-                  </p>
-                </div>
+    <div className="space-y-8">
+      {groupedByClient.map(({ client, sites: sitesList }) => {
+        const isUnassigned = client === '__unassigned__';
+        const clientLabel = isUnassigned ? 'Unassigned Client' : client;
+        const totalEmployeesInGroup = sitesList.reduce((sum, s) => sum + s.employeeCount, 0);
+        return (
+          <div key={client} className="space-y-3">
+            {/* Client group header */}
+            <div className="flex items-center gap-3 pb-2 border-b border-slate-700/60">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
+                <Building2 className="h-4 w-4 text-blue-400" />
               </div>
-              <div className="flex items-center gap-0.5">
-                {/* Active/Inactive Toggle */}
-                <Button
-                  variant="ghost"
-                  size="icon"
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-white truncate uppercase tracking-wide">
+                  {clientLabel}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {sitesList.length} site{sitesList.length !== 1 ? 's' : ''} · {totalEmployeesInGroup} employee{totalEmployeesInGroup !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+
+            {/* Site cards in this client group */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sitesList.map((site) => (
+                <Card
+                  key={site.id}
                   className={cn(
-                    "h-8 w-8 shrink-0",
-                    site.isActive
-                      ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
-                      : "text-slate-500 hover:text-slate-400 hover:bg-slate-500/10"
+                    "border-slate-700/50 hover:border-slate-600/50 transition-all group",
+                    site.isActive ? "bg-slate-800/50" : "bg-slate-800/30 opacity-80"
                   )}
-                  onClick={() => onToggleActive(site)}
-                  title={site.isActive ? 'Deactivate site' : 'Activate site'}
                 >
-                  {site.isActive ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 shrink-0"
-                  onClick={() => onEditSite(site)}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-500/10 shrink-0"
-                  onClick={() => onDeleteSite(site)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0 space-y-3">
-            {/* Client & Project info */}
-            {(site.clientName || site.projectName) && (
-              <div className="space-y-0.5">
-                {site.clientName && (
-                  <p className="text-xs text-slate-400 truncate">
-                    <span className="text-slate-500">Client:</span> {site.clientName}
-                  </p>
-                )}
-                {site.projectName && (
-                  <p className="text-xs text-slate-400 truncate">
-                    <span className="text-slate-500">Project:</span> {site.projectName}
-                  </p>
-                )}
-              </div>
-            )}
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "flex h-10 w-10 items-center justify-center rounded-lg transition-colors",
+                          site.isActive
+                            ? "bg-emerald-500/10 group-hover:bg-emerald-500/20"
+                            : "bg-slate-600/20 group-hover:bg-slate-600/30"
+                        )}>
+                          <Building2 className={cn(
+                            "h-5 w-5",
+                            site.isActive ? "text-emerald-400" : "text-slate-500"
+                          )} />
+                        </div>
+                        <div className="min-w-0">
+                          <CardTitle className="text-base text-white truncate">
+                            {site.name}
+                          </CardTitle>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Created {formatDate(site.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-0.5">
+                        {/* Active/Inactive Toggle */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            "h-8 w-8 shrink-0",
+                            site.isActive
+                              ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                              : "text-slate-500 hover:text-slate-400 hover:bg-slate-500/10"
+                          )}
+                          onClick={() => onToggleActive(site)}
+                          title={site.isActive ? 'Deactivate site' : 'Activate site'}
+                        >
+                          {site.isActive ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 shrink-0"
+                          onClick={() => onEditSite(site)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-500/10 shrink-0"
+                          onClick={() => onDeleteSite(site)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-0 space-y-3">
+                    {/* Project & Project ID info */}
+                    {(site.projectName || site.projectId) && (
+                      <div className="space-y-0.5">
+                        {site.projectName && (
+                          <p className="text-xs text-slate-400 truncate">
+                            <span className="text-slate-500">Project:</span> {site.projectName}
+                          </p>
+                        )}
+                        {site.projectId && (
+                          <p className="text-xs text-slate-400 truncate">
+                            <span className="text-slate-500">Project ID:</span>{' '}
+                            <span className="font-mono text-amber-300">{site.projectId}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
 
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Users className="h-4 w-4" />
-              <span>
-                <span className="text-white font-semibold">{site.employeeCount}</span>{' '}
-                {site.employeeCount === 1 ? 'employee' : 'employees'}
-              </span>
-            </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                      <Users className="h-4 w-4" />
+                      <span>
+                        <span className="text-white font-semibold">{site.employeeCount}</span>{' '}
+                        {site.employeeCount === 1 ? 'employee' : 'employees'}
+                      </span>
+                    </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 gap-2 transition-all"
-                  onClick={() => onViewEmployees(site)}
-                >
-                  <Eye className="h-4 w-4" />
-                  View Employees
-                </Button>
-                <Button
-                  variant="outline"
-                  className="bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 gap-2 transition-all shrink-0"
-                  onClick={() => onAttendanceSheet(site)}
-                  title="Attendance Sheet"
-                >
-                  <FileSpreadsheet className="h-4 w-4" />
-                </Button>
-              </div>
+                    {/* Action Buttons */}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="flex-1 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 gap-2 transition-all"
+                          onClick={() => onViewEmployees(site)}
+                        >
+                          <Eye className="h-4 w-4" />
+                          View Employees
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 gap-2 transition-all shrink-0"
+                          onClick={() => onAttendanceSheet(site)}
+                          title="Attendance Sheet"
+                        >
+                          <FileSpreadsheet className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
-          </CardContent>
-        </Card>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -475,6 +529,7 @@ export function SitesPage() {
   const [addSiteName, setAddSiteName] = useState('');
   const [addSiteClientName, setAddSiteClientName] = useState('');
   const [addSiteProjectName, setAddSiteProjectName] = useState('');
+  const [addSiteProjectId, setAddSiteProjectId] = useState('');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
 
@@ -482,6 +537,7 @@ export function SitesPage() {
   const [editSiteName, setEditSiteName] = useState('');
   const [editSiteClientName, setEditSiteClientName] = useState('');
   const [editSiteProjectName, setEditSiteProjectName] = useState('');
+  const [editSiteProjectId, setEditSiteProjectId] = useState('');
   const [editLoading, setEditLoading] = useState(false);
 
   const [deleteSiteTarget, setDeleteSiteTarget] = useState<Site | null>(null);
@@ -619,6 +675,7 @@ export function SitesPage() {
           name: site.name,
           clientName: site.clientName,
           projectName: site.projectName,
+          projectId: site.projectId,
           isActive: !site.isActive,
         }),
       });
@@ -649,6 +706,7 @@ export function SitesPage() {
           name: addSiteName.trim(),
           clientName: addSiteClientName.trim() || undefined,
           projectName: addSiteProjectName.trim() || undefined,
+          projectId: addSiteProjectId.trim() || undefined,
         }),
       });
       const json = await res.json();
@@ -656,6 +714,7 @@ export function SitesPage() {
         setAddSiteName('');
         setAddSiteClientName('');
         setAddSiteProjectName('');
+        setAddSiteProjectId('');
         setShowAddDialog(false);
         fetchSites();
         toast({ title: 'Site Created', description: `"${addSiteName.trim()}" has been added.` });
@@ -667,7 +726,7 @@ export function SitesPage() {
     } finally {
       setAddLoading(false);
     }
-  }, [addSiteName, addSiteClientName, addSiteProjectName, fetchSites]);
+  }, [addSiteName, addSiteClientName, addSiteProjectName, addSiteProjectId, fetchSites]);
 
   /* ── Edit site ── */
   const handleEditSite = useCallback(async () => {
@@ -682,6 +741,7 @@ export function SitesPage() {
           name: editSiteName.trim(),
           clientName: editSiteClientName.trim(),
           projectName: editSiteProjectName.trim(),
+          projectId: editSiteProjectId.trim(),
         }),
       });
       const json = await res.json();
@@ -690,10 +750,11 @@ export function SitesPage() {
         setEditSiteName('');
         setEditSiteClientName('');
         setEditSiteProjectName('');
+        setEditSiteProjectId('');
         fetchSites();
         // Update viewSite name if we're viewing this site's employees
         if (viewSite && viewSite.id === editSiteTarget.id) {
-          setViewSite((prev) => prev ? { ...prev, name: editSiteName.trim(), clientName: editSiteClientName.trim(), projectName: editSiteProjectName.trim() } : null);
+          setViewSite((prev) => prev ? { ...prev, name: editSiteName.trim(), clientName: editSiteClientName.trim(), projectName: editSiteProjectName.trim(), projectId: editSiteProjectId.trim() } : null);
         }
         toast({ title: 'Site Updated', description: `Site details updated successfully.` });
       } else {
@@ -704,7 +765,7 @@ export function SitesPage() {
     } finally {
       setEditLoading(false);
     }
-  }, [editSiteTarget, editSiteName, editSiteClientName, editSiteProjectName, fetchSites, viewSite]);
+  }, [editSiteTarget, editSiteName, editSiteClientName, editSiteProjectName, editSiteProjectId, fetchSites, viewSite]);
 
   /* ── Delete site ── */
   const handleDeleteSite = useCallback(async () => {
@@ -1128,6 +1189,7 @@ export function SitesPage() {
                   setEditSiteName(site.name);
                   setEditSiteClientName(site.clientName || '');
                   setEditSiteProjectName(site.projectName || '');
+                  setEditSiteProjectId(site.projectId || '');
                 }}
                 onToggleActive={handleToggleActive}
                 onAttendanceSheet={handleAttendanceSheet}
@@ -1147,6 +1209,7 @@ export function SitesPage() {
                   setEditSiteName(site.name);
                   setEditSiteClientName(site.clientName || '');
                   setEditSiteProjectName(site.projectName || '');
+                  setEditSiteProjectId(site.projectId || '');
                 }}
                 onToggleActive={handleToggleActive}
                 onAttendanceSheet={handleAttendanceSheet}
@@ -1443,9 +1506,19 @@ export function SitesPage() {
                 onKeyDown={(e) => e.key === 'Enter' && handleAddSite()}
               />
             </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Project ID</Label>
+              <Input
+                placeholder="e.g. PRJ-001"
+                value={addSiteProjectId}
+                onChange={(e) => setAddSiteProjectId(e.target.value)}
+                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 focus:ring-emerald-500/20 focus:border-emerald-500/50 font-mono"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddSite()}
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => { setShowAddDialog(false); setAddSiteName(''); setAddSiteClientName(''); setAddSiteProjectName(''); }} className="text-slate-400 hover:text-white">
+            <Button variant="ghost" onClick={() => { setShowAddDialog(false); setAddSiteName(''); setAddSiteClientName(''); setAddSiteProjectName(''); setAddSiteProjectId(''); }} className="text-slate-400 hover:text-white">
               Cancel
             </Button>
             <Button
@@ -1468,6 +1541,7 @@ export function SitesPage() {
             setEditSiteName('');
             setEditSiteClientName('');
             setEditSiteProjectName('');
+            setEditSiteProjectId('');
           }
         }}
       >
@@ -1508,6 +1582,16 @@ export function SitesPage() {
                 onKeyDown={(e) => e.key === 'Enter' && handleEditSite()}
               />
             </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Project ID</Label>
+              <Input
+                placeholder="e.g. PRJ-001"
+                value={editSiteProjectId}
+                onChange={(e) => setEditSiteProjectId(e.target.value)}
+                className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 focus:ring-emerald-500/20 focus:border-emerald-500/50 font-mono"
+                onKeyDown={(e) => e.key === 'Enter' && handleEditSite()}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -1517,6 +1601,7 @@ export function SitesPage() {
                 setEditSiteName('');
                 setEditSiteClientName('');
                 setEditSiteProjectName('');
+                setEditSiteProjectId('');
               }}
               className="text-slate-400 hover:text-white"
             >
@@ -1524,7 +1609,7 @@ export function SitesPage() {
             </Button>
             <Button
               onClick={handleEditSite}
-              disabled={!editSiteName.trim() || (editSiteName === editSiteTarget?.name && editSiteClientName === (editSiteTarget?.clientName || '') && editSiteProjectName === (editSiteTarget?.projectName || '')) || editLoading}
+              disabled={!editSiteName.trim() || (editSiteName === editSiteTarget?.name && editSiteClientName === (editSiteTarget?.clientName || '') && editSiteProjectName === (editSiteTarget?.projectName || '') && editSiteProjectId === (editSiteTarget?.projectId || '')) || editLoading}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               {editLoading ? 'Saving...' : 'Save Changes'}
