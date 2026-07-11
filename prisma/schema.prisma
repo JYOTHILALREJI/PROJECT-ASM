@@ -1,0 +1,453 @@
+// ASM — Arabian Shield Manpower
+// Rewritten Prisma schema (SQLite)
+// Design goals:
+//   1. Explicit foreign-key relations between all related tables.
+//   2. Consistent soft-delete via `deletedAt` on every data model so deletion
+//      can be cascaded across tables WITHOUT ever hard-deleting rows.
+//   3. Per-employee "custom current total working hours" that can be set at any
+//      point in time (Employee.currentTotalWorkingHours).
+// Legacy soft-delete flags (status='deleted', isHidden, isDeleted, deletedDate)
+// are retained for backward compatibility with existing queries; the canonical
+// soft-delete marker is now `deletedAt`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      String   @default("admin") // "super_admin" or "admin"
+  theme     String   @default("dark") // "dark" or "light"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  notifications                Notification[]
+  leaveRequestsCreated         LeaveRequest[]       @relation("CreatedBy")
+  leaveRequestsReviewed        LeaveRequest[]       @relation("ReviewedBy")
+  cancellationRequestsCreated  CancellationRequest[] @relation("RequestedBy")
+  cancellationRequestsReviewed CancellationRequest[] @relation("ReviewedBy")
+  warnings                     Warning[]
+  fines                        Fine[]
+  menuPermissions              AdminMenuPermission[]
+  adminPermissions             AdminPermission[]
+}
+
+model AdminMenuPermission {
+  id        String   @id @default(cuid())
+  userId    String
+  menuKey   String // e.g. "employees", "sites", "attendance", "leave_requests", "cancellation_requests", "notifications"
+  allowed   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, menuKey])
+  @@index([userId])
+}
+
+model Employee {
+  id               String    @id @default(cuid())
+  fullName         String
+  employeeId       String    @unique
+  nationality      String?
+  dateOfBirth      DateTime?
+  phone            String?
+  email            String?
+  address          String?
+  emergencyContact String?
+  position         String? // Legacy - kept for backward compat
+  trade            String? // New: Trade (Mason, Electrician, Welder, etc.)
+  joinDate         DateTime?
+  companyName      String?
+  passportNumber   String?
+  passportStatus   String?
+  idNumber         String?
+  idStatus         String?
+  currentSite      String? // Denormalized site NAME (kept for backward compat with existing queries)
+  currentSiteId    String? // FK -> Site.id (proper relation)
+  rating           Float     @default(0)
+  status           String    @default("active") // "active", "deleted", "pending_deletion"
+  photo            String?
+  isTeamLeader     Boolean   @default(false)
+  teamLeaderSiteId String? // FK -> Site.id
+  isSupervisor     Boolean   @default(false)
+  supervisorSiteId String? // FK -> Site.id
+  role             String    @default("Standard") // "Standard", "Team Leader", "Supervisor"
+  customHourlyRate Float? // Nullable - overrides standard tier rates for this employee
+  hoursThreshold   Int       @default(1000) // Hours threshold for rate switching (basic vs premium)
+  // Custom current total working hours — manually settable at ANY point in time.
+  // Represents the employee's running cumulative total hours and can be overridden
+  // by an admin whenever needed (e.g. to correct historical data).
+  currentTotalWorkingHours Float   @default(0)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  deletedAt                DateTime?
+
+  // Relations
+  currentSiteRef  Site?  @relation("EmployeeCurrentSite", fields: [currentSiteId], references: [id])
+  teamLeaderSite  Site?  @relation("EmployeeTeamLeaderSite", fields: [teamLeaderSiteId], references: [id])
+  supervisorSite  Site?  @relation("EmployeeSupervisorSite", fields: [supervisorSiteId], references: [id])
+  attendance           Attendance[]
+  warnings             Warning[]
+  fines                Fine[]
+  leaveRequests        LeaveRequest[]
+  cancellationRequests CancellationRequest[]
+  uniformRegistry      UniformRegistry[]
+  siteHistory          EmpCountSitePerMonth[]
+  salaryRecords        SalaryRecord[]
+  workingHours         TotalEmployeeWorkingHours[]
+  workLogs             WorkLog[]
+
+  @@index([trade])
+  @@index([isTeamLeader])
+  @@index([isSupervisor])
+  @@index([currentSite])
+  @@index([currentSiteId])
+}
+
+model Site {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  clientName  String?
+  projectName String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+
+  // Back-relations for the Employee -> Site FKs
+  currentEmployees Employee[] @relation("EmployeeCurrentSite")
+  teamLeaders      Employee[] @relation("EmployeeTeamLeaderSite")
+  supervisors      Employee[] @relation("EmployeeSupervisorSite")
+
+  employeeHistory   EmpCountSitePerMonth[]
+  monthActivations  SiteMonthActivation[]
+  workLogs          WorkLog[]
+  salaryRecords     SalaryRecord[]
+}
+
+model Attendance {
+  id            String   @id @default(cuid())
+  employeeId    String
+  date          String // YYYY-MM-DD format
+  status        String   @default("present") // "present", "absent", "no_site", "overtime", "not_marked"
+  overtimeHours Float?
+  isHidden      Boolean  @default(false) // Legacy soft-hide when employee is deleted
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([date])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String // "request", "warning", "fine"
+  read      Boolean  @default(false)
+  isHidden  Boolean  @default(false) // Legacy soft-hide
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model Warning {
+  id              String    @id @default(cuid())
+  employeeId      String
+  reason          String
+  isAutoGenerated Boolean   @default(false)
+  absentDates     String? // JSON string of dates
+  customDate      DateTime? // Custom date if provided, otherwise createdAt is used
+  isHidden        Boolean   @default(false) // Legacy soft-hide
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+
+  @@index([employeeId])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model Fine {
+  id         String    @id @default(cuid())
+  employeeId String
+  reason     String
+  amount     Float
+  customDate DateTime? // Custom date if provided, otherwise createdAt is used
+  isHidden   Boolean   @default(false) // Legacy soft-hide
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+
+  @@index([employeeId])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model LeaveRequest {
+  id            String    @id @default(cuid())
+  employeeId    String
+  leaveType     String // "casual", "sick", "annual", "emergency", "marriage", "other"
+  otherTypeText String? // Free-text when leaveType is "other"
+  startDate     DateTime
+  endDate       DateTime
+  totalDays     Int
+  reason        String
+  status        String    @default("pending") // "pending", "approved", "rejected"
+  isHidden      Boolean   @default(false) // Legacy soft-hide
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  reviewedAt    DateTime?
+  deletedAt     DateTime?
+
+  employee     Employee @relation(fields: [employeeId], references: [id])
+  createdById  String
+  createdBy    User     @relation("CreatedBy", fields: [createdById], references: [id])
+  reviewedById String?
+  reviewedBy   User?    @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model CancellationRequest {
+  id             String    @id @default(cuid())
+  employeeId     String
+  reason         String?
+  status         String    @default("pending") // "pending", "approved", "rejected"
+  customDate     DateTime? // Custom date if provided, otherwise createdAt is used
+  isHidden       Boolean   @default(false) // Legacy soft-hide
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  reviewedAt     DateTime?
+  deletedAt      DateTime?
+
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  requestedById String
+  requestedBy   User     @relation("RequestedBy", fields: [requestedById], references: [id])
+  reviewedById  String?
+  reviewedBy    User?    @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model UniformRegistry {
+  id              String   @id @default(cuid())
+  uniformId       Int      @unique // Separate ID field for reuse when deleting main record
+  tokenNumber     Int
+  employeeName    String
+  employeeId      String
+  documentType    String // "id" or "passport"
+  documentNumber  String // Stored encrypted
+  items           String // JSON string
+  siteName        String?
+  teamLeaderName  String?
+  isRenewal       Boolean  @default(false)
+  previousTokenId String? // reference to previous token if this is a renewal
+  isDeleted       Boolean  @default(false) // Legacy soft-delete
+  isHidden        Boolean  @default(false) // Legacy soft-hide
+  createdAt       DateTime @default(now())
+  renewalDate     DateTime // 6 months from createdAt
+  deletedAt       DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([tokenNumber])
+  @@index([createdAt])
+  @@index([uniformId])
+  @@index([isHidden])
+  @@index([deletedAt])
+}
+
+model Permission {
+  id        String   @id @default(cuid())
+  name      String   @unique // Display name: "Dashboard", "Employees", etc.
+  slug      String   @unique // URL key: "dashboard", "employees", etc.
+  group     String   @default("general") // Permission group
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  adminPermissions AdminPermission[]
+
+  @@index([slug])
+  @@index([group])
+}
+
+model AdminPermission {
+  id           String   @id @default(cuid())
+  adminId      String
+  permissionId String
+  createdAt    DateTime @default(now())
+  deletedAt    DateTime?
+
+  admin      User       @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([adminId, permissionId])
+  @@index([adminId])
+  @@index([permissionId])
+}
+
+model TotalEmployeeWorkingHours {
+  id                String   @id @default(cuid())
+  empId             String // FK to Employee
+  empName           String
+  month             String // YYYY-MM format - which month these hours belong to
+  totalWorkingHours Float    @default(0) // hours for this specific month
+  rtPerHour         Float    @default(2.5) // rate per hour for this month
+  isCustom          Boolean  @default(false) // if true, rtPerHour is manually set
+  isDeleted         Boolean  @default(false) // Legacy soft-delete
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  employee Employee @relation(fields: [empId], references: [id], onDelete: Cascade)
+
+  @@unique([empId, month])
+  @@index([empId])
+  @@index([month])
+  @@index([isDeleted])
+  @@index([deletedAt])
+}
+
+model SalaryRecord {
+  id            String   @id @default(cuid())
+  empId         String // FK to Employee
+  empName       String
+  siteId        String // FK to Site
+  siteName      String
+  month         String // YYYY-MM format
+  year          Int
+  nationality   String   @default("")
+  trade         String   @default("")
+  employeeCode  String   @default("") // employeeId (e.g. ASM-001)
+  slNo          Int      @default(0)
+  totalHours    Float    @default(0)
+  rtPerHour     Float    @default(2.5)
+  totalSalary   Float    @default(0)
+  deduction     Float    @default(0)
+  advance       Float    @default(0)
+  balanceSalary Float    @default(0)
+  isPaid        Boolean  @default(false)
+  isDeleted     Boolean  @default(false) // Legacy soft-delete
+  rateTier      String   @default("standard") // "standard" | "premium"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  employee Employee @relation(fields: [empId], references: [id], onDelete: Cascade)
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([empId, siteId, month, year, rateTier])
+  @@index([empId])
+  @@index([siteId])
+  @@index([month])
+  @@index([year])
+  @@index([siteId, month, year])
+  @@index([isPaid])
+  @@index([rateTier])
+  @@index([isDeleted])
+  @@index([deletedAt])
+}
+
+model EmpCountSitePerMonth {
+  id          String    @id @default(cuid())
+  empId       String // FK to Employee
+  empName     String
+  siteId      String // FK to Site
+  siteName    String
+  month       String // YYYY-MM format
+  createdDate DateTime  @default(now())
+  removedDate DateTime?
+  updatedDate DateTime  @updatedAt
+  deletedDate DateTime? // Legacy soft-delete timestamp
+  deletedAt   DateTime?
+
+  employee Employee @relation(fields: [empId], references: [id], onDelete: Cascade)
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([empId, siteId, month])
+  @@index([empId])
+  @@index([siteId])
+  @@index([month])
+  @@index([empId, siteId])
+  @@index([deletedDate])
+  @@index([deletedAt])
+}
+
+model SiteMonthActivation {
+  id        String   @id @default(cuid())
+  siteId    String // FK to Site
+  month     String // YYYY-MM format
+  year      Int
+  createdAt DateTime @default(now())
+  deletedAt DateTime?
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, month, year])
+  @@index([month, year])
+  @@index([siteId])
+  @@index([deletedAt])
+}
+
+model WorkLog {
+  logId        Int      @id @default(autoincrement())
+  employeeId   String // FK to Employee.id
+  siteId       String // FK to Site.id
+  year         Int
+  month        Int // 1-12
+  hoursWorked  Float    @default(0.00)
+  allowances   Float    @default(0.00)
+  deductions   Float    @default(0.00)
+  deletedAt    DateTime? // soft delete (canonical)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, siteId, year, month])
+  @@index([employeeId, year, month], name: "idx_work_logs_chrono")
+}

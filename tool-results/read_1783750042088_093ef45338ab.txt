@@ -1,0 +1,935 @@
+     1→'use client';
+     2→
+     3→import React, { useEffect, useState, useCallback, useMemo } from 'react';
+     4→import {
+     5→  Building2,
+     6→  Users,
+     7→  Clock,
+     8→  DollarSign,
+     9→  TrendingDown,
+    10→  ArrowUpRight,
+    11→  Wallet,
+    12→  ChevronDown,
+    13→  ChevronRight,
+    14→  CalendarDays,
+    15→  AlertCircle,
+    16→  CheckCircle2,
+    17→  XCircle,
+    18→  ShieldCheck,
+    19→  ShieldAlert,
+    20→} from 'lucide-react';
+    21→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    22→import { Skeleton } from '@/components/ui/skeleton';
+    23→import { Badge } from '@/components/ui/badge';
+    24→import {
+    25→  Select,
+    26→  SelectContent,
+    27→  SelectItem,
+    28→  SelectTrigger,
+    29→  SelectValue,
+    30→} from '@/components/ui/select';
+    31→import {
+    32→  Table,
+    33→  TableBody,
+    34→  TableCell,
+    35→  TableHead,
+    36→  TableHeader,
+    37→  TableRow,
+    38→} from '@/components/ui/table';
+    39→import { cn } from '@/lib/utils';
+    40→
+    41→/* ───────── constants ───────── */
+    42→const MONTHS = [
+    43→  { value: '1', label: 'January' },
+    44→  { value: '2', label: 'February' },
+    45→  { value: '3', label: 'March' },
+    46→  { value: '4', label: 'April' },
+    47→  { value: '5', label: 'May' },
+    48→  { value: '6', label: 'June' },
+    49→  { value: '7', label: 'July' },
+    50→  { value: '8', label: 'August' },
+    51→  { value: '9', label: 'September' },
+    52→  { value: '10', label: 'October' },
+    53→  { value: '11', label: 'November' },
+    54→  { value: '12', label: 'December' },
+    55→];
+    56→
+    57→const RATE_STANDARD_BELOW = 2.5;
+    58→const RATE_STANDARD_ABOVE = 5.0;
+    59→const RATE_TL_BELOW = 3.0;
+    60→const RATE_TL_ABOVE = 5.5;
+    61→
+    62→/* ───────── types ───────── */
+    63→interface SalaryRecord {
+    64→  id: string;
+    65→  empId: string;
+    66→  empName: string;
+    67→  siteId: string;
+    68→  siteName: string;
+    69→  month: string;
+    70→  year: number;
+    71→  nationality: string;
+    72→  trade: string;
+    73→  employeeCode: string;
+    74→  slNo: number;
+    75→  totalHours: number;
+    76→  rtPerHour: number;
+    77→  totalSalary: number;
+    78→  deduction: number;
+    79→  advance: number;
+    80→  balanceSalary: number;
+    81→  isPaid: boolean;
+    82→  rateTier: string;
+    83→  employee?: {
+    84→    id: string;
+    85→    fullName: string;
+    86→    employeeId: string;
+    87→    currentSite: string | null;
+    88→    trade: string | null;
+    89→    nationality: string | null;
+    90→    customHourlyRate: number | null;
+    91→    isTeamLeader: boolean;
+    92→    isSupervisor: boolean;
+    93→    role: string;
+    94→  };
+    95→}
+    96→
+    97→/** Merged employee row combining standard + premium salary records */
+    98→interface MergedEmployee {
+    99→  empId: string;
+   100→  empName: string;
+   101→  employeeCode: string;
+   102→  nationality: string;
+   103→  trade: string;
+   104→  siteId: string;
+   105→  siteName: string;
+   106→  belowThresholdHours: number;
+   107→  aboveThresholdHours: number;
+   108→  totalHours: number;
+   109→  isTeamLeader: boolean;
+   110→  isSupervisor: boolean;
+   111→  customHourlyRate: number | null;
+   112→  grossSalary: number;
+   113→  belowSalaryComponent: number;
+   114→  aboveSalaryComponent: number;
+   115→  deduction: number;
+   116→  advance: number;
+   117→  balanceSalary: number;
+   118→  isPaid: boolean;
+   119→  rateTier: 'standard' | 'premium' | 'split';
+   120→  standardRecordId: string | null;
+   121→  premiumRecordId: string | null;
+   122→}
+   123→
+   124→interface SiteSummary {
+   125→  siteId: string;
+   126→  siteName: string;
+   127→  clientName: string | null;
+   128→  employeeCount: number;
+   129→  totalHours: number;
+   130→  totalBelowThresholdHours: number;
+   131→  totalAboveThresholdHours: number;
+   132→  totalSalary: number;
+   133→  totalGrossSalary: number;
+   134→  totalDeductions: number;
+   135→  totalAdvances: number;
+   136→  netBalance: number;
+   137→  paidCount: number;
+   138→  totalRecords: number;
+   139→  employees: SalaryRecord[];
+   140→}
+   141→
+   142→interface Totals {
+   143→  totalSites: number;
+   144→  totalEmployees: number;
+   145→  totalHours: number;
+   146→  totalBelowThresholdHours: number;
+   147→  totalAboveThresholdHours: number;
+   148→  totalSalary: number;
+   149→  totalGrossSalary: number;
+   150→  totalDeductions: number;
+   151→  totalAdvances: number;
+   152→  netBalance: number;
+   153→  paidCount: number;
+   154→  totalRecords: number;
+   155→}
+   156→
+   157→/* ───────── helpers ───────── */
+   158→function formatCurrency(amount: number): string {
+   159→  return amount.toLocaleString('en-US', {
+   160→    minimumFractionDigits: 2,
+   161→    maximumFractionDigits: 2,
+   162→  });
+   163→}
+   164→
+   165→function formatHours(hours: number): string {
+   166→  return hours.toLocaleString('en-US', {
+   167→    minimumFractionDigits: 0,
+   168→    maximumFractionDigits: 1,
+   169→  });
+   170→}
+   171→
+   172→/** Compute gross salary using direct hourly rates (PRD v2.0 — no divisors) */
+   173→function computeGrossSalary(
+   174→  belowHours: number,
+   175→  aboveHours: number,
+   176→  isTeamLeader: boolean,
+   177→  isSupervisor: boolean,
+   178→  customHourlyRate: number | null,
+   179→): { gross: number; belowComponent: number; aboveComponent: number } {
+   180→  if (customHourlyRate !== null && customHourlyRate > 0) {
+   181→    const gross = (belowHours + aboveHours) * customHourlyRate;
+   182→    return { gross, belowComponent: belowHours * customHourlyRate, aboveComponent: aboveHours * customHourlyRate };
+   183→  }
+   184→
+   185→  const isLeader = isTeamLeader || isSupervisor;
+   186→  const lowRate = isLeader ? RATE_TL_BELOW : RATE_STANDARD_BELOW;
+   187→  const highRate = isLeader ? RATE_TL_ABOVE : RATE_STANDARD_ABOVE;
+   188→
+   189→  const belowComponent = belowHours * lowRate;
+   190→  const aboveComponent = aboveHours * highRate;
+   191→  const gross = belowComponent + aboveComponent;
+   192→
+   193→  return { gross, belowComponent, aboveComponent };
+   194→}
+   195→
+   196→/** Merge salary records by employee, combining standard + premium tiers */
+   197→function mergeSalaryRecords(records: SalaryRecord[]): MergedEmployee[] {
+   198→  const empMap = new Map<string, SalaryRecord[]>();
+   199→  for (const record of records) {
+   200→    const key = `${record.empId}::${record.siteId}`;
+   201→    if (!empMap.has(key)) {
+   202→      empMap.set(key, []);
+   203→    }
+   204→    empMap.get(key)!.push(record);
+   205→  }
+   206→
+   207→  const merged: MergedEmployee[] = [];
+   208→
+   209→  const sortedEntries = [...empMap.entries()].sort((a, b) => {
+   210→    const nameA = a[1][0]?.empName || '';
+   211→    const nameB = b[1][0]?.empName || '';
+   212→    return nameA.localeCompare(nameB);
+   213→  });
+   214→
+   215→  for (const [, empRecords] of sortedEntries) {
+   216→    const standardRecord = empRecords.find(r => r.rateTier === 'standard');
+   217→    const premiumRecord = empRecords.find(r => r.rateTier === 'premium');
+   218→    const baseRecord = standardRecord || premiumRecord || empRecords[0];
+   219→
+   220→    const belowThresholdHours = standardRecord?.totalHours ?? 0;
+   221→    const aboveThresholdHours = premiumRecord?.totalHours ?? 0;
+   222→    const totalHours = belowThresholdHours + aboveThresholdHours;
+   223→
+   224→    const isTeamLeader = baseRecord.employee?.isTeamLeader ?? false;
+   225→    const isSupervisor = baseRecord.employee?.isSupervisor ?? false;
+   226→    const customHourlyRate = baseRecord.employee?.customHourlyRate ?? null;
+   227→
+   228→    const { gross: grossSalary, belowComponent, aboveComponent } = computeGrossSalary(
+   229→      belowThresholdHours,
+   230→      aboveThresholdHours,
+   231→      isTeamLeader,
+   232→      isSupervisor,
+   233→      customHourlyRate,
+   234→    );
+   235→
+   236→    const deduction = standardRecord?.deduction ?? 0;
+   237→    const advance = standardRecord?.advance ?? 0;
+   238→    const isPaid = (standardRecord?.isPaid ?? false) || (premiumRecord?.isPaid ?? false);
+   239→
+   240→    let rateTier: 'standard' | 'premium' | 'split' = 'standard';
+   241→    if (standardRecord && premiumRecord) {
+   242→      rateTier = 'split';
+   243→    } else if (premiumRecord && !standardRecord) {
+   244→      rateTier = 'premium';
+   245→    }
+   246→
+   247→    merged.push({
+   248→      empId: baseRecord.empId,
+   249→      empName: baseRecord.empName,
+   250→      employeeCode: baseRecord.employeeCode || baseRecord.employee?.employeeId || '',
+   251→      nationality: baseRecord.nationality || baseRecord.employee?.nationality || '',
+   252→      trade: baseRecord.trade || baseRecord.employee?.trade || '',
+   253→      siteId: baseRecord.siteId,
+   254→      siteName: baseRecord.siteName,
+   255→      belowThresholdHours,
+   256→      aboveThresholdHours,
+   257→      totalHours,
+   258→      isTeamLeader,
+   259→      isSupervisor,
+   260→      customHourlyRate,
+   261→      grossSalary,
+   262→      belowSalaryComponent: belowComponent,
+   263→      aboveSalaryComponent: aboveComponent,
+   264→      deduction,
+   265→      advance,
+   266→      balanceSalary: grossSalary - deduction - advance,
+   267→      isPaid,
+   268→      rateTier,
+   269→      standardRecordId: standardRecord?.id ?? null,
+   270→      premiumRecordId: premiumRecord?.id ?? null,
+   271→    });
+   272→  }
+   273→
+   274→  return merged;
+   275→}
+   276→
+   277→/* ───────── Metric Card ───────── */
+   278→interface MetricCardProps {
+   279→  title: string;
+   280→  value: number | null;
+   281→  icon: React.ElementType;
+   282→  color: string;
+   283→  bgColor: string;
+   284→  format?: 'number' | 'currency' | 'hours';
+   285→  loading?: boolean;
+   286→  subtitle?: string;
+   287→}
+   288→
+   289→function MetricCard({ title, value, icon: Icon, color, bgColor, format = 'number', loading, subtitle }: MetricCardProps) {
+   290→  const displayValue = useMemo(() => {
+   291→    if (value === null) return null;
+   292→    switch (format) {
+   293→      case 'currency':
+   294→        return `SAR ${formatCurrency(value)}`;
+   295→      case 'hours':
+   296→        return formatHours(value);
+   297→      default:
+   298→        return value.toLocaleString();
+   299→    }
+   300→  }, [value, format]);
+   301→
+   302→  return (
+   303→    <Card className="bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 transition-colors py-4">
+   304→      <CardHeader className="flex flex-row items-center justify-between pb-2 px-4">
+   305→        <CardTitle className="text-sm font-medium text-slate-400">
+   306→          {title}
+   307→        </CardTitle>
+   308→        <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', bgColor)}>
+   309→          <Icon className={cn('h-4 w-4', color)} />
+   310→        </div>
+   311→      </CardHeader>
+   312→      <CardContent className="px-4 pt-0">
+   313→        {loading || displayValue === null ? (
+   314→          <Skeleton className="h-8 w-24 bg-slate-700" />
+   315→        ) : (
+   316→          <div className="text-2xl font-bold text-white">{displayValue}</div>
+   317→        )}
+   318→        {subtitle && (
+   319→          <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
+   320→        )}
+   321→      </CardContent>
+   322→    </Card>
+   323→  );
+   324→}
+   325→
+   326→/* ───────── Main Component ───────── */
+   327→export function ConsolidatedSalaryPage() {
+   328→  const now = new Date();
+   329→  const [month, setMonth] = useState(String(now.getMonth() + 1));
+   330→  const [year, setYear] = useState(String(now.getFullYear()));
+   331→  const [loading, setLoading] = useState(true);
+   332→  const [siteSummaries, setSiteSummaries] = useState<SiteSummary[]>([]);
+   333→  const [totals, setTotals] = useState<Totals | null>(null);
+   334→  const [hasData, setHasData] = useState(true);
+   335→  const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set());
+   336→  const [fetchKey, setFetchKey] = useState(0); // DB-first invalidation key
+   337→
+   338→  const yearOptions = useMemo(() => {
+   339→    const currentYear = now.getFullYear();
+   340→    return [
+   341→      String(currentYear - 2),
+   342→      String(currentYear - 1),
+   343→      String(currentYear),
+   344→      String(currentYear + 1),
+   345→    ];
+   346→  }, []);
+   347→
+   348→  /* ── Fetch salary data with DB-first invalidation ── */
+   349→  const fetchSalaryData = useCallback(async (m: string, y: string) => {
+   350→    try {
+   351→      setLoading(true);
+   352→      const monthStr = `${y}-${m.padStart(2, '0')}`;
+   353→      // Add cache-busting timestamp to ensure fresh DB data
+   354→      const cacheBuster = `&_t=${Date.now()}`;
+   355→      const res = await fetch(`/api/salary-records?month=${monthStr}&year=${y}${cacheBuster}`, {
+   356→        cache: 'no-store',
+   357→        headers: {
+   358→          'Cache-Control': 'no-cache',
+   359→          'Pragma': 'no-cache',
+   360→        },
+   361→      });
+   362→      const json = await res.json();
+   363→      if (json.success) {
+   364→        setSiteSummaries(json.data.siteSummaries || []);
+   365→        setTotals(json.data.totals || null);
+   366→        setHasData((json.data.records || []).length > 0);
+   367→      } else {
+   368→        setSiteSummaries([]);
+   369→        setTotals(null);
+   370→        setHasData(false);
+   371→      }
+   372→    } catch {
+   373→      setSiteSummaries([]);
+   374→      setTotals(null);
+   375→      setHasData(false);
+   376→    } finally {
+   377→      setLoading(false);
+   378→    }
+   379→  }, []);
+   380→
+   381→  useEffect(() => {
+   382→    fetchSalaryData(month, year);
+   383→  }, [month, year, fetchSalaryData, fetchKey]);
+   384→
+   385→  /* ── Toggle site expansion ── */
+   386→  const toggleSiteExpand = useCallback((siteId: string) => {
+   387→    setExpandedSites((prev) => {
+   388→      const next = new Set(prev);
+   389→      if (next.has(siteId)) {
+   390→        next.delete(siteId);
+   391→      } else {
+   392→        next.add(siteId);
+   393→      }
+   394→      return next;
+   395→    });
+   396→  }, []);
+   397→
+   398→  /* ── Refresh data (DB-first invalidation) ── */
+   399→  const refreshData = useCallback(() => {
+   400→    setFetchKey(k => k + 1);
+   401→  }, []);
+   402→
+   403→  /* ── Month/Year display label ── */
+   404→  const monthLabel = MONTHS.find((m) => m.value === month)?.label || '';
+   405→
+   406→  /* ── Merge employees for expanded view ── */
+   407→  const mergedEmployeesBySite = useMemo(() => {
+   408→    const result: Record<string, MergedEmployee[]> = {};
+   409→    for (const site of siteSummaries) {
+   410→      result[site.siteId] = mergeSalaryRecords(site.employees);
+   411→    }
+   412→    return result;
+   413→  }, [siteSummaries]);
+   414→
+   415→  /* ── Summary metrics config ── */
+   416→  const metrics: MetricCardProps[] = useMemo(() => [
+   417→    {
+   418→      title: 'Total Sites',
+   419→      value: totals?.totalSites ?? null,
+   420→      icon: Building2,
+   421→      color: 'text-blue-400',
+   422→      bgColor: 'bg-blue-500/10',
+   423→      loading,
+   424→      subtitle: `${monthLabel} ${year}`,
+   425→    },
+   426→    {
+   427→      title: 'Total Employees',
+   428→      value: totals?.totalEmployees ?? null,
+   429→      icon: Users,
+   430→      color: 'text-green-400',
+   431→      bgColor: 'bg-green-500/10',
+   432→      loading,
+   433→      subtitle: `${monthLabel} ${year}`,
+   434→    },
+   435→    {
+   436→      title: 'Below Threshold Hrs',
+   437→      value: totals?.totalBelowThresholdHours ?? null,
+   438→      icon: Clock,
+   439→      color: 'text-cyan-400',
+   440→      bgColor: 'bg-cyan-500/10',
+   441→      format: 'hours',
+   442→      loading,
+   443→      subtitle: `${monthLabel} ${year}`,
+   444→    },
+   445→    {
+   446→      title: 'Above Threshold Hrs',
+   447→      value: totals?.totalAboveThresholdHours ?? null,
+   448→      icon: ArrowUpRight,
+   449→      color: 'text-amber-400',
+   450→      bgColor: 'bg-amber-500/10',
+   451→      format: 'hours',
+   452→      loading,
+   453→      subtitle: `${monthLabel} ${year}`,
+   454→    },
+   455→    {
+   456→      title: 'Gross Salary',
+   457→      value: totals?.totalGrossSalary ?? null,
+   458→      icon: DollarSign,
+   459→      color: 'text-emerald-400',
+   460→      bgColor: 'bg-emerald-500/10',
+   461→      format: 'currency',
+   462→      loading,
+   463→      subtitle: `Direct rates`,
+   464→    },
+   465→    {
+   466→      title: 'Total Deductions',
+   467→      value: totals?.totalDeductions ?? null,
+   468→      icon: TrendingDown,
+   469→      color: 'text-red-400',
+   470→      bgColor: 'bg-red-500/10',
+   471→      format: 'currency',
+   472→      loading,
+   473→      subtitle: `${monthLabel} ${year}`,
+   474→    },
+   475→    {
+   476→      title: 'Net Balance',
+   477→      value: totals?.netBalance ?? null,
+   478→      icon: Wallet,
+   479→      color: 'text-purple-400',
+   480→      bgColor: 'bg-purple-500/10',
+   481→      format: 'currency',
+   482→      loading,
+   483→      subtitle: `${monthLabel} ${year}`,
+   484→    },
+   485→  ], [totals, loading, monthLabel, year]);
+   486→
+   487→  /* ── Role badge for employee ── */
+   488→  const RoleBadge = ({ emp }: { emp: MergedEmployee }) => {
+   489→    if (emp.isSupervisor) {
+   490→      return (
+   491→        <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20 text-[9px] gap-0.5 px-1 py-0">
+   492→          <ShieldAlert className="h-2.5 w-2.5" />
+   493→          SUP
+   494→        </Badge>
+   495→      );
+   496→    }
+   497→    if (emp.isTeamLeader) {
+   498→      return (
+   499→        <Badge className="bg-sky-500/10 text-sky-400 border-sky-500/20 hover:bg-sky-500/20 text-[9px] gap-0.5 px-1 py-0">
+   500→          <ShieldCheck className="h-2.5 w-2.5" />
+   501→          TL
+   502→        </Badge>
+   503→      );
+   504→    }
+   505→    return null;
+   506→  };
+   507→
+   508→  return (
+   509→    <div className="flex flex-col gap-6">
+   510→      {/* Page Header */}
+   511→      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+   512→        <div>
+   513→          <h2 className="text-2xl font-bold text-white">Consolidated Salary Sheet</h2>
+   514→          <div className="flex items-center gap-2 mt-1">
+   515→            <CalendarDays className="h-4 w-4 text-emerald-400" />
+   516→            <p className="text-emerald-400 font-medium text-sm">{monthLabel} {year}</p>
+   517→          </div>
+   518→          <p className="text-slate-400 mt-1">
+   519→            Aggregated salary overview with threshold split &bull; Direct rate formula
+   520→          </p>
+   521→        </div>
+   522→        <div className="flex items-center gap-3 flex-wrap">
+   523→          <Select value={month} onValueChange={setMonth}>
+   524→            <SelectTrigger className="w-[140px] bg-slate-800 border-slate-700 text-slate-200">
+   525→              <CalendarDays className="h-4 w-4 mr-2 text-slate-400" />
+   526→              <SelectValue placeholder="Month" />
+   527→            </SelectTrigger>
+   528→            <SelectContent className="dropdown-upward bg-slate-800 border-slate-700">
+   529→              {MONTHS.map((m) => (
+   530→                <SelectItem
+   531→                  key={m.value}
+   532→                  value={m.value}
+   533→                  className="text-slate-200 focus:bg-slate-700 focus:text-white"
+   534→                >
+   535→                  {m.label}
+   536→                </SelectItem>
+   537→              ))}
+   538→            </SelectContent>
+   539→          </Select>
+   540→          <Select value={year} onValueChange={setYear}>
+   541→            <SelectTrigger className="w-[110px] bg-slate-800 border-slate-700 text-slate-200">
+   542→              <SelectValue placeholder="Year" />
+   543→            </SelectTrigger>
+   544→            <SelectContent className="dropdown-upward bg-slate-800 border-slate-700">
+   545→              {yearOptions.map((y) => (
+   546→                <SelectItem
+   547→                  key={y}
+   548→                  value={y}
+   549→                  className="text-slate-200 focus:bg-slate-700 focus:text-white"
+   550→                >
+   551→                  {y}
+   552→                </SelectItem>
+   553→              ))}
+   554→            </SelectContent>
+   555→          </Select>
+   556→        </div>
+   557→      </div>
+   558→
+   559→      {/* Summary Cards */}
+   560→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+   561→        {metrics.map((metric) => (
+   562→          <MetricCard key={metric.title} {...metric} />
+   563→        ))}
+   564→      </div>
+   565→
+   566→      {/* No Data Message */}
+   567→      {!loading && !hasData && (
+   568→        <Card className="bg-slate-800/50 border-slate-700/50">
+   569→          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+   570→            <AlertCircle className="h-12 w-12 text-slate-600 mb-3" />
+   571→            <p className="text-slate-400 text-lg font-medium">No salary data for this month</p>
+   572→            <p className="text-slate-500 text-sm mt-1">
+   573→              Generate salary records from the Accounts page first.
+   574→            </p>
+   575→          </CardContent>
+   576→        </Card>
+   577→      )}
+   578→
+   579→      {/* Main Table */}
+   580→      {!loading && hasData && siteSummaries.length > 0 && (
+   581→        <Card className="bg-slate-800/50 border-slate-700/50 py-4">
+   582→          <CardHeader className="px-4 flex flex-row items-center justify-between">
+   583→            <CardTitle className="text-base text-white flex items-center gap-2">
+   584→              <Building2 className="h-4 w-4 text-slate-400" />
+   585→              Site-wise Salary Summary
+   586→            </CardTitle>
+   587→            <button
+   588→              onClick={refreshData}
+   589→              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+   590→            >
+   591→              Refresh from DB
+   592→            </button>
+   593→          </CardHeader>
+   594→          <CardContent className="px-4">
+   595→            <div className="overflow-x-auto rounded-lg">
+   596→              <Table>
+   597→                <TableHeader>
+   598→                  <TableRow className="border-slate-700 hover:bg-transparent">
+   599→                    <TableHead className="text-slate-400 font-semibold w-8"></TableHead>
+   600→                    <TableHead className="text-slate-400 font-semibold">Site Name</TableHead>
+   601→                    <TableHead className="text-slate-400 font-semibold">Client</TableHead>
+   602→                    <TableHead className="text-slate-400 font-semibold text-center">Employees</TableHead>
+   603→                    <TableHead className="text-slate-400 font-semibold text-right bg-cyan-900/10">Below Threshold Hrs</TableHead>
+   604→                    <TableHead className="text-slate-400 font-semibold text-right bg-amber-900/10">Above Threshold Hrs</TableHead>
+   605→                    <TableHead className="text-slate-400 font-semibold text-right">Total Hours</TableHead>
+   606→                    <TableHead className="text-slate-400 font-semibold text-right bg-emerald-900/10">Gross Salary</TableHead>
+   607→                    <TableHead className="text-slate-400 font-semibold text-right">Deductions</TableHead>
+   608→                    <TableHead className="text-slate-400 font-semibold text-right">Advances</TableHead>
+   609→                    <TableHead className="text-slate-400 font-semibold text-right">Net Balance</TableHead>
+   610→                    <TableHead className="text-slate-400 font-semibold text-center">Paid</TableHead>
+   611→                  </TableRow>
+   612→                </TableHeader>
+   613→                <TableBody>
+   614→                  {siteSummaries.map((site) => {
+   615→                    const isExpanded = expandedSites.has(site.siteId);
+   616→                    return (
+   617→                      <React.Fragment key={site.siteId}>
+   618→                        {/* Site Summary Row */}
+   619→                        <TableRow
+   620→                          className={cn(
+   621→                            'border-slate-700/50 cursor-pointer transition-colors',
+   622→                            isExpanded
+   623→                              ? 'bg-slate-700/30 hover:bg-slate-700/40'
+   624→                              : 'hover:bg-slate-700/20'
+   625→                          )}
+   626→                          onClick={() => toggleSiteExpand(site.siteId)}
+   627→                        >
+   628→                          <TableCell className="w-8 px-2">
+   629→                            {isExpanded ? (
+   630→                              <ChevronDown className="h-4 w-4 text-slate-400" />
+   631→                            ) : (
+   632→                              <ChevronRight className="h-4 w-4 text-slate-400" />
+   633→                            )}
+   634→                          </TableCell>
+   635→                          <TableCell className="text-slate-200 font-medium">
+   636→                            <div className="flex items-center gap-2">
+   637→                              <Building2 className="h-4 w-4 text-slate-500" />
+   638→                              {site.siteName}
+   639→                            </div>
+   640→                          </TableCell>
+   641→                          <TableCell className="text-slate-400">
+   642→                            {site.clientName || '\u2014'}
+   643→                          </TableCell>
+   644→                          <TableCell className="text-slate-200 text-center font-semibold">
+   645→                            {site.employeeCount}
+   646→                          </TableCell>
+   647→                          <TableCell className="text-cyan-400 text-right font-medium bg-cyan-900/5">
+   648→                            {formatHours(site.totalBelowThresholdHours)}
+   649→                          </TableCell>
+   650→                          <TableCell className="text-amber-400 text-right font-medium bg-amber-900/5">
+   651→                            {formatHours(site.totalAboveThresholdHours)}
+   652→                          </TableCell>
+   653→                          <TableCell className="text-slate-200 text-right">
+   654→                            {formatHours(site.totalHours)}
+   655→                          </TableCell>
+   656→                          <TableCell className="text-emerald-400 text-right font-medium bg-emerald-900/5">
+   657→                            {formatCurrency(site.totalGrossSalary)}
+   658→                          </TableCell>
+   659→                          <TableCell className="text-red-400 text-right">
+   660→                            {formatCurrency(site.totalDeductions)}
+   661→                          </TableCell>
+   662→                          <TableCell className="text-amber-400 text-right">
+   663→                            {formatCurrency(site.totalAdvances)}
+   664→                          </TableCell>
+   665→                          <TableCell className={cn(
+   666→                            'text-right font-semibold',
+   667→                            site.netBalance >= 0 ? 'text-purple-400' : 'text-red-400'
+   668→                          )}>
+   669→                            {formatCurrency(site.netBalance)}
+   670→                          </TableCell>
+   671→                          <TableCell className="text-center">
+   672→                            <div className="flex items-center justify-center gap-1">
+   673→                              <span className="text-emerald-400 font-semibold">{site.paidCount}</span>
+   674→                              <span className="text-slate-500">/</span>
+   675→                              <span className="text-slate-300">{site.employeeCount}</span>
+   676→                            </div>
+   677→                          </TableCell>
+   678→                        </TableRow>
+   679→
+   680→                        {/* Expanded Employee Details */}
+   681→                        {isExpanded && (
+   682→                          <TableRow className="border-slate-700/30 bg-slate-900/50 hover:bg-transparent">
+   683→                            <TableCell colSpan={12} className="p-0">
+   684→                              <div className="px-8 py-3">
+   685→                                <div className="overflow-x-auto rounded-lg border border-slate-700/30">
+   686→                                  <Table>
+   687→                                    <TableHeader>
+   688→                                      <TableRow className="border-slate-700/30 hover:bg-transparent">
+   689→                                        <TableHead className="text-slate-500 font-medium text-xs">#</TableHead>
+   690→                                        <TableHead className="text-slate-500 font-medium text-xs">Emp Code</TableHead>
+   691→                                        <TableHead className="text-slate-500 font-medium text-xs">Name</TableHead>
+   692→                                        <TableHead className="text-slate-500 font-medium text-xs">Trade</TableHead>
+   693→                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Total Hrs</TableHead>
+   694→                                        <TableHead className="text-slate-500 font-medium text-xs text-right bg-cyan-900/10">Rate 2.5/3.0</TableHead>
+   695→                                        <TableHead className="text-slate-500 font-medium text-xs text-right bg-amber-900/10">Rate 5.0/5.5</TableHead>
+   696→                                        <TableHead className="text-slate-500 font-medium text-xs text-right bg-emerald-900/10">Salary (DHS)</TableHead>
+   697→                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Advance</TableHead>
+   698→                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Deduction</TableHead>
+   699→                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Total Salary</TableHead>
+   700→                                        <TableHead className="text-slate-500 font-medium text-xs text-center">Status</TableHead>
+   701→                                      </TableRow>
+   702→                                    </TableHeader>
+   703→                                    <TableBody>
+   704→                                      {(mergedEmployeesBySite[site.siteId] || []).map((emp, idx) => (
+   705→                                        <TableRow
+   706→                                          key={emp.empId}
+   707→                                          className={cn(
+   708→                                            'border-slate-700/20 hover:bg-slate-800/30',
+   709→                                            emp.rateTier === 'split' && 'bg-amber-500/5',
+   710→                                            emp.isPaid && emp.rateTier !== 'split' && 'bg-emerald-500/5',
+   711→                                          )}
+   712→                                        >
+   713→                                          <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
+   714→                                          <TableCell className="text-slate-400 text-xs font-mono">
+   715→                                            {emp.employeeCode}
+   716→                                          </TableCell>
+   717→                                          <TableCell className="text-slate-300 text-sm font-medium">
+   718→                                            <div className="flex items-center gap-1.5">
+   719→                                              {emp.empName}
+   720→                                              <RoleBadge emp={emp} />
+   721→                                              {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
+   722→                                                <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0">
+   723→                                                  CR
+   724→                                                </Badge>
+   725→                                              )}
+   726→                                            </div>
+   727→                                          </TableCell>
+   728→                                          <TableCell className="text-slate-400 text-xs">
+   729→                                            {emp.trade}
+   730→                                          </TableCell>
+   731→                                          <TableCell className="text-slate-300 text-xs text-right font-medium">
+   732→                                            {formatHours(emp.totalHours)}
+   733→                                          </TableCell>
+   734→                                          <TableCell className="text-cyan-400/80 text-xs text-right bg-cyan-900/5">
+   735→                                            {formatHours(emp.belowThresholdHours)}
+   736→                                          </TableCell>
+   737→                                          <TableCell className="text-amber-400/80 text-xs text-right bg-amber-900/5">
+   738→                                            {formatHours(emp.aboveThresholdHours)}
+   739→                                          </TableCell>
+   740→                                          <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5">
+   741→                                            <div className="flex flex-col items-end gap-0.5">
+   742→                                              <span className="text-[9px] text-slate-500 font-mono">
+   743→                                                {emp.customHourlyRate !== null && emp.customHourlyRate > 0 ? (
+   744→                                                  `${formatHours(emp.totalHours)} × ${emp.customHourlyRate}`
+   745→                                                ) : emp.rateTier === 'split' ? (
+   746→                                                  <>
+   747→                                                    <span className="text-emerald-500">{formatHours(emp.belowThresholdHours)} × {(emp.isTeamLeader || emp.isSupervisor) ? '3.0' : '2.5'}</span>
+   748→                                                    {' + '}
+   749→                                                    <span className="text-amber-500">{formatHours(emp.aboveThresholdHours)} × {(emp.isTeamLeader || emp.isSupervisor) ? '5.5' : '5.0'}</span>
+   750→                                                  </>
+   751→                                                ) : emp.rateTier === 'premium' ? (
+   752→                                                  `${formatHours(emp.aboveThresholdHours)} × ${(emp.isTeamLeader || emp.isSupervisor) ? '5.5' : '5.0'}`
+   753→                                                ) : (
+   754→                                                  `${formatHours(emp.belowThresholdHours)} × ${(emp.isTeamLeader || emp.isSupervisor) ? '3.0' : '2.5'}`
+   755→                                                )}
+   756→                                              </span>
+   757→                                              <span className="font-mono">
+   758→                                                = {formatCurrency(emp.grossSalary)}
+   759→                                              </span>
+   760→                                            </div>
+   761→                                          </TableCell>
+   762→                                          <TableCell className="text-amber-400/80 text-xs text-right">
+   763→                                            {formatCurrency(emp.advance)}
+   764→                                          </TableCell>
+   765→                                          <TableCell className="text-red-400/80 text-xs text-right">
+   766→                                            {formatCurrency(emp.deduction)}
+   767→                                          </TableCell>
+   768→                                          <TableCell className={cn(
+   769→                                            'text-xs text-right font-medium',
+   770→                                            emp.balanceSalary >= 0 ? 'text-slate-200' : 'text-red-400'
+   771→                                          )}>
+   772→                                            {formatCurrency(emp.balanceSalary)}
+   773→                                          </TableCell>
+   774→                                          <TableCell className="text-center">
+   775→                                            {emp.isPaid ? (
+   776→                                              <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 text-[10px] gap-1">
+   777→                                                <CheckCircle2 className="h-3 w-3" />
+   778→                                                Paid
+   779→                                              </Badge>
+   780→                                            ) : (
+   781→                                              <Badge className="bg-slate-600/20 text-slate-400 border-slate-600/30 hover:bg-slate-600/30 text-[10px] gap-1">
+   782→                                                <XCircle className="h-3 w-3" />
+   783→                                                Unpaid
+   784→                                              </Badge>
+   785→                                            )}
+   786→                                          </TableCell>
+   787→                                        </TableRow>
+   788→                                      ))}
+   789→
+   790→                                      {/* Site employee totals */}
+   791→                                      {(mergedEmployeesBySite[site.siteId] || []).length > 0 && (
+   792→                                        <TableRow className="border-slate-600/50 bg-slate-800/40 hover:bg-slate-800/40">
+   793→                                          <TableCell colSpan={4} className="text-slate-300 text-xs font-bold text-right pr-4">
+   794→                                            Site Employee Total
+   795→                                          </TableCell>
+   796→                                          <TableCell className="text-slate-200 text-xs text-right font-bold">
+   797→                                            {formatHours(
+   798→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.totalHours, 0)
+   799→                                            )}
+   800→                                          </TableCell>
+   801→                                          <TableCell className="text-cyan-400 text-xs text-right font-bold bg-cyan-900/5">
+   802→                                            {formatHours(
+   803→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.belowThresholdHours, 0)
+   804→                                            )}
+   805→                                          </TableCell>
+   806→                                          <TableCell className="text-amber-400 text-xs text-right font-bold bg-amber-900/5">
+   807→                                            {formatHours(
+   808→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.aboveThresholdHours, 0)
+   809→                                            )}
+   810→                                          </TableCell>
+   811→                                          <TableCell className="text-emerald-400 text-xs text-right font-bold bg-emerald-900/5">
+   812→                                            {formatCurrency(
+   813→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.grossSalary, 0)
+   814→                                            )}
+   815→                                          </TableCell>
+   816→                                          <TableCell className="text-amber-400 text-xs text-right font-bold">
+   817→                                            {formatCurrency(
+   818→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.advance, 0)
+   819→                                            )}
+   820→                                          </TableCell>
+   821→                                          <TableCell className="text-red-400 text-xs text-right font-bold">
+   822→                                            {formatCurrency(
+   823→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.deduction, 0)
+   824→                                            )}
+   825→                                          </TableCell>
+   826→                                          <TableCell className={cn(
+   827→                                            'text-xs text-right font-bold',
+   828→                                            (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.balanceSalary, 0) >= 0
+   829→                                              ? 'text-purple-400'
+   830→                                              : 'text-red-400'
+   831→                                          )}>
+   832→                                            {formatCurrency(
+   833→                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.balanceSalary, 0)
+   834→                                            )}
+   835→                                          </TableCell>
+   836→                                          <TableCell></TableCell>
+   837→                                        </TableRow>
+   838→                                      )}
+   839→                                    </TableBody>
+   840→                                  </Table>
+   841→                                </div>
+   842→
+   843→                                {/* Direct rate formula reference */}
+   844→                                <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-slate-500">
+   845→                                  <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
+   846→                                    Standard: below_hrs × 2.5 + above_hrs × 5.0
+   847→                                  </span>
+   848→                                  <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
+   849→                                    TL/Supervisor: below_hrs × 3.0 + above_hrs × 5.5
+   850→                                  </span>
+   851→                                  <span className="bg-violet-900/20 px-2 py-1 rounded border border-violet-700/30 text-violet-400">
+   852→                                    CR = Custom Rate override
+   853→                                  </span>
+   854→                                </div>
+   855→                              </div>
+   856→                            </TableCell>
+   857→                          </TableRow>
+   858→                        )}
+   859→                      </React.Fragment>
+   860→                    );
+   861→                  })}
+   862→
+   863→                  {/* Grand Total Row */}
+   864→                  {totals && (
+   865→                    <TableRow className="border-slate-600/50 bg-slate-800/60 hover:bg-slate-800/60">
+   866→                      <TableCell className="w-8 px-2"></TableCell>
+   867→                      <TableCell className="text-white font-bold">
+   868→                        Grand Total
+   869→                      </TableCell>
+   870→                      <TableCell></TableCell>
+   871→                      <TableCell className="text-white text-center font-bold">
+   872→                        {totals.totalEmployees}
+   873→                      </TableCell>
+   874→                      <TableCell className="text-cyan-400 text-right font-bold bg-cyan-900/5">
+   875→                        {formatHours(totals.totalBelowThresholdHours)}
+   876→                      </TableCell>
+   877→                      <TableCell className="text-amber-400 text-right font-bold bg-amber-900/5">
+   878→                        {formatHours(totals.totalAboveThresholdHours)}
+   879→                      </TableCell>
+   880→                      <TableCell className="text-white text-right font-bold">
+   881→                        {formatHours(totals.totalHours)}
+   882→                      </TableCell>
+   883→                      <TableCell className="text-emerald-400 text-right font-bold bg-emerald-900/5">
+   884→                        {formatCurrency(totals.totalGrossSalary)}
+   885→                      </TableCell>
+   886→                      <TableCell className="text-red-400 text-right font-bold">
+   887→                        {formatCurrency(totals.totalDeductions)}
+   888→                      </TableCell>
+   889→                      <TableCell className="text-amber-400 text-right font-bold">
+   890→                        {formatCurrency(totals.totalAdvances)}
+   891→                      </TableCell>
+   892→                      <TableCell className={cn(
+   893→                        'text-right font-bold',
+   894→                        totals.netBalance >= 0 ? 'text-purple-400' : 'text-red-400'
+   895→                      )}>
+   896→                        {formatCurrency(totals.netBalance)}
+   897→                      </TableCell>
+   898→                      <TableCell className="text-center">
+   899→                        <div className="flex items-center justify-center gap-1">
+   900→                          <span className="text-emerald-400 font-bold">{totals.paidCount}</span>
+   901→                          <span className="text-slate-400">/</span>
+   902→                          <span className="text-white font-bold">{totals.totalRecords}</span>
+   903→                        </div>
+   904→                      </TableCell>
+   905→                    </TableRow>
+   906→                  )}
+   907→                </TableBody>
+   908→              </Table>
+   909→            </div>
+   910→          </CardContent>
+   911→        </Card>
+   912→      )}
+   913→
+   914→      {/* Loading State */}
+   915→      {loading && (
+   916→        <Card className="bg-slate-800/50 border-slate-700/50 py-4">
+   917→          <CardHeader className="px-4">
+   918→            <CardTitle className="text-base text-white flex items-center gap-2">
+   919→              <Building2 className="h-4 w-4 text-slate-400" />
+   920→              Site-wise Salary Summary
+   921→            </CardTitle>
+   922→          </CardHeader>
+   923→          <CardContent className="px-4">
+   924→            <div className="space-y-3">
+   925→              {[1, 2, 3, 4].map((i) => (
+   926→                <Skeleton key={i} className="h-12 w-full bg-slate-700 rounded-lg" />
+   927→              ))}
+   928→            </div>
+   929→          </CardContent>
+   930→        </Card>
+   931→      )}
+   932→    </div>
+   933→  );
+   934→}
+   935→
