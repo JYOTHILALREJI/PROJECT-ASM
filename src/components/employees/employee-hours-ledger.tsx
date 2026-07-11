@@ -52,6 +52,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -215,6 +216,11 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   const [isSavingRate, setIsSavingRate] = useState(false);
   const [isEditingRate, setIsEditingRate] = useState(false);
 
+  // ── Threshold editing state ──
+  const [thresholdInput, setThresholdInput] = useState('');
+  const [isSavingThreshold, setIsSavingThreshold] = useState(false);
+  const [isEditingThreshold, setIsEditingThreshold] = useState(false);
+
   // ── Edit mode state ──
   const [isEditMode, setIsEditMode] = useState(false);
   const [editableRows, setEditableRows] = useState<EditableRow[]>([]);
@@ -270,6 +276,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
         } else {
           setCustomRateInput('');
         }
+        setThresholdInput(String(json.data.employeeInfo.hoursThreshold || 1000));
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to load work logs', variant: 'destructive' });
       }
@@ -550,6 +557,68 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
       toast({ title: 'Error', description: 'Failed to clear custom rate', variant: 'destructive' });
     } finally {
       setIsSavingRate(false);
+    }
+  };
+
+  // ── Save custom threshold ──
+  const handleSaveThreshold = async () => {
+    const thresholdValue = thresholdInput.trim();
+    const numericThreshold = thresholdValue ? parseFloat(thresholdValue) : 1000;
+
+    if (isNaN(numericThreshold) || numericThreshold <= 0) {
+      toast({ title: 'Invalid Threshold', description: 'Please enter a valid positive number.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingThreshold(true);
+    try {
+      const res = await fetch(`/api/employees/${employeeId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hoursThreshold: numericThreshold }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: 'Threshold Updated',
+          description: `Hours threshold set to ${numericThreshold}h. Rate tiers will recalculate accordingly.`,
+        });
+        setIsEditingThreshold(false);
+        await fetchWorkLogs();
+        await fetchEmployeeDetails();
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to update threshold', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to save threshold', variant: 'destructive' });
+    } finally {
+      setIsSavingThreshold(false);
+    }
+  };
+
+  // ── Reset threshold to default (1000) ──
+  const handleResetThreshold = async () => {
+    setIsSavingThreshold(true);
+    try {
+      const res = await fetch(`/api/employees/${employeeId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hoursThreshold: 1000 }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: 'Threshold Reset', description: 'Hours threshold reset to default (1000h).' });
+        setThresholdInput('1000');
+        setIsEditingThreshold(false);
+        await fetchWorkLogs();
+        await fetchEmployeeDetails();
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to reset threshold', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to reset threshold', variant: 'destructive' });
+    } finally {
+      setIsSavingThreshold(false);
     }
   };
 
@@ -851,6 +920,95 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                         <X className="h-3 w-3" />
                       </Button>
                     )}
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Custom Threshold Configuration */}
+          <Card className="bg-slate-800/50 border-slate-700/50 w-full sm:w-auto">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <TrendingUp className="h-4 w-4 text-amber-400 shrink-0" />
+                <span className="text-sm text-slate-300 whitespace-nowrap">Threshold:</span>
+
+                {employeeInfo && !isEditingThreshold && (
+                  <>
+                    <Badge className={cn(
+                      'border',
+                      employeeInfo.hoursThreshold !== 1000
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/25'
+                        : 'bg-slate-600/20 text-slate-300 border-slate-500/25',
+                    )}>
+                      {employeeInfo.hoursThreshold}h
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setIsEditingThreshold(true);
+                        setThresholdInput(String(employeeInfo.hoursThreshold));
+                      }}
+                      className="h-7 text-xs text-slate-400 hover:text-white"
+                    >
+                      Edit
+                    </Button>
+                    {employeeInfo.hoursThreshold !== 1000 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleResetThreshold}
+                        disabled={isSavingThreshold}
+                        className="h-7 text-xs text-red-400 hover:text-red-300"
+                      >
+                        {isSavingThreshold ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Reset'}
+                      </Button>
+                    )}
+                  </>
+                )}
+
+                {employeeInfo && isEditingThreshold && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        step="50"
+                        min="1"
+                        placeholder="e.g. 1000"
+                        value={thresholdInput}
+                        onChange={(e) => setThresholdInput(e.target.value)}
+                        className="w-24 h-8 text-sm bg-slate-900 border-slate-600"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveThreshold();
+                          if (e.key === 'Escape') {
+                            setIsEditingThreshold(false);
+                            setThresholdInput(String(employeeInfo.hoursThreshold));
+                          }
+                        }}
+                      />
+                      <span className="text-xs text-slate-500">hours</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={handleSaveThreshold}
+                      disabled={isSavingThreshold}
+                      className="h-8 text-xs bg-amber-600 hover:bg-amber-700"
+                    >
+                      {isSavingThreshold ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
+                      Save
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setIsEditingThreshold(false);
+                        setThresholdInput(String(employeeInfo.hoursThreshold));
+                      }}
+                      className="h-8 text-xs text-slate-400"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </>
                 )}
               </div>
