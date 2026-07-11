@@ -209,6 +209,63 @@ export async function GET(request: NextRequest) {
       },
     })) as unknown as RawRecord[];
 
+    // ── Merge pending advances into the records ──
+    // Same logic as /api/salary-records and /api/accounts — see those files
+    // for detailed comments. This keeps the Excel export consistent with the
+    // on-screen salary sheet.
+    {
+      const pendingAdvances = await db.advance.findMany({
+        where: {
+          effectiveMonth: month,
+          effectiveYear: yearNum,
+          status: 'pending',
+          deletedAt: null,
+        },
+      });
+
+      if (pendingAdvances.length > 0 && records.length > 0) {
+        const pendingByEmp = new Map<string, number>();
+        for (const a of pendingAdvances) {
+          pendingByEmp.set(a.empId, (pendingByEmp.get(a.empId) || 0) + a.amount);
+        }
+
+        const appliedEmps = new Set<string>();
+        // First pass: standard-tier records
+        for (let i = 0; i < records.length; i++) {
+          const r = records[i];
+          const pending = pendingByEmp.get(r.empId);
+          if (pending === undefined) continue;
+          if (appliedEmps.has(r.empId)) continue;
+          if (r.rateTier !== 'standard') continue;
+
+          const newAdvance = r.advance + pending;
+          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          records[i] = {
+            ...r,
+            advance: newAdvance,
+            balanceSalary: newBalance,
+          };
+          appliedEmps.add(r.empId);
+        }
+        // Second pass: fallback for employees with no standard-tier record
+        for (let i = 0; i < records.length; i++) {
+          const r = records[i];
+          if (appliedEmps.has(r.empId)) continue;
+          const pending = pendingByEmp.get(r.empId);
+          if (pending === undefined) continue;
+
+          const newAdvance = r.advance + pending;
+          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          records[i] = {
+            ...r,
+            advance: newAdvance,
+            balanceSalary: newBalance,
+          };
+          appliedEmps.add(r.empId);
+        }
+      }
+    }
+
     // Group by site
     const siteMap = new Map<string, RawRecord[]>();
     for (const record of records) {

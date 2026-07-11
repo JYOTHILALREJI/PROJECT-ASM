@@ -121,35 +121,58 @@ export async function POST(request: NextRequest) {
       const targetRecord =
         salaryRecords.find((r) => r.rateTier === 'standard') || salaryRecords[0];
 
-      const newAdvance = targetRecord.advance + advance.amount;
-      const newBalance = targetRecord.totalSalary - targetRecord.deduction - newAdvance;
+      // Check if the pending advance has already been merged into the salary
+      // record's advance field (by /api/accounts + a save). If so, just mark
+      // as applied without modifying the advance field (avoids double-count).
+      if (targetRecord.advance >= advance.amount - 0.01) {
+        const updatedAdvance = await db.advance.update({
+          where: { id: advance.id },
+          data: {
+            status: 'applied',
+            appliedToSalaryRecordId: targetRecord.id,
+          },
+        });
 
-      const updatedRecord = await db.salaryRecord.update({
-        where: { id: targetRecord.id },
-        data: {
-          advance: newAdvance,
-          balanceSalary: newBalance,
-        },
-      });
-
-      // Mark the advance as applied
-      const updatedAdvance = await db.advance.update({
-        where: { id: advance.id },
-        data: {
+        appliedCount++;
+        results.push({
+          advanceId: updatedAdvance.id,
+          empId: updatedAdvance.empId,
+          empName: updatedAdvance.empName,
+          amount: updatedAdvance.amount,
+          salaryRecordId: targetRecord.id,
           status: 'applied',
-          appliedToSalaryRecordId: updatedRecord.id,
-        },
-      });
+        });
+      } else {
+        // Not merged — add the pending amount to the advance field
+        const newAdvance = targetRecord.advance + advance.amount;
+        const newBalance = targetRecord.totalSalary - targetRecord.deduction - newAdvance;
 
-      appliedCount++;
-      results.push({
-        advanceId: updatedAdvance.id,
-        empId: updatedAdvance.empId,
-        empName: updatedAdvance.empName,
-        amount: updatedAdvance.amount,
-        salaryRecordId: updatedRecord.id,
-        status: 'applied',
-      });
+        const updatedRecord = await db.salaryRecord.update({
+          where: { id: targetRecord.id },
+          data: {
+            advance: newAdvance,
+            balanceSalary: newBalance,
+          },
+        });
+
+        const updatedAdvance = await db.advance.update({
+          where: { id: advance.id },
+          data: {
+            status: 'applied',
+            appliedToSalaryRecordId: updatedRecord.id,
+          },
+        });
+
+        appliedCount++;
+        results.push({
+          advanceId: updatedAdvance.id,
+          empId: updatedAdvance.empId,
+          empName: updatedAdvance.empName,
+          amount: updatedAdvance.amount,
+          salaryRecordId: updatedRecord.id,
+          status: 'applied',
+        });
+      }
     }
 
     return NextResponse.json({

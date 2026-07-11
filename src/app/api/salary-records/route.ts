@@ -51,6 +51,76 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    // ── Merge pending advances into the records ──
+    // For each pending advance with effectiveMonth === month and effectiveYear === yearNum,
+    // add its amount to the corresponding standard-tier salary record's `advance` field,
+    // and recompute `balanceSalary = totalSalary − deduction − advance`.
+    //
+    // This makes the salary sheet and consolidated view show pending advances
+    // immediately, before the user clicks "Save All" on the Accounts page
+    // (which would otherwise persist these values via the bulk-save route).
+    //
+    // We merge in-memory here (NOT writing to DB) so the display always reflects
+    // the latest pending advances. The actual DB write happens in bulk-save.
+    {
+      const pendingAdvances = await db.advance.findMany({
+        where: {
+          effectiveMonth: month,
+          effectiveYear: yearNum,
+          status: 'pending',
+          deletedAt: null,
+        },
+      });
+
+      if (pendingAdvances.length > 0) {
+        // Group pending advances by empId
+        const pendingByEmp = new Map<string, number>();
+        for (const a of pendingAdvances) {
+          pendingByEmp.set(a.empId, (pendingByEmp.get(a.empId) || 0) + a.amount);
+        }
+
+        // Apply to records (prefer standard-tier record per empId)
+        // We need to be careful: an employee may have multiple records across
+        // multiple sites for the same month. To avoid double-counting, we apply
+        // the pending advance to the FIRST standard-tier record encountered per
+        // empId (matching what the bulk-save route does).
+        const appliedEmps = new Set<string>();
+        for (let i = 0; i < records.length; i++) {
+          const r = records[i];
+          const pending = pendingByEmp.get(r.empId);
+          if (pending === undefined) continue;
+          if (appliedEmps.has(r.empId)) continue;
+          if (r.rateTier !== 'standard') continue;
+
+          const newAdvance = r.advance + pending;
+          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          records[i] = {
+            ...r,
+            advance: newAdvance,
+            balanceSalary: newBalance,
+          };
+          appliedEmps.add(r.empId);
+        }
+
+        // For employees with no standard-tier record, apply to the first record
+        for (let i = 0; i < records.length; i++) {
+          const r = records[i];
+          if (appliedEmps.has(r.empId)) continue;
+          const pending = pendingByEmp.get(r.empId);
+          if (pending === undefined) continue;
+
+          const newAdvance = r.advance + pending;
+          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          records[i] = {
+            ...r,
+            advance: newAdvance,
+            balanceSalary: newBalance,
+          };
+          appliedEmps.add(r.empId);
+        }
+      }
+    }
+
     // If no siteId filter, also compute site summaries for consolidated view
     let siteSummaries: Array<{
       siteId: string;

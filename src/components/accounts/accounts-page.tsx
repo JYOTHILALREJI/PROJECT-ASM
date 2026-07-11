@@ -311,8 +311,9 @@ export function AccountsPage() {
   // Original data for reverting
   const [originalSiteEmployees, setOriginalSiteEmployees] = useState<Record<string, MergedEmployeeRow[]>>({});
 
-  // Pending advances for this month — map of empId -> total pending amount
-  const [pendingAdvancesByEmp, setPendingAdvancesByEmp] = useState<Map<string, number>>(new Map());
+  // Total pending advances for the current month — used only for the badge on
+  // the "Advance" button. Individual advance amounts are merged into the salary
+  // records server-side by /api/accounts.
   const [totalPendingAdvances, setTotalPendingAdvances] = useState(0);
 
   const yearOptions = useMemo(() => {
@@ -364,54 +365,26 @@ export function AccountsPage() {
     fetchData();
   }, [fetchData]);
 
-  // Fetch pending advances for the selected month and merge them into the
-  // employee rows as the "advance" field (only when NOT in edit mode, so
-  // editing doesn't fight with the auto-merge).
+  // Fetch the total pending advances count for the badge on the "Advance" button.
+  // The actual advance amounts are already merged into the salary records by the
+  // /api/accounts route (server-side), so we don't overlay them client-side anymore —
+  // this avoids the edit-mode bug where the overlay was lost when entering edit mode.
   useEffect(() => {
     const fetchPendingAdvances = async () => {
       try {
         const res = await fetch(`/api/advances/pending-by-month?month=${monthStr}&year=${selectedYear}`);
         const data = await res.json();
         if (data.success) {
-          const byEmp = new Map<string, number>();
-          for (const item of (data.data.byEmployee || []) as Array<{ empId: string; total: number }>) {
-            byEmp.set(item.empId, item.total);
-          }
-          setPendingAdvancesByEmp(byEmp);
           setTotalPendingAdvances(data.data.totalPending || 0);
-
-          // Merge pending advances into employee rows (only when not in edit mode)
-          // — for each row, set advance = max(saved advance, pending advance total).
-          // This ensures the salary sheet shows the latest pending advance even
-          // before the salary record is saved.
-          if (!editMode) {
-            setSiteEmployees((prev) => {
-              const next: Record<string, MergedEmployeeRow[]> = {};
-              for (const [siteId, emps] of Object.entries(prev)) {
-                next[siteId] = emps.map((emp) => {
-                  const pendingAmt = byEmp.get(emp.empId) || 0;
-                  // Use whichever is larger: existing saved advance or pending total
-                  // (the saved value already includes applied advances; pending ones
-                  //  will be applied on the next save).
-                  const effectiveAdvance = Math.max(emp.advance, pendingAmt);
-                  const newBalance = emp.totalSalary - emp.deduction - effectiveAdvance;
-                  return { ...emp, advance: effectiveAdvance, balanceSalary: newBalance };
-                });
-              }
-              return next;
-            });
-          }
         } else {
-          setPendingAdvancesByEmp(new Map());
           setTotalPendingAdvances(0);
         }
       } catch {
-        setPendingAdvancesByEmp(new Map());
         setTotalPendingAdvances(0);
       }
     };
     fetchPendingAdvances();
-  }, [monthStr, selectedYear, editMode]);
+  }, [monthStr, selectedYear]);
 
   // Reset edit mode when month/year changes
   useEffect(() => {

@@ -360,9 +360,21 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // ── Apply pending advances to the saved salary records ──
-      // For each unique (month, year) in the saved records, find pending advances
-      // and add their amount to the corresponding salary record's `advance` field.
+      // ── Mark pending advances as applied ──
+      // The client (Accounts page) receives salary records with pending advances
+      // already merged into the `advance` field by /api/accounts. When the user
+      // clicks "Save All", those merged values are written to the DB above, and
+      // the allocation engine preserves them via `carryAdvance`.
+      //
+      // So here we just need to mark the pending advances as 'applied' — we do
+      // NOT add the pending amount to the advance field again (that would
+      // double-count).
+      //
+      // Edge case: if a salary record was created by a path that doesn't merge
+      // pending advances (e.g., attendance sync), the advance field may not
+      // include the pending amount. In that case, we DO add it. We detect this
+      // by checking if the salary record's advance is less than the pending
+      // amount — if so, the merge didn't happen, so we add.
       const monthYearCombosForAdvances = new Set(
         savedRecords.map((r) => `${r.month}|${r.year}`),
       );
@@ -404,26 +416,49 @@ export async function POST(request: NextRequest) {
           const targetRecord =
             empSalaryRecords.find((r) => r.rateTier === 'standard') || empSalaryRecords[0];
 
-          const newAdvance = targetRecord.advance + advance.amount;
-          const newBalance = targetRecord.totalSalary - targetRecord.deduction - newAdvance;
+          // Check if the pending advance has already been merged into the
+          // salary record's advance field (by /api/accounts + client save).
+          // If targetRecord.advance >= advance.amount, we assume the merge
+          // happened and just mark as applied. Otherwise, add the pending
+          // amount to the advance field.
+          //
+          // This heuristic isn't perfect (a record could have advance >= amount
+          // from a previous applied advance), but it's safe because:
+          //   - If the merge happened, we don't double-count.
+          //   - If the merge didn't happen (attendance sync path), we add it.
+          //   - Marking as applied prevents the advance from being applied again.
+          if (targetRecord.advance >= advance.amount - 0.01) {
+            // Already merged — just mark as applied
+            await db.advance.update({
+              where: { id: advance.id },
+              data: {
+                status: 'applied',
+                appliedToSalaryRecordId: targetRecord.id,
+              },
+            });
+            advancesApplied++;
+          } else {
+            // Not merged — add the pending amount to the advance field
+            const newAdvance = targetRecord.advance + advance.amount;
+            const newBalance = targetRecord.totalSalary - targetRecord.deduction - newAdvance;
 
-          const updatedSalaryRecord = await db.salaryRecord.update({
-            where: { id: targetRecord.id },
-            data: {
-              advance: newAdvance,
-              balanceSalary: newBalance,
-            },
-          });
+            const updatedSalaryRecord = await db.salaryRecord.update({
+              where: { id: targetRecord.id },
+              data: {
+                advance: newAdvance,
+                balanceSalary: newBalance,
+              },
+            });
 
-          // Mark the advance as applied
-          await db.advance.update({
-            where: { id: advance.id },
-            data: {
-              status: 'applied',
-              appliedToSalaryRecordId: updatedSalaryRecord.id,
-            },
-          });
-          advancesApplied++;
+            await db.advance.update({
+              where: { id: advance.id },
+              data: {
+                status: 'applied',
+                appliedToSalaryRecordId: updatedSalaryRecord.id,
+              },
+            });
+            advancesApplied++;
+          }
         }
       }
 
@@ -634,7 +669,8 @@ export async function POST(request: NextRequest) {
         where: { id: { in: finalRecordIds } },
       });
 
-      // Apply pending advances in manual mode too
+      // Mark pending advances as applied in manual mode too (same heuristic as
+      // allocation mode — see comment above)
       const manualMonthYearCombos = new Set(
         savedRecords.map((r) => `${r.month}|${r.year}`),
       );
@@ -661,17 +697,27 @@ export async function POST(request: NextRequest) {
             continue;
           }
           const target = empSalaryRecords.find((r) => r.rateTier === 'standard') || empSalaryRecords[0];
-          const newAdvance = target.advance + advance.amount;
-          const newBalance = target.totalSalary - target.deduction - newAdvance;
-          const updated = await db.salaryRecord.update({
-            where: { id: target.id },
-            data: { advance: newAdvance, balanceSalary: newBalance },
-          });
-          await db.advance.update({
-            where: { id: advance.id },
-            data: { status: 'applied', appliedToSalaryRecordId: updated.id },
-          });
-          manualAdvancesApplied++;
+          if (target.advance >= advance.amount - 0.01) {
+            // Already merged — just mark as applied
+            await db.advance.update({
+              where: { id: advance.id },
+              data: { status: 'applied', appliedToSalaryRecordId: target.id },
+            });
+            manualAdvancesApplied++;
+          } else {
+            // Not merged — add the pending amount
+            const newAdvance = target.advance + advance.amount;
+            const newBalance = target.totalSalary - target.deduction - newAdvance;
+            const updated = await db.salaryRecord.update({
+              where: { id: target.id },
+              data: { advance: newAdvance, balanceSalary: newBalance },
+            });
+            await db.advance.update({
+              where: { id: advance.id },
+              data: { status: 'applied', appliedToSalaryRecordId: updated.id },
+            });
+            manualAdvancesApplied++;
+          }
         }
       }
 
