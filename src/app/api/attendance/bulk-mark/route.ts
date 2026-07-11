@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
+import { captureAttendanceVersion } from '@/lib/attendance-version';
 
 // POST /api/attendance/bulk-mark - Mark employees as present for a specific date
 // If employeeIds array is provided, only mark those employees.
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     const employees = await db.employee.findMany({
       where: whereClause,
-      select: { id: true, fullName: true, employeeId: true, rating: true },
+      select: { id: true, fullName: true, employeeId: true, rating: true, currentSite: true, currentSiteId: true },
     });
 
     if (employees.length === 0) {
@@ -96,6 +97,34 @@ export async function POST(request: NextRequest) {
     const updated = results.filter((r) => r.updated).length;
     const skipped = results.filter((r) => r.skipped).length;
 
+    // ── Capture one attendance version per affected site ──
+    // Bulk-mark may have touched employees across multiple sites, so group the
+    // updated employees by their currentSiteId and capture one version per site.
+    const updatedEmps = employees.filter((e) => results.some((r) => r.employeeId === e.id && r.updated));
+    const bySite = new Map<string, { siteId: string; siteName: string }>();
+    for (const emp of updatedEmps) {
+      if (!emp.currentSiteId || !emp.currentSite) continue;
+      if (!bySite.has(emp.currentSiteId)) {
+        bySite.set(emp.currentSiteId, { siteId: emp.currentSiteId, siteName: emp.currentSite });
+      }
+    }
+    const versionCaptures: Array<{ siteId: string; siteName: string; versionNumber: number }> = [];
+    for (const [, { siteId, siteName }] of bySite) {
+      try {
+        const v = await captureAttendanceVersion({
+          siteId,
+          siteName,
+          date,
+          source: 'bulk_mark',
+          changedByName: 'Admin (bulk mark)',
+          summary: `Bulk marked ${updatedEmps.filter((e) => e.currentSiteId === siteId).length} employee(s) as ${status}`,
+        });
+        if (v) versionCaptures.push({ siteId, siteName, versionNumber: v.versionNumber });
+      } catch (err) {
+        console.error('[bulk-mark] version capture failed for', siteId, err);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -105,6 +134,7 @@ export async function POST(request: NextRequest) {
         updated,
         skipped,
         errors: errors.length > 0 ? errors : undefined,
+        versionCaptures,
       },
     });
   } catch (error: unknown) {

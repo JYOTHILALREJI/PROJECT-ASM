@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
+import { captureAttendanceVersion } from '@/lib/attendance-version';
 
 // Calculate total working days in a month (excluding Fridays)
 function getWorkingDaysInMonth(year: number, month: number): number {
@@ -274,6 +275,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Capture an attendance version snapshot ──
+    // After every attendance write from the website, capture a version so the
+    // Attendance Copy page can show the change in the version history.
+    let versionCapture: { id: string; versionNumber: number; entryCount: number } | null = null;
+    if (employee.currentSiteId) {
+      try {
+        versionCapture = await captureAttendanceVersion({
+          siteId: employee.currentSiteId,
+          siteName: employee.currentSite || '',
+          date,
+          source: 'website',
+          changedByName: 'Admin (website)',
+          summary: `Marked ${employee.fullName} as ${status}${status === 'overtime' && overtimeHours ? ` (${overtimeHours}h OT)` : ''}`,
+        });
+      } catch (err) {
+        console.error('[attendance POST] version capture failed:', err);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -289,6 +309,13 @@ export async function POST(request: NextRequest) {
               skipped: salarySync.skipped,
               totalHours: salarySync.totalHours,
               reason: salarySync.reason || undefined,
+            }
+          : null,
+        versionCapture: versionCapture
+          ? {
+              id: versionCapture.id,
+              versionNumber: versionCapture.versionNumber,
+              entryCount: versionCapture.entryCount,
             }
           : null,
       },

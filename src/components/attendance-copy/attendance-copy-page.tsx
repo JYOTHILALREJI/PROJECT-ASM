@@ -17,6 +17,11 @@ import {
   ChevronDown,
   ChevronRight,
   Users,
+  History,
+  RotateCcw,
+  Globe,
+  Share2,
+  Layers,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,6 +29,15 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { useAuthStore } from '@/store/auth-store';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -45,12 +59,50 @@ interface SiteGroup {
   shares: ShareEntry[];
 }
 
+interface VersionSnapshotEntry {
+  employeeId: string;
+  fullName: string;
+  employeeCode: string;
+  status: 'present' | 'absent' | 'no_site' | 'overtime' | 'not_marked';
+  overtimeHours: number | null;
+}
+
+interface AttendanceVersion {
+  id: string;
+  siteId: string;
+  siteName: string;
+  date: string;
+  versionNumber: number;
+  source: string;
+  shareToken: string | null;
+  changedById: string | null;
+  changedByName: string | null;
+  summary: string;
+  createdAt: string;
+  snapshot: VersionSnapshotEntry[];
+}
+
 /* ───────── Helpers ───────── */
 
 const STATUS_CONFIG: Record<ShareEntry['status'], { label: string; color: string; icon: React.ElementType }> = {
   open: { label: 'Open', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', icon: Clock },
   submitted: { label: 'Submitted', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', icon: CheckCircle2 },
   expired: { label: 'Expired', color: 'bg-slate-500/15 text-slate-400 border-slate-500/30', icon: XCircle },
+};
+
+const VERSION_SOURCE_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  website: { label: 'Website', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30', icon: Globe },
+  share_link: { label: 'Share Link', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', icon: Share2 },
+  bulk_mark: { label: 'Bulk Mark', color: 'bg-violet-500/15 text-violet-400 border-violet-500/30', icon: Layers },
+  restore: { label: 'Restored', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', icon: RotateCcw },
+};
+
+const ATTENDANCE_STATUS_CONFIG: Record<string, { label: string; short: string; color: string }> = {
+  present: { label: 'Present', short: 'P', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
+  absent: { label: 'Absent', short: 'A', color: 'bg-red-500/15 text-red-400 border-red-500/30' },
+  no_site: { label: 'No Site', short: 'NS', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  overtime: { label: 'Overtime', short: 'O', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+  not_marked: { label: 'Not Marked', short: '-', color: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
 };
 
 function formatDateDisplay(iso: string): string {
@@ -138,6 +190,82 @@ export function AttendanceCopyPage() {
       });
     }
   }, []);
+
+  // ── Version history dialog state ──
+  const { user } = useAuthStore();
+  const [versionDialogShare, setVersionDialogShare] = useState<{ share: ShareEntry; siteId: string; siteName: string } | null>(null);
+  const [versions, setVersions] = useState<AttendanceVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
+
+  const openVersionDialog = useCallback(async (share: ShareEntry, siteId: string, siteName: string) => {
+    setVersionDialogShare({ share, siteId, siteName });
+    setSelectedVersionId(null);
+    setVersions([]);
+    setVersionsLoading(true);
+    try {
+      // Fetch all versions for this site+date (not just the share's), so the
+      // admin sees the full history including website/bulk-mark changes.
+      const res = await fetch(`/api/attendance/versions?siteId=${encodeURIComponent(siteId)}&date=${encodeURIComponent(share.date)}`);
+      const data = await res.json();
+      if (data.success) {
+        const v: AttendanceVersion[] = data.data.versions || [];
+        setVersions(v);
+        // Default-select the newest version
+        if (v.length > 0) setSelectedVersionId(v[0].id);
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load version history', variant: 'destructive' });
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, []);
+
+  const closeVersionDialog = useCallback(() => {
+    setVersionDialogShare(null);
+    setVersions([]);
+    setSelectedVersionId(null);
+  }, []);
+
+  const handleRestoreVersion = useCallback(async (versionId: string) => {
+    if (!versionDialogShare) return;
+    if (!confirm('Restore this version? This will overwrite the live attendance for this site+date with the snapshot, and create a new version (source: restore).')) return;
+    setRestoringVersionId(versionId);
+    try {
+      const res = await fetch(`/api/attendance/versions/${versionId}?action=restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restoredById: user?.id || null,
+          restoredByName: user?.name || 'Admin',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast({
+          title: 'Version restored',
+          description: `Live attendance updated. New version v${data.data.newVersionNumber} captured.`,
+        });
+        // Refresh the versions list so the new restore version shows up
+        if (versionDialogShare) {
+          await openVersionDialog(versionDialogShare.share, versionDialogShare.siteId, versionDialogShare.siteName);
+        }
+        // Also refresh the shares list so any "open" share reflects the new state
+        fetchShares(true);
+      } else {
+        toast({ title: 'Error', description: data.error || 'Failed to restore version', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to restore version', variant: 'destructive' });
+    } finally {
+      setRestoringVersionId(null);
+    }
+  }, [versionDialogShare, user, openVersionDialog, fetchShares]);
+
+  const selectedVersion = useMemo(() => {
+    return versions.find((v) => v.id === selectedVersionId) || null;
+  }, [versions, selectedVersionId]);
 
   // Filter by search (matches site name or date)
   const filteredGroups = useMemo(() => {
@@ -403,6 +531,16 @@ export function AttendanceCopyPage() {
 
                           {/* Actions (real buttons — no nesting) */}
                           <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openVersionDialog(share, group.siteId, group.siteName)}
+                              className="h-7 text-[11px] text-violet-400 hover:text-violet-300 hover:bg-violet-500/10 gap-1"
+                              title="View version history"
+                            >
+                              <History className="h-3 w-3" />
+                              <span className="hidden sm:inline">Versions</span>
+                            </Button>
                             <a
                               href={share.url}
                               target="_blank"
@@ -440,6 +578,169 @@ export function AttendanceCopyPage() {
           })}
         </div>
       )}
+
+      {/* ── Version History Dialog ── */}
+      <Dialog open={!!versionDialogShare} onOpenChange={(open) => { if (!open) closeVersionDialog(); }}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <History className="h-5 w-5 text-violet-400" />
+              Version History
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              {versionDialogShare && (
+                <>
+                  <span className="text-white font-medium">{versionDialogShare.siteName}</span>
+                  {' · '}
+                  {formatDateDisplay(versionDialogShare.share.date)}
+                  {' · '}
+                  Click a version to preview its snapshot. Click <span className="text-violet-300">Restore</span> to roll the live attendance back to that version.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 min-h-0">
+            {/* Versions list (left) */}
+            <div className="overflow-y-auto border-r border-slate-700/50 pr-2 md:pr-4 max-h-[60vh]">
+              {versionsLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-20 bg-slate-700/50" />
+                  ))}
+                </div>
+              ) : versions.length === 0 ? (
+                <div className="py-12 text-center">
+                  <History className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400">No versions yet</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Versions are captured every time attendance is written for this site+date.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {versions.map((v) => {
+                    const srcCfg = VERSION_SOURCE_CONFIG[v.source] || VERSION_SOURCE_CONFIG.website;
+                    const SrcIcon = srcCfg.icon;
+                    const isSelected = v.id === selectedVersionId;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setSelectedVersionId(v.id)}
+                        className={cn(
+                          'w-full text-left rounded-lg border p-3 transition-all',
+                          isSelected
+                            ? 'border-violet-500/50 bg-violet-500/10 ring-1 ring-violet-500/30'
+                            : 'border-slate-700/50 bg-slate-900/40 hover:border-slate-600 hover:bg-slate-900/70',
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="text-sm font-bold text-white">v{v.versionNumber}</span>
+                          <Badge className={cn('text-[9px] px-1.5 py-0 h-4 border gap-0.5', srcCfg.color)}>
+                            <SrcIcon className="h-2.5 w-2.5" />
+                            {srcCfg.label}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-slate-300 line-clamp-2">{v.summary}</p>
+                        <p className="text-[10px] text-slate-500 mt-1.5">
+                          {formatTimestamp(v.createdAt)}
+                          {v.changedByName && <span> · by {v.changedByName}</span>}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Snapshot preview (right) */}
+            <div className="overflow-y-auto max-h-[60vh]">
+              {selectedVersion ? (
+                <div className="space-y-3">
+                  {/* Header */}
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-700/50">
+                    <div>
+                      <p className="text-sm font-bold text-white">
+                        v{selectedVersion.versionNumber} · {selectedVersion.siteName}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {formatDateDisplay(selectedVersion.date)} · {formatTimestamp(selectedVersion.createdAt)}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => handleRestoreVersion(selectedVersion.id)}
+                      disabled={restoringVersionId === selectedVersion.id}
+                      className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5"
+                    >
+                      {restoringVersionId === selectedVersion.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      )}
+                      Restore
+                    </Button>
+                  </div>
+
+                  {/* Summary line */}
+                  <div className="bg-slate-900/50 rounded-lg p-2.5 border border-slate-700/50">
+                    <p className="text-xs text-slate-300">{selectedVersion.summary}</p>
+                    {selectedVersion.changedByName && (
+                      <p className="text-[10px] text-slate-500 mt-1">by {selectedVersion.changedByName}</p>
+                    )}
+                  </div>
+
+                  {/* Snapshot table */}
+                  <div className="overflow-x-auto rounded-lg border border-slate-700/50">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-900/80 sticky top-0">
+                        <tr>
+                          <th className="text-left text-slate-400 font-semibold px-3 py-2">#</th>
+                          <th className="text-left text-slate-400 font-semibold px-3 py-2">Name</th>
+                          <th className="text-left text-slate-400 font-semibold px-3 py-2">Emp. Code</th>
+                          <th className="text-center text-slate-400 font-semibold px-3 py-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedVersion.snapshot.map((entry, idx) => {
+                          const cfg = ATTENDANCE_STATUS_CONFIG[entry.status] || ATTENDANCE_STATUS_CONFIG.not_marked;
+                          return (
+                            <tr key={entry.employeeId} className={cn('border-t border-slate-700/30', idx % 2 === 1 && 'bg-slate-900/30')}>
+                              <td className="px-3 py-1.5 text-slate-500 font-mono">{idx + 1}</td>
+                              <td className="px-3 py-1.5 text-white font-medium">{entry.fullName}</td>
+                              <td className="px-3 py-1.5 text-slate-400 font-mono">{entry.employeeCode}</td>
+                              <td className="px-3 py-1.5 text-center">
+                                <Badge className={cn('text-[9px] px-1.5 py-0 h-4 border', cfg.color)}>
+                                  {cfg.label}
+                                  {entry.status === 'overtime' && entry.overtimeHours ? ` (${entry.overtimeHours}h)` : ''}
+                                </Badge>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-16 text-center">
+                  <History className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400">
+                    {versions.length > 0 ? 'Select a version to preview' : 'No versions to preview'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeVersionDialog} className="text-slate-400 hover:text-white">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

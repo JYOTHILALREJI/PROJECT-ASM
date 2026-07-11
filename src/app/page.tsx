@@ -25,6 +25,7 @@ import { EmployeeHoursLedger } from '@/components/employees/employee-hours-ledge
 import { EmployeeHoursDirectory } from '@/components/employees/employee-hours-directory';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { usePresenceHeartbeat } from '@/hooks/use-presence-heartbeat';
 
 type AppState = 'checking' | 'needs_setup' | 'unauthenticated' | 'authenticated';
 
@@ -66,6 +67,10 @@ function MainLayout() {
   const { user } = useAuthStore();
   const isMobile = useIsMobile();
   const [adminPermissions, setAdminPermissions] = useState<string[]>([]);
+
+  // Send a presence heartbeat every 30s while the app is open so the Admin
+  // Management page can show an "online" green dot for this user.
+  usePresenceHeartbeat();
 
   // Fetch admin menu permissions dynamically from the Permission system
   React.useEffect(() => {

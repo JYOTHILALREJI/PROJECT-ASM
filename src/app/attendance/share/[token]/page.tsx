@@ -45,6 +45,11 @@ interface ShareEmployee {
   position: string | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
+  // The live DB attendance status for this employee on the share's date.
+  // Used to pre-populate the Present/Absent selector so changes made via
+  // the website (or another share link, or a version restore) are reflected
+  // here — bidirectional sync.
+  liveStatus?: 'present' | 'absent' | 'no_site' | 'overtime' | 'not_marked';
 }
 
 type Status = 'present' | 'absent' | 'unmarked';
@@ -123,10 +128,15 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
         setStatuses(map);
         setSubmitted(true);
       } else {
-        // Default everyone to 'unmarked'
+        // Open share: pre-populate from the LIVE DB attendance (bidirectional
+        // sync). If an admin already marked someone present via the website,
+        // the share page shows them as present. Otherwise default to 'unmarked'.
         const map: Record<string, Status> = {};
-        for (const e of data.data.employees || []) {
-          map[e.id] = 'unmarked';
+        for (const e of (data.data.employees || []) as ShareEmployee[]) {
+          const live = e.liveStatus;
+          if (live === 'present') map[e.id] = 'present';
+          else if (live === 'absent') map[e.id] = 'absent';
+          else map[e.id] = 'unmarked';
         }
         setStatuses(map);
       }

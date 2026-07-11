@@ -26,6 +26,10 @@ model User {
   password  String
   role      String   @default("admin") // "super_admin" or "admin"
   theme     String   @default("dark") // "dark" or "light"
+  // Heartbeat timestamp updated periodically by the client while the app is
+  // open. Used by the Admin Management page to show an online indicator.
+  // A user is considered "online" if lastSeenAt is within the last 90s.
+  lastSeenAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   deletedAt DateTime?
@@ -39,6 +43,7 @@ model User {
   fines                        Fine[]
   menuPermissions              AdminMenuPermission[]
   adminPermissions             AdminPermission[]
+  attendanceVersions           AttendanceVersion[]
 }
 
 model AdminMenuPermission {
@@ -137,6 +142,7 @@ model Site {
   workLogs          WorkLog[]
   salaryRecords     SalaryRecord[]
   attendanceShares  AttendanceShare[]
+  attendanceVersions AttendanceVersion[]
 }
 
 model Attendance {
@@ -543,4 +549,63 @@ model AttendanceShare {
   @@index([date])
   @@index([status])
   @@index([token])
+}
+
+// ---------------------------------------------------------------------------
+// AttendanceVersion
+// ---------------------------------------------------------------------------
+// A snapshot of the attendance for a single site on a single date, captured
+// every time attendance is written (from the website, the public share link,
+// or the bulk-mark route). Each version is immutable once written.
+//
+// Versions are linked to a share token when the change came in via a share
+// link (so the Attendance Copy page can show per-link history). When the
+// change came from the website admin UI, shareTokenId is null and source
+// is 'website'.
+//
+// The Attendance Copy page lists all versions for a given site+date and
+// lets the admin switch between them — switching does NOT change the live
+// attendance; it just re-displays that version's snapshot. The admin can
+// "Restore" a version, which writes a new version that copies the snapshot
+// and updates the live attendance to match.
+// ---------------------------------------------------------------------------
+model AttendanceVersion {
+  id           String   @id @default(cuid())
+  siteId       String   // FK to Site.id
+  siteName     String   // Denormalized
+  date         String   // YYYY-MM-DD
+  // The version number for this site+date. v1 is the first capture, v2 the
+  // next, etc. Computed at write time by counting existing versions + 1.
+  versionNumber Int
+  // JSON snapshot of every employee's status at capture time:
+  //   [{ "employeeId": "...", "fullName": "...", "employeeCode": "...",
+  //      "status": "present" | "absent" | "no_site" | "overtime" | "not_marked",
+  //      "overtimeHours": number | null }]
+  snapshot     String
+  // Where the change came from:
+  //   - 'website'    : admin marked via the Attendance page
+  //   - 'share_link' : TL/Supervisor submitted via /attendance/share/<token>
+  //   - 'bulk_mark'  : admin used bulk-mark-present
+  //   - 'restore'    : admin restored a previous version
+  source       String   @default("website")
+  // If source is 'share_link', the token of the share that submitted it.
+  shareToken   String?
+  // Who made the change (User.id for website/restore, or the submittedByName
+  // for share_link). Stored as a free-text label for audit + the User.id
+  // when known for the relation.
+  changedById   String?
+  changedByName String?
+  // Brief label shown in the version history UI, e.g.
+  //   "Marked 12 present, 3 absent via share link"
+  summary      String
+  createdAt    DateTime @default(now())
+
+  site  Site?  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user  User?  @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@unique([siteId, date, versionNumber])
+  @@index([siteId, date])
+  @@index([date])
+  @@index([shareToken])
+  @@index([changedById])
 }

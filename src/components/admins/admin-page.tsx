@@ -211,6 +211,32 @@ export function AdminPage() {
   // Admin access map for display in table
   const [adminAccessMap, setAdminAccessMap] = useState<Record<string, string[]>>({});
 
+  // Online admin IDs (lastSeenAt within 90s). Refreshed every 20s.
+  const [onlineAdminIds, setOnlineAdminIds] = useState<Set<string>>(new Set());
+
+  // Fetch online presence
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOnline = async () => {
+      try {
+        const res = await fetch('/api/presence/online');
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.success) {
+          setOnlineAdminIds(new Set(data.data.onlineUserIds || []));
+        }
+      } catch {
+        // silent
+      }
+    };
+    fetchOnline();
+    const interval = setInterval(fetchOnline, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Fetch admins
   const fetchAdmins = useCallback(async () => {
     try {
@@ -711,14 +737,27 @@ export function AdminPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {superAdmins.map((admin) => (
+                  {superAdmins.map((admin) => {
+                    const isOnline = onlineAdminIds.has(admin.id);
+                    return (
                     <TableRow key={admin.id} className="border-slate-700/50 hover:bg-slate-700/30">
                       <TableCell className="text-slate-200 font-medium">
                         <div className="flex items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/10">
+                          <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/10">
                             <Crown className="h-4 w-4 text-amber-400" />
+                            {isOnline && (
+                              <span
+                                className="absolute -bottom-0 -right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-slate-800"
+                                title="Online now"
+                              />
+                            )}
                           </div>
-                          {admin.name}
+                          <div className="flex flex-col">
+                            {admin.name}
+                            {isOnline && (
+                              <span className="text-[10px] text-emerald-400 font-medium">Online</span>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-slate-400">
@@ -763,7 +802,8 @@ export function AdminPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -813,6 +853,7 @@ export function AdminPage() {
                 const grantedCount = Object.values(permState).filter(Boolean).length;
                 const totalConfigurable = perms.filter(p => !p.isAlwaysVisible).length;
                 const grantedConfigurable = perms.filter(p => !p.isAlwaysVisible && permState[p.slug]).length;
+                const isOnline = onlineAdminIds.has(admin.id);
 
                 return (
                   <div
@@ -829,11 +870,17 @@ export function AdminPage() {
                       className="flex items-center gap-3 px-4 py-3 cursor-pointer"
                       onClick={() => toggleExpand(admin.id)}
                     >
-                      {/* Avatar */}
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10 shrink-0">
+                      {/* Avatar with online indicator */}
+                      <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10 shrink-0">
                         <span className="text-sm font-semibold text-blue-400">
                           {admin.name.charAt(0).toUpperCase()}
                         </span>
+                        {isOnline && (
+                          <span
+                            className="absolute -bottom-0 -right-0 h-3 w-3 rounded-full bg-emerald-500 border-2 border-slate-800"
+                            title="Online now"
+                          />
+                        )}
                       </div>
 
                       {/* Info */}
@@ -843,6 +890,12 @@ export function AdminPage() {
                           <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20 text-[10px] px-1.5 py-0 h-4">
                             Admin
                           </Badge>
+                          {isOnline && (
+                            <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 text-[10px] px-1.5 py-0 h-4 gap-0.5">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Online
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <Mail className="h-3 w-3 text-slate-500" />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
+import { captureAttendanceVersion } from '@/lib/attendance-version';
 
 // ---------------------------------------------------------------------------
 // /api/attendance/share/[token]
@@ -53,6 +54,20 @@ export async function GET(
       },
     });
 
+    // Fetch the LIVE attendance records for this site's employees on the
+    // share's date. This makes the share page bidirectional: when an admin
+    // changes attendance on the website, the share page reflects it (when
+    // the share is still open). When the share is submitted, we fall back to
+    // the submitted snapshot for the read-only view.
+    const liveAttendance = await db.attendance.findMany({
+      where: {
+        employeeId: { in: employees.map((e) => e.id) },
+        date: share.date,
+        deletedAt: null,
+      },
+    });
+    const liveAttendanceMap = new Map(liveAttendance.map((r) => [r.employeeId, r]));
+
     // Sort: Team Leaders first, then Supervisors, then everyone else
     // alphabetically by name within each group.
     const sortedEmployees = [...employees].sort((a, b) => {
@@ -96,6 +111,10 @@ export async function GET(
           position: e.position,
           isTeamLeader: e.isTeamLeader,
           isSupervisor: e.isSupervisor,
+          // Include the live DB status so the share page can pre-populate
+          // the Present/Absent selector with whatever's currently in the
+          // system (bidirectional sync).
+          liveStatus: liveAttendanceMap.get(e.id)?.status || 'not_marked',
         })),
         submittedEntries,
       },
@@ -231,6 +250,27 @@ export async function POST(
       },
     });
 
+    // ── Capture an attendance version for this site+date ──
+    // Source is 'share_link' so the Attendance Copy page can show this
+    // submission in the version history. The shareToken is recorded so
+    // per-link history can be filtered.
+    let versionCapture: { id: string; versionNumber: number } | null = null;
+    try {
+      const present = entries.filter((e) => e.status === 'present').length;
+      const absent = entries.filter((e) => e.status === 'absent').length;
+      versionCapture = await captureAttendanceVersion({
+        siteId: share.siteId,
+        siteName: share.siteName,
+        date: share.date,
+        source: 'share_link',
+        shareToken: share.token,
+        changedByName: submittedByName || 'Team Leader / Supervisor',
+        summary: `${present} present, ${absent} absent via share link`,
+      });
+    } catch (err) {
+      console.error('[share submit] version capture failed:', err);
+    }
+
     const successCount = written.filter((w) => w.ok).length;
     const failedCount = written.length - successCount;
 
@@ -247,6 +287,9 @@ export async function POST(
           failed: failedCount,
           details: written,
         },
+        versionCapture: versionCapture
+          ? { id: versionCapture.id, versionNumber: versionCapture.versionNumber }
+          : null,
       },
     });
   } catch (error: unknown) {
