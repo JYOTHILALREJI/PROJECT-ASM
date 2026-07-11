@@ -1,0 +1,604 @@
+'use client';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Calendar,
+  Building2,
+  Users,
+  Crown,
+  ShieldCheck,
+  Printer,
+  Lock,
+  AlertTriangle,
+  Check,
+  X,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+
+/* ───────── Types ───────── */
+
+interface ShareInfo {
+  id: string;
+  token: string;
+  siteId: string;
+  siteName: string;
+  clientName: string | null;
+  projectName: string | null;
+  date: string;
+  status: 'open' | 'submitted' | 'expired';
+  submittedByName: string | null;
+  submittedAt: string;
+  createdAt: string;
+}
+
+interface ShareEmployee {
+  id: string;
+  fullName: string;
+  employeeId: string;
+  trade: string | null;
+  position: string | null;
+  isTeamLeader: boolean;
+  isSupervisor: boolean;
+}
+
+type Status = 'present' | 'absent' | 'unmarked';
+
+/* ───────── Helpers ───────── */
+
+function formatDateDisplay(iso: string): string {
+  try {
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatTimestamp(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/* ───────── Main Component ───────── */
+
+export default function AttendanceSharePage({ params }: { params: Promise<{ token: string }> }) {
+  const [token, setToken] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [share, setShare] = useState<ShareInfo | null>(null);
+  const [employees, setEmployees] = useState<ShareEmployee[]>([]);
+  const [statuses, setStatuses] = useState<Record<string, Status>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitterName, setSubmitterName] = useState('');
+  const [submitResult, setSubmitResult] = useState<{ succeeded: number; failed: number; total: number } | null>(null);
+
+  // Resolve the token from params
+  useEffect(() => {
+    params.then((p) => setToken(p.token));
+  }, [params]);
+
+  // Fetch share data
+  const fetchShare = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/attendance/share/${token}`);
+      const data = await res.json();
+      if (!data.success) {
+        setError(data.error || 'Failed to load share link');
+        return;
+      }
+      setShare(data.data.share);
+      setEmployees(data.data.employees || []);
+
+      // If submitted, pre-populate statuses from the snapshot so the page
+      // shows a read-only summary of what was marked.
+      if (data.data.share.status === 'submitted' && data.data.submittedEntries) {
+        const map: Record<string, Status> = {};
+        for (const e of data.data.submittedEntries as Array<{ employeeId: string; status: string }>) {
+          map[e.employeeId] = (e.status === 'present' || e.status === 'absent') ? e.status : 'unmarked';
+        }
+        setStatuses(map);
+        setSubmitted(true);
+      } else {
+        // Default everyone to 'unmarked'
+        const map: Record<string, Status> = {};
+        for (const e of data.data.employees || []) {
+          map[e.id] = 'unmarked';
+        }
+        setStatuses(map);
+      }
+    } catch {
+      setError('Failed to load share link');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchShare();
+  }, [fetchShare]);
+
+  const setStatus = useCallback((employeeId: string, status: Status) => {
+    setStatuses((prev) => ({ ...prev, [employeeId]: status }));
+  }, []);
+
+  const markAll = useCallback((status: Status) => {
+    setStatuses((prev) => {
+      const next: Record<string, Status> = {};
+      for (const e of employees) next[e.id] = status;
+      return next;
+    });
+  }, [employees]);
+
+  // Group employees by TL/Supervisor/Standard for display ordering
+  const sortedEmployees = useMemo(() => {
+    return [...employees].sort((a, b) => {
+      const aRank = a.isTeamLeader ? 0 : a.isSupervisor ? 1 : 2;
+      const bRank = b.isTeamLeader ? 0 : b.isSupervisor ? 1 : 2;
+      if (aRank !== bRank) return aRank - bRank;
+      return (a.fullName || '').localeCompare(b.fullName || '');
+    });
+  }, [employees]);
+
+  const markedCount = useMemo(() => {
+    let count = 0;
+    for (const e of employees) {
+      if (statuses[e.id] === 'present' || statuses[e.id] === 'absent') count++;
+    }
+    return count;
+  }, [employees, statuses]);
+
+  const presentCount = useMemo(() => {
+    return Object.values(statuses).filter((s) => s === 'present').length;
+  }, [statuses]);
+
+  const absentCount = useMemo(() => {
+    return Object.values(statuses).filter((s) => s === 'absent').length;
+  }, [statuses]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!share) return;
+    if (markedCount === 0) {
+      alert('Please mark at least one employee as present or absent before submitting.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const entries = employees
+        .map((e) => ({ employeeId: e.id, status: statuses[e.id] as 'present' | 'absent' }))
+        .filter((e) => e.status === 'present' || e.status === 'absent');
+
+      const res = await fetch(`/api/attendance/share/${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entries,
+          submittedByName: submitterName.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSubmitted(true);
+        setSubmitResult({
+          succeeded: data.data.attendance.succeeded,
+          failed: data.data.attendance.failed,
+          total: data.data.attendance.total,
+        });
+        // Refresh the share so the status badge updates
+        await fetchShare();
+      } else {
+        if (data.alreadySubmitted) {
+          setSubmitted(true);
+          await fetchShare();
+        } else {
+          alert(data.error || 'Failed to submit attendance');
+        }
+      }
+    } catch {
+      alert('Failed to submit attendance. Please check your connection and try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [share, employees, statuses, markedCount, token, submitterName, fetchShare]);
+
+  const handlePrint = useCallback(() => {
+    window.print();
+  }, []);
+
+  /* ───────── Render ───────── */
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-slate-500" />
+          <p className="text-sm text-slate-500">Loading attendance sheet...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-100 mx-auto mb-4">
+            <XCircle className="h-7 w-7 text-red-600" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 mb-2">Link Not Available</h1>
+          <p className="text-sm text-gray-600">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!share) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <p className="text-sm text-slate-500">No share data</p>
+      </div>
+    );
+  }
+
+  const isReadOnly = share.status !== 'open' || submitted;
+
+  return (
+    <div className="min-h-screen bg-slate-100">
+      {/* Print-only styles */}
+      <style jsx global>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; }
+          .print-container { padding: 0 !important; }
+          .print-sheet { box-shadow: none !important; border: none !important; margin: 0 !important; max-width: 100% !important; }
+        }
+      `}</style>
+
+      {/* Top bar */}
+      <div className="no-print bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <img src="/logo_asm.png" alt="ASM" className="h-9 w-auto" />
+            <div className="min-w-0">
+              <h1 className="text-sm font-bold text-gray-900 truncate">Arabian Shield Manpower</h1>
+              <p className="text-[11px] text-gray-500 truncate">Daily Attendance Sheet</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {isReadOnly && (
+              <Button onClick={handlePrint} variant="outline" size="sm" className="gap-1.5">
+                <Printer className="h-3.5 w-3.5" />
+                Print
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto p-4 print-container">
+        {/* Status banner */}
+        {isReadOnly && (
+          <div className={cn(
+            'no-print rounded-lg border p-4 mb-4 flex items-start gap-3',
+            share.status === 'submitted'
+              ? 'bg-emerald-50 border-emerald-200'
+              : 'bg-amber-50 border-amber-200',
+          )}>
+            {share.status === 'submitted' ? (
+              <Lock className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900">
+                {share.status === 'submitted' ? 'Attendance already submitted' : 'This link has expired'}
+              </p>
+              <p className="text-xs text-gray-600 mt-0.5">
+                {share.status === 'submitted' ? (
+                  <>
+                    Submitted{share.submittedByName ? ` by ${share.submittedByName}` : ''} on{' '}
+                    {formatTimestamp(share.submittedAt)}. The link is now read-only — entries below
+                    are shown as recorded and cannot be edited.
+                    {submitResult && (
+                      <span className="block mt-1.5 text-emerald-700">
+                        {submitResult.succeeded} of {submitResult.total} record(s) saved successfully.
+                        {submitResult.failed > 0 ? ` ${submitResult.failed} failed.` : ''}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  'This share link has been closed. Please request a new link from the admin.'
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Sheet (mimics the admin attendance sheet) */}
+        <div className="print-sheet bg-white shadow-xl border border-gray-300 w-full p-[10mm]" style={{ boxSizing: 'border-box' }}>
+          {/* Header */}
+          <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between" style={{ minHeight: '52px' }}>
+            <div className="flex-1" />
+            <div className="flex-1 text-center">
+              <h1 className="text-[16px] font-bold text-black tracking-[0.08em] uppercase">
+                Arabian Shield Manpower
+              </h1>
+              <div className="mt-1.5 text-center py-1.5 text-[13px] font-bold tracking-[0.15em] uppercase bg-gray-400 text-black">
+                Daily Attendance
+              </div>
+            </div>
+            <div className="flex-1 flex justify-end items-center">
+              <img src="/logo_asm.png" alt="ASM Logo" className="h-12 w-auto object-contain" />
+            </div>
+          </div>
+
+          {/* Info Section */}
+          <div className="mt-4 text-[12px] uppercase">
+            <div className="flex items-baseline mb-1.5">
+              <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; Client Name :</span>
+              <span className="flex-1 border-b border-gray-500 font-bold text-gray-800 px-1">
+                {(share.clientName || share.siteName || '-').toUpperCase()}
+              </span>
+            </div>
+            <div className="flex items-baseline mb-1.5">
+              <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; Project Name :</span>
+              <span className="flex-1 border-b border-gray-500 font-bold text-gray-800 px-1">
+                {(share.projectName || share.siteName || '-').toUpperCase()}
+              </span>
+            </div>
+            <div className="flex items-baseline mb-1.5">
+              <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; Site :</span>
+              <span className="flex-1 border-b border-gray-500 font-bold text-gray-800 px-1">
+                {share.siteName.toUpperCase()}
+              </span>
+            </div>
+            <div className="flex items-baseline mb-1.5">
+              <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; Date :</span>
+              <span className="flex-1 border-b border-gray-500 font-bold text-gray-800 px-1">
+                {formatDateDisplay(share.date).toUpperCase()}
+              </span>
+            </div>
+            <div className="flex items-baseline mb-1.5">
+              <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; Strength :</span>
+              <span className="flex-1 border-b border-gray-500 font-bold text-gray-800 px-1">
+                {employees.length} EMPLOYEES
+              </span>
+            </div>
+          </div>
+
+          {/* Summary chips (only when not yet submitted, or after) */}
+          <div className="no-print mt-4 flex flex-wrap gap-2">
+            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+              <CheckCircle2 className="h-3 w-3 mr-1" />
+              {presentCount} Present
+            </Badge>
+            <Badge className="bg-red-100 text-red-700 border-red-200">
+              <XCircle className="h-3 w-3 mr-1" />
+              {absentCount} Absent
+            </Badge>
+            <Badge className="bg-slate-100 text-slate-600 border-slate-200">
+              <Users className="h-3 w-3 mr-1" />
+              {markedCount} of {employees.length} marked
+            </Badge>
+          </div>
+
+          {/* Bulk action buttons (only when open) */}
+          {!isReadOnly && (
+            <div className="no-print mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => markAll('present')} className="gap-1.5">
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                Mark all present
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => markAll('absent')} className="gap-1.5">
+                <X className="h-3.5 w-3.5 text-red-600" />
+                Mark all absent
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => markAll('unmarked')} className="gap-1.5 text-slate-500">
+                Reset all
+              </Button>
+            </div>
+          )}
+
+          {/* Main Employee Table */}
+          <div className="mt-4 pb-2">
+            <table className="w-full border-collapse text-[13px] uppercase">
+              <thead>
+                <tr className="bg-gray-400 text-black">
+                  <th className="border border-black px-2 py-2 text-center font-bold w-12 text-[14px]">Sl. No</th>
+                  <th className="border border-black px-2 py-2 text-left font-bold text-[14px]">Name</th>
+                  <th className="border border-black px-2 py-2 text-center font-bold w-[115px] text-[14px]">Emp. Code</th>
+                  <th className="border border-black px-2 py-2 text-left font-bold w-[179px] text-[14px]">Trade</th>
+                  <th className="border border-black px-2 py-2 text-center font-bold w-48 text-[14px]">
+                    {isReadOnly ? 'Status' : 'Mark Present / Absent'}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedEmployees.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="border border-black px-2 py-8 text-center text-gray-500 text-[13px]">
+                      No active employees assigned to this site.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedEmployees.map((emp, idx) => {
+                    const status = statuses[emp.id] || 'unmarked';
+                    const isEven = idx % 2 === 1;
+                    return (
+                      <tr
+                        key={emp.id}
+                        className={cn(
+                          isEven ? 'bg-gray-50' : 'bg-white',
+                          emp.isTeamLeader && 'bg-amber-50',
+                          emp.isSupervisor && !emp.isTeamLeader && 'bg-blue-50',
+                        )}
+                      >
+                        <td className="border border-black px-2 py-1.5 text-center text-gray-700 font-bold">
+                          {idx + 1}
+                        </td>
+                        <td className="border border-black px-2 py-1 text-gray-900 font-bold">
+                          <div className="flex items-center gap-1.5">
+                            <span>{emp.fullName.toUpperCase()}</span>
+                            {emp.isTeamLeader && (
+                              <Crown className="h-3 w-3 text-amber-500 shrink-0" />
+                            )}
+                            {emp.isSupervisor && !emp.isTeamLeader && (
+                              <ShieldCheck className="h-3 w-3 text-blue-500 shrink-0" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="border border-black px-2 py-1 text-center text-gray-700 font-mono font-bold">
+                          {emp.employeeId.toUpperCase()}
+                        </td>
+                        <td className="border border-black px-2 py-1 text-gray-700 font-bold">
+                          {emp.trade?.toUpperCase() || emp.position?.toUpperCase() || '-'}
+                          {emp.isTeamLeader && ' / TL'}
+                          {emp.isSupervisor && !emp.isTeamLeader && ' / SUPERVISOR'}
+                        </td>
+                        <td className="border border-black px-2 py-1.5 text-center">
+                          {isReadOnly ? (
+                            // Read-only status badge
+                            <span className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold uppercase',
+                              status === 'present' && 'bg-emerald-100 text-emerald-700',
+                              status === 'absent' && 'bg-red-100 text-red-700',
+                              status === 'unmarked' && 'bg-slate-100 text-slate-500',
+                            )}>
+                              {status === 'present' && <Check className="h-3 w-3" />}
+                              {status === 'absent' && <X className="h-3 w-3" />}
+                              {status === 'unmarked' ? '—' : status}
+                            </span>
+                          ) : (
+                            // Interactive Present/Absent selector
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setStatus(emp.id, 'present')}
+                                className={cn(
+                                  'inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold uppercase border transition-colors',
+                                  status === 'present'
+                                    ? 'bg-emerald-500 text-white border-emerald-500'
+                                    : 'bg-white text-emerald-600 border-emerald-300 hover:bg-emerald-50',
+                                )}
+                              >
+                                <Check className="h-3 w-3" />
+                                P
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStatus(emp.id, 'absent')}
+                                className={cn(
+                                  'inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold uppercase border transition-colors',
+                                  status === 'absent'
+                                    ? 'bg-red-500 text-white border-red-500'
+                                    : 'bg-white text-red-600 border-red-300 hover:bg-red-50',
+                                )}
+                              >
+                                <X className="h-3 w-3" />
+                                A
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Footer */}
+          <div className="mt-6 flex items-end justify-between text-[11px] text-gray-500 uppercase">
+            <div>
+              <p>Generated: {formatTimestamp(share.createdAt)}</p>
+              {share.status === 'submitted' && (
+                <p>Submitted: {formatTimestamp(share.submittedAt)}</p>
+              )}
+            </div>
+            <div className="text-right">
+              <p>Token: {share.token.substring(0, 8)}...</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Submit section (only when open) */}
+        {!isReadOnly && (
+          <div className="no-print mt-4 bg-white rounded-xl shadow-md border border-gray-200 p-4 space-y-3">
+            <div>
+              <label className="text-xs font-medium text-gray-600 uppercase tracking-wide block mb-1.5">
+                Your name (optional)
+              </label>
+              <Input
+                type="text"
+                value={submitterName}
+                onChange={(e) => setSubmitterName(e.target.value)}
+                placeholder="e.g. John Doe (Team Leader)"
+                className="h-9"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Recorded for audit purposes. You can leave this blank.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-100">
+              <p className="text-xs text-gray-600">
+                {markedCount} of {employees.length} employees marked.{' '}
+                {markedCount === employees.length ? (
+                  <span className="text-emerald-600 font-medium">Ready to submit.</span>
+                ) : (
+                  <span className="text-amber-600">
+                    {employees.length - markedCount} unmarked will be skipped.
+                  </span>
+                )}
+              </p>
+              <Button
+                onClick={handleSubmit}
+                disabled={submitting || markedCount === 0}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Submit Attendance
+                  </>
+                )}
+              </Button>
+            </div>
+            <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+              <AlertTriangle className="h-3 w-3 inline mr-1" />
+              Once submitted, this link becomes read-only and cannot be edited. Verify all entries before clicking Submit.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -11,6 +11,18 @@ import {
   Search,
   MapPin,
   X,
+  ChevronDown,
+  Building2,
+  Users,
+  Crown,
+  ShieldCheck,
+  Share2,
+  Copy,
+  Loader2,
+  FileSpreadsheet,
+  Power,
+  PowerOff,
+  ExternalLink,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,10 +36,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/store/auth-store';
 
 /* ───────── types ───────── */
 interface Employee {
@@ -36,11 +55,18 @@ interface Employee {
   employeeId: string;
   currentSite: string | null;
   status: string;
+  trade: string | null;
+  position: string | null;
+  isTeamLeader: boolean;
+  isSupervisor: boolean;
 }
 
 interface SiteOption {
   id: string;
   name: string;
+  clientName?: string | null;
+  projectName?: string | null;
+  isActive: boolean;
 }
 
 interface AttendanceRecord {
@@ -53,7 +79,6 @@ interface AttendanceRecord {
 }
 
 type StatusOption = AttendanceRecord['status'];
-type ViewMode = 'list' | 'calendar';
 
 /* ───────── helpers ───────── */
 const MONTHS = [
@@ -109,7 +134,7 @@ function getRelativeDateLabel(day: number, month: number, year: number): string 
   if (diffDays === 4) return '4 days ago';
   if (diffDays === 5) return '5 days ago';
   if (diffDays === 6) return '6 days ago';
-  return null; // older than 6 days — just show day number
+  return null;
 }
 
 const STATUS_CONFIG: Record<StatusOption, { label: string; short: string; color: string; dotColor: string }> = {
@@ -221,135 +246,9 @@ function StatusDropdown({
   );
 }
 
-/* ───────── Searchable Employee Dropdown (for Calendar view) ───────── */
-interface SearchableEmployeeSelectProps {
-  employees: Employee[];
-  selectedEmployeeId: string;
-  onSelect: (id: string) => void;
-}
-
-function SearchableEmployeeSelect({
-  employees,
-  selectedEmployeeId,
-  onSelect,
-}: SearchableEmployeeSelectProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId);
-
-  const filtered = search
-    ? employees.filter(
-        (e) =>
-          e.fullName.toLowerCase().includes(search.toLowerCase()) ||
-          e.employeeId.toLowerCase().includes(search.toLowerCase()) ||
-          (e.currentSite || '').toLowerCase().includes(search.toLowerCase())
-      )
-    : employees;
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setSearch('');
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (open && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [open]);
-
-  return (
-    <div ref={containerRef} className="relative w-full max-w-md">
-      <label className="text-sm text-slate-400 mb-2 block font-medium">Select Employee</label>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full h-10 rounded-lg border border-slate-600 bg-slate-900 px-3 text-sm text-white hover:bg-slate-800 transition-colors text-left"
-      >
-        {selectedEmployee ? (
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <span className="truncate">{selectedEmployee.fullName}</span>
-            <span className="text-slate-500 text-xs">({selectedEmployee.employeeId})</span>
-            {selectedEmployee.currentSite && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shrink-0">
-                {selectedEmployee.currentSite}
-              </Badge>
-            )}
-          </div>
-        ) : (
-          <span className="text-slate-500">Select employee...</span>
-        )}
-      </button>
-
-      {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl shadow-black/40 overflow-hidden">
-          <div className="p-2 border-b border-slate-700">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, ID, or site..."
-                className="w-full h-8 pl-8 pr-3 bg-slate-900 border border-slate-600 rounded-md text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="max-h-64 overflow-y-auto">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-6 text-center text-sm text-slate-500">No employees found</div>
-            ) : (
-              filtered.map((emp) => (
-                <button
-                  key={emp.id}
-                  type="button"
-                  onClick={() => {
-                    onSelect(emp.id);
-                    setOpen(false);
-                    setSearch('');
-                  }}
-                  className={cn(
-                    'flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-slate-700/50',
-                    emp.id === selectedEmployeeId ? 'bg-slate-700/70 text-white' : 'text-slate-300'
-                  )}
-                >
-                  <span className="truncate flex-1">{emp.fullName}</span>
-                  <span className="text-slate-500 text-xs shrink-0">({emp.employeeId})</span>
-                  {emp.currentSite && (
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shrink-0">
-                      {emp.currentSite}
-                    </Badge>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ───────── List View ───────── */
-interface ListViewProps {
+/* ───────── Site List View (per-site collapsible table) ───────── */
+interface SiteListViewProps {
+  site: SiteOption;
   employees: Employee[];
   attendanceMap: Map<string, AttendanceRecord>;
   daysInMonth: number;
@@ -357,12 +256,16 @@ interface ListViewProps {
   yearStr: string;
   month: number;
   year: number;
-  loading: boolean;
   isCurrentMonthView: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
   onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void;
+  onShare: () => void;
+  onAttendanceSheet: () => void;
 }
 
-function ListView({
+function SiteListView({
+  site,
   employees,
   attendanceMap,
   daysInMonth,
@@ -370,10 +273,13 @@ function ListView({
   yearStr,
   month,
   year,
-  loading,
   isCurrentMonthView,
+  isCollapsed,
+  onToggleCollapse,
   onStatusChange,
-}: ListViewProps) {
+  onShare,
+  onAttendanceSheet,
+}: SiteListViewProps) {
   const [dropdown, setDropdown] = useState<{
     employeeId: string;
     date: string;
@@ -382,20 +288,27 @@ function ListView({
     position: { top: number; left: number };
   } | null>(null);
 
-  // For current month: today on the left, all previous dates to the right (no future dates)
-  // For past months: normal order (1, 2, 3... last day)
+  // Sort: Team Leaders first, then Supervisors, then everyone else
+  // alphabetically by name within each group.
+  const sortedEmployees = useMemo(() => {
+    return [...employees].sort((a, b) => {
+      const aRank = a.isTeamLeader ? 0 : a.isSupervisor ? 1 : 2;
+      const bRank = b.isTeamLeader ? 0 : b.isSupervisor ? 1 : 2;
+      if (aRank !== bRank) return aRank - bRank;
+      return (a.fullName || '').localeCompare(b.fullName || '');
+    });
+  }, [employees]);
+
+  // For current month: today on the left, all previous dates to the right
   const displayDays = useMemo(() => {
     if (isCurrentMonthView) {
       const today = new Date();
       const currentDay = today.getDate();
-      // Only show days from 1 up to today, reversed: today on left, 1st on right
-      const days = Array.from({ length: currentDay }, (_, i) => currentDay - i);
-      return days;
+      return Array.from({ length: currentDay }, (_, i) => currentDay - i);
     }
     return Array.from({ length: daysInMonth }, (_, i) => i + 1);
   }, [daysInMonth, isCurrentMonthView]);
 
-  // Get label for each day column header
   const getDayLabel = useCallback(
     (day: number): string => {
       if (!isCurrentMonthView) return String(day);
@@ -405,7 +318,6 @@ function ListView({
     [isCurrentMonthView, month, year]
   );
 
-  // Check if a day is within the "relative label" zone (last 7 days for current month)
   const isRecentDay = useCallback(
     (day: number): boolean => {
       if (!isCurrentMonthView) return false;
@@ -414,162 +326,266 @@ function ListView({
     [isCurrentMonthView, month, year]
   );
 
-  if (loading) {
-    return (
-      <Card className="bg-slate-800/50 border-slate-700/50">
-        <CardContent className="p-4">
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-10 w-full bg-slate-700/50" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (employees.length === 0) {
-    return (
-      <Card className="bg-slate-800/50 border-slate-700/50">
-        <CardContent className="py-16 text-center">
-          <p className="text-sm text-slate-400">No active employees found</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  // Site-level stats for the header
+  const siteStats = useMemo(() => {
+    let present = 0;
+    let absent = 0;
+    let unmarked = 0;
+    const today = new Date();
+    const todayStr = isCurrentMonthView
+      ? formatDate(today.getDate(), monthStr, yearStr)
+      : null;
+    if (todayStr) {
+      for (const emp of employees) {
+        const rec = attendanceMap.get(`${emp.id}-${todayStr}`);
+        if (!rec || rec.status === 'not_marked') unmarked++;
+        else if (rec.status === 'present' || rec.status === 'overtime') present++;
+        else absent++;
+      }
+    }
+    return { present, absent, unmarked, total: employees.length };
+  }, [employees, attendanceMap, isCurrentMonthView, monthStr, yearStr]);
 
   return (
     <Card className="bg-slate-800/50 border-slate-700/50 overflow-hidden">
-      <ScrollArea className="w-full">
-        <div className="min-w-[1000px]">
-          {/* Header row */}
-          <div className="flex items-center bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
-            <div className="w-52 shrink-0 px-4 py-3">Employee</div>
-            <div className="w-28 shrink-0 px-3 py-3">ID</div>
-            <div className="w-36 shrink-0 px-3 py-3">Site</div>
-            <div className="flex-1 flex">
-              {displayDays.map((day) => {
-                const isFri = isFriday(year, month, day);
-                const label = getDayLabel(day);
-                const recent = isRecentDay(day);
-                return (
-                  <div
-                    key={day}
-                    className={cn(
-                      'w-16 shrink-0 text-center py-3 leading-tight',
-                      isFri && 'text-red-400/50',
-                      recent && 'text-emerald-400 font-semibold'
-                    )}
-                  >
-                    <span className={cn(recent && 'text-[10px] block')}>{label}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="w-16 shrink-0 text-center py-3 px-2">OT</div>
+      {/* Site header (clickable to collapse/expand) */}
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-900/40 hover:bg-slate-900/60 transition-colors text-left border-b border-slate-700/50"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          {isCollapsed ? (
+            <ChevronRight className="h-5 w-5 text-slate-400 shrink-0" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-slate-400 shrink-0" />
+          )}
+          <div className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-lg shrink-0',
+            site.isActive ? 'bg-emerald-500/10' : 'bg-slate-600/20',
+          )}>
+            <Building2 className={cn(
+              'h-4 w-4',
+              site.isActive ? 'text-emerald-400' : 'text-slate-500',
+            )} />
           </div>
-
-          {/* Employee rows */}
-          <div className="divide-y divide-slate-700/50">
-            {employees.map((emp) => {
-              const totalOT = Array.from(attendanceMap.values())
-                .filter((r) => r.employeeId === emp.id && r.status === 'overtime')
-                .reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
-
-              return (
-                <div
-                  key={emp.id}
-                  className="flex items-center hover:bg-slate-700/20 transition-colors"
-                >
-                  <div className="w-52 shrink-0 px-4 py-2.5">
-                    <span className="text-sm text-white font-medium truncate block">
-                      {emp.fullName}
-                    </span>
-                  </div>
-                  <div className="w-28 shrink-0 px-3 py-2.5">
-                    <span className="text-xs text-slate-400 font-mono">{emp.employeeId}</span>
-                  </div>
-                  <div className="w-36 shrink-0 px-3 py-2.5">
-                    {emp.currentSite ? (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30 truncate max-w-full block">
-                        {emp.currentSite}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-slate-500">&mdash;</span>
-                    )}
-                  </div>
-                  <div className="flex-1 flex">
-                    {displayDays.map((day) => {
-                      const dateStr = formatDate(day, monthStr, yearStr);
-                      const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-                      const status = record?.status || 'not_marked';
-                      const cfg = STATUS_CONFIG[status];
-                      const isFri = isFriday(year, month, day);
-                      const recent = isRecentDay(day);
-
-                      return (
-                        <div
-                          key={day}
-                          className={cn(
-                            'w-16 shrink-0 flex items-center justify-center py-1.5',
-                            isFri && 'bg-red-500/5',
-                            recent && 'bg-emerald-500/5'
-                          )}
-                        >
-                          <button
-                            onClick={(e) => {
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              setDropdown({
-                                employeeId: emp.id,
-                                date: dateStr,
-                                status,
-                                overtimeHours: record?.overtimeHours || null,
-                                position: { top: rect.top, left: rect.left },
-                              });
-                            }}
-                            className={cn(
-                              'h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all hover:ring-2 hover:ring-slate-500/50',
-                              cfg.color
-                            )}
-                            title={`${cfg.label}${status === 'overtime' && record?.overtimeHours ? ` (${record.overtimeHours}h)` : ''}`}
-                          >
-                            {cfg.short}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="w-16 shrink-0 text-center py-2.5 px-2">
-                    {totalOT > 0 ? (
-                      <span className="text-xs font-medium text-blue-400">{totalOT}h</span>
-                    ) : (
-                      <span className="text-xs text-slate-600">&mdash;</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white truncate">{site.name}</span>
+              {site.clientName && (
+                <span className="text-[11px] text-slate-400 truncate hidden sm:inline">· {site.clientName}</span>
+              )}
+              {!site.isActive && (
+                <Badge className="bg-slate-700 text-slate-300 text-[9px] px-1.5 py-0 h-4">Inactive</Badge>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              <Users className="h-2.5 w-2.5 inline mr-0.5" />
+              {employees.length} employee{employees.length !== 1 ? 's' : ''}
+              {isCurrentMonthView && siteStats.total > 0 && (
+                <>
+                  <span className="mx-1.5">·</span>
+                  <span className="text-emerald-400">{siteStats.present} present</span>
+                  <span className="mx-1">·</span>
+                  <span className="text-red-400">{siteStats.absent} absent</span>
+                  {siteStats.unmarked > 0 && (
+                    <>
+                      <span className="mx-1">·</span>
+                      <span className="text-slate-400">{siteStats.unmarked} unmarked</span>
+                    </>
+                  )}
+                </>
+              )}
+            </p>
           </div>
         </div>
-        <ScrollBar orientation="horizontal" />
-      </ScrollArea>
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {/* Share button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShare}
+            disabled={employees.length === 0}
+            className="h-7 text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 gap-1"
+            title="Generate shareable attendance link"
+          >
+            <Share2 className="h-3 w-3" />
+            <span className="hidden sm:inline">Share</span>
+          </Button>
+          {/* Attendance Sheet button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onAttendanceSheet}
+            disabled={employees.length === 0}
+            className="h-7 text-[11px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 gap-1"
+            title="Open printable attendance sheet"
+          >
+            <FileSpreadsheet className="h-3 w-3" />
+            <span className="hidden sm:inline">Sheet</span>
+          </Button>
+        </div>
+      </button>
+
+      {/* Collapsible table */}
+      {!isCollapsed && (
+        <ScrollArea className="w-full">
+          <div className="min-w-[1000px]">
+            {/* Header row */}
+            <div className="flex items-center bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
+              <div className="w-52 shrink-0 px-4 py-3">Employee</div>
+              <div className="w-28 shrink-0 px-3 py-3">Emp. Code</div>
+              <div className="w-28 shrink-0 px-3 py-3">Trade</div>
+              <div className="flex-1 flex">
+                {displayDays.map((day) => {
+                  const isFri = isFriday(year, month, day);
+                  const label = getDayLabel(day);
+                  const recent = isRecentDay(day);
+                  return (
+                    <div
+                      key={day}
+                      className={cn(
+                        'w-16 shrink-0 text-center py-3 leading-tight',
+                        isFri && 'text-red-400/50',
+                        recent && 'text-emerald-400 font-semibold'
+                      )}
+                    >
+                      <span className={cn(recent && 'text-[10px] block')}>{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="w-16 shrink-0 text-center py-3 px-2">OT</div>
+            </div>
+
+            {/* Employee rows */}
+            <div className="divide-y divide-slate-700/50">
+              {sortedEmployees.length === 0 ? (
+                <div className="py-12 text-center text-sm text-slate-500">
+                  No active employees assigned to this site.
+                </div>
+              ) : (
+                sortedEmployees.map((emp) => {
+                  const totalOT = Array.from(attendanceMap.values())
+                    .filter((r) => r.employeeId === emp.id && r.status === 'overtime')
+                    .reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
+
+                  return (
+                    <div
+                      key={emp.id}
+                      className={cn(
+                        'flex items-center hover:bg-slate-700/20 transition-colors',
+                        emp.isTeamLeader && 'bg-amber-500/5',
+                        emp.isSupervisor && !emp.isTeamLeader && 'bg-blue-500/5',
+                      )}
+                    >
+                      <div className="w-52 shrink-0 px-4 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm text-white font-medium truncate block">
+                            {emp.fullName}
+                          </span>
+                          {emp.isTeamLeader && (
+                            <Crown className="h-3 w-3 text-amber-400 shrink-0" />
+                          )}
+                          {emp.isSupervisor && !emp.isTeamLeader && (
+                            <ShieldCheck className="h-3 w-3 text-blue-400 shrink-0" />
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-28 shrink-0 px-3 py-2.5">
+                        <span className="text-xs text-slate-400 font-mono">{emp.employeeId}</span>
+                      </div>
+                      <div className="w-28 shrink-0 px-3 py-2.5">
+                        <span className="text-xs text-slate-400 truncate block">
+                          {emp.trade || emp.position || '—'}
+                          {emp.isTeamLeader && <span className="text-amber-400"> / TL</span>}
+                          {emp.isSupervisor && !emp.isTeamLeader && <span className="text-blue-400"> / SUP</span>}
+                        </span>
+                      </div>
+                      <div className="flex-1 flex">
+                        {displayDays.map((day) => {
+                          const dateStr = formatDate(day, monthStr, yearStr);
+                          const record = attendanceMap.get(`${emp.id}-${dateStr}`);
+                          const status = record?.status || 'not_marked';
+                          const cfg = STATUS_CONFIG[status];
+                          const isFri = isFriday(year, month, day);
+                          const recent = isRecentDay(day);
+
+                          return (
+                            <div
+                              key={day}
+                              className={cn(
+                                'w-16 shrink-0 flex items-center justify-center py-1.5',
+                                isFri && 'bg-red-500/5',
+                                recent && 'bg-emerald-500/5'
+                              )}
+                            >
+                              <button
+                                onClick={(e) => {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setDropdown({
+                                    employeeId: emp.id,
+                                    date: dateStr,
+                                    status,
+                                    overtimeHours: record?.overtimeHours || null,
+                                    position: { top: rect.top, left: rect.left },
+                                  });
+                                }}
+                                className={cn(
+                                  'h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all hover:ring-2 hover:ring-slate-500/50',
+                                  cfg.color
+                                )}
+                                title={`${cfg.label}${status === 'overtime' && record?.overtimeHours ? ` (${record.overtimeHours}h)` : ''}`}
+                              >
+                                {cfg.short}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="w-16 shrink-0 text-center py-2.5 px-2">
+                        {totalOT > 0 ? (
+                          <span className="text-xs font-medium text-blue-400">{totalOT}h</span>
+                        ) : (
+                          <span className="text-xs text-slate-600">—</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
+      )}
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-3 px-4 py-3 border-t border-slate-700/50">
-        {STATUS_OPTIONS.map((s) => {
-          const cfg = STATUS_CONFIG[s];
-          return (
-            <div key={s} className="flex items-center gap-1.5">
-              <span className={cn('h-2 w-2 rounded-full', cfg.dotColor)} />
-              <span className="text-[11px] text-slate-400">{cfg.label}</span>
-            </div>
-          );
-        })}
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-red-400/40" />
-          <span className="text-[11px] text-slate-400">Friday</span>
+      {!isCollapsed && (
+        <div className="flex flex-wrap gap-3 px-4 py-3 border-t border-slate-700/50">
+          {STATUS_OPTIONS.map((s) => {
+            const cfg = STATUS_CONFIG[s];
+            return (
+              <div key={s} className="flex items-center gap-1.5">
+                <span className={cn('h-2 w-2 rounded-full', cfg.dotColor)} />
+                <span className="text-[11px] text-slate-400">{cfg.label}</span>
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-1.5">
+            <Crown className="h-2.5 w-2.5 text-amber-400" />
+            <span className="text-[11px] text-slate-400">Team Leader</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck className="h-2.5 w-2.5 text-blue-400" />
+            <span className="text-[11px] text-slate-400">Supervisor</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-red-400/40" />
+            <span className="text-[11px] text-slate-400">Friday</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Status Dropdown */}
       {dropdown && (
@@ -587,382 +603,31 @@ function ListView({
   );
 }
 
-/* ───────── Calendar View ───────── */
-interface CalendarViewProps {
-  employees: Employee[];
-  attendanceMap: Map<string, AttendanceRecord>;
-  monthStr: string;
-  yearStr: string;
-  month: number;
-  year: number;
-  loading: boolean;
-  selectedEmployeeId: string;
-  onSelectedEmployeeChange: (id: string) => void;
-  onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void;
-}
-
-function CalendarView({
-  employees,
-  attendanceMap,
-  monthStr,
-  yearStr,
-  month,
-  year,
-  loading,
-  selectedEmployeeId,
-  onSelectedEmployeeChange,
-  onStatusChange,
-}: CalendarViewProps) {
-  const daysInMonth = getDaysInMonth(year, month);
-  const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0=Sunday
-  const [dropdown, setDropdown] = useState<{
-    employeeId: string;
-    date: string;
-    status: StatusOption;
-    overtimeHours: number | null;
-    position: { top: number; left: number };
-  } | null>(null);
-
-  const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId);
-
-  const calendarDays = useMemo(() => {
-    const days: (number | null)[] = [];
-    // Pad start
-    for (let i = 0; i < firstDayOfWeek; i++) {
-      days.push(null);
-    }
-    for (let d = 1; d <= daysInMonth; d++) {
-      days.push(d);
-    }
-    return days;
-  }, [firstDayOfWeek, daysInMonth]);
-
-  const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-  const getStatusForDay = useCallback(
-    (day: number) => {
-      const dateStr = formatDate(day, monthStr, yearStr);
-      const record = attendanceMap.get(`${selectedEmployeeId}-${dateStr}`);
-      return record?.status || 'not_marked';
-    },
-    [attendanceMap, selectedEmployeeId, monthStr, yearStr]
-  );
-
-  if (loading) {
-    return (
-      <Card className="bg-slate-800/50 border-slate-700/50">
-        <CardContent className="p-6">
-          <Skeleton className="h-10 w-64 mb-6 bg-slate-700/50" />
-          <div className="grid grid-cols-7 gap-2">
-            {Array.from({ length: 35 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 rounded-lg bg-slate-700/50" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="bg-slate-800/50 border-slate-700/50">
-      <CardContent className="p-4 md:p-6">
-        {/* Searchable Employee selector */}
-        <div className="mb-6">
-          <SearchableEmployeeSelect
-            employees={employees}
-            selectedEmployeeId={selectedEmployeeId}
-            onSelect={onSelectedEmployeeChange}
-          />
-        </div>
-
-        {selectedEmployee && (
-          <>
-            {/* Employee info + Summary */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-white font-medium">{selectedEmployee.fullName}</span>
-                <span className="text-xs text-slate-500">({selectedEmployee.employeeId})</span>
-                {selectedEmployee.currentSite && (
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-                    <MapPin className="h-2.5 w-2.5 mr-0.5" />
-                    {selectedEmployee.currentSite}
-                  </Badge>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2 sm:ml-auto">
-                {STATUS_OPTIONS.map((s) => {
-                  const count = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(
-                    (d) => !isFutureDate(d, month, year) && getStatusForDay(d) === s
-                  ).length;
-                  const cfg = STATUS_CONFIG[s];
-                  return (
-                    <div key={s} className={cn('px-2.5 py-1 rounded-lg flex items-center gap-1.5', cfg.color)}>
-                      <span className={cn('h-2 w-2 rounded-full', cfg.dotColor)} />
-                      <span className="text-xs font-medium">{count}</span>
-                      <span className="text-[10px] opacity-80">{cfg.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Calendar grid */}
-            <div className="border border-slate-700/50 rounded-xl overflow-hidden">
-              {/* Weekday headers */}
-              <div className="grid grid-cols-7 bg-slate-900/80">
-                {weekDays.map((wd) => (
-                  <div
-                    key={wd}
-                    className={cn(
-                      'text-center py-2.5 text-xs font-medium border-b border-slate-700/50',
-                      wd === 'Fri' ? 'text-red-400/60' : 'text-slate-400'
-                    )}
-                  >
-                    {wd}
-                  </div>
-                ))}
-              </div>
-
-              {/* Day cells */}
-              <div className="grid grid-cols-7">
-                {calendarDays.map((day, idx) => {
-                  if (day === null) {
-                    return (
-                      <div
-                        key={`empty-${idx}`}
-                        className="min-h-[72px] md:min-h-[88px] border-b border-r border-slate-700/30 bg-slate-900/30"
-                      />
-                    );
-                  }
-
-                  const dateStr = formatDate(day, monthStr, yearStr);
-                  const status = getStatusForDay(day);
-                  const cfg = STATUS_CONFIG[status];
-                  const isFri = isFriday(year, month, day);
-                  const isFut = isFutureDate(day, month, year);
-                  const record = attendanceMap.get(`${selectedEmployeeId}-${dateStr}`);
-
-                  return (
-                    <div
-                      key={day}
-                      className={cn(
-                        'min-h-[72px] md:min-h-[88px] border-b border-r border-slate-700/30 p-1.5 md:p-2 flex flex-col',
-                        isFri && 'bg-red-500/5',
-                        isFut && 'opacity-40'
-                      )}
-                    >
-                      <span className={cn(
-                        'text-xs font-medium mb-1',
-                        isFri ? 'text-red-400/60' : 'text-slate-300'
-                      )}>
-                        {day}
-                      </span>
-                      {!isFut && (
-                        <button
-                          onClick={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setDropdown({
-                              employeeId: selectedEmployeeId,
-                              date: dateStr,
-                              status,
-                              overtimeHours: record?.overtimeHours || null,
-                              position: { top: rect.top, left: rect.left },
-                            });
-                          }}
-                          className={cn(
-                            'flex-1 rounded-lg flex items-center justify-center text-xs font-medium transition-all hover:ring-2 hover:ring-slate-500/50',
-                            cfg.color
-                          )}
-                        >
-                          <span className="truncate">{cfg.short}</span>
-                        </button>
-                      )}
-                      {status === 'overtime' && record?.overtimeHours && (
-                        <span className="text-[10px] text-blue-400 mt-0.5 text-center">
-                          {record.overtimeHours}h
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </>
-        )}
-
-        {dropdown && (
-          <StatusDropdown
-            employeeId={dropdown.employeeId}
-            date={dropdown.date}
-            currentStatus={dropdown.status}
-            currentOvertimeHours={dropdown.overtimeHours}
-            onStatusChange={onStatusChange}
-            onClose={() => setDropdown(null)}
-            position={dropdown.position}
-          />
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ───────── Searchable Site Filter Dropdown ───────── */
-interface SiteFilterProps {
-  sites: SiteOption[];
-  selectedSite: string;
-  onSiteChange: (site: string) => void;
-}
-
-function SiteFilter({ sites, selectedSite, onSiteChange }: SiteFilterProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const filtered = search
-    ? sites.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()))
-    : sites;
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setSearch('');
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (open && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [open]);
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className={cn(
-          'flex items-center gap-2 h-9 rounded-lg border px-3 text-sm transition-colors text-left min-w-[180px]',
-          selectedSite
-            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-            : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
-        )}
-      >
-        <MapPin className="h-4 w-4 shrink-0" />
-        <span className="truncate flex-1">
-          {selectedSite || 'All Sites'}
-        </span>
-        {selectedSite && (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSiteChange('');
-            }}
-            className="text-slate-400 hover:text-white shrink-0"
-          >
-            <X className="h-3.5 w-3.5" />
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl shadow-black/40 overflow-hidden min-w-[240px]">
-          <div className="p-2 border-b border-slate-700">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search sites..."
-                className="w-full h-8 pl-8 pr-3 bg-slate-900 border border-slate-600 rounded-md text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="max-h-56 overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => {
-                onSiteChange('');
-                setOpen(false);
-                setSearch('');
-              }}
-              className={cn(
-                'flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-slate-700/50',
-                !selectedSite ? 'bg-slate-700/70 text-white' : 'text-slate-300'
-              )}
-            >
-              <span className="font-medium">All Sites</span>
-            </button>
-            {filtered.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-slate-500">No sites found</div>
-            ) : (
-              filtered.map((site) => (
-                <button
-                  key={site.id}
-                  type="button"
-                  onClick={() => {
-                    onSiteChange(site.name);
-                    setOpen(false);
-                    setSearch('');
-                  }}
-                  className={cn(
-                    'flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-slate-700/50',
-                    selectedSite === site.name ? 'bg-slate-700/70 text-emerald-400' : 'text-slate-300'
-                  )}
-                >
-                  <MapPin className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                  <span className="truncate">{site.name}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ───────── Main Page ───────── */
 export function AttendancePage() {
-  const { user } = useAuthStore();
-
   const [selectedMonth, setSelectedMonth] = useState<string>(String(currentMonth).padStart(2, '0'));
   const [selectedYear, setSelectedYear] = useState<string>(String(currentYear));
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
+  // Sites + employees (ALL active employees, grouped client-side by site)
+  const [sites, setSites] = useState<SiteOption[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [totalEmployees, setTotalEmployees] = useState(0);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [loadingSites, setLoadingSites] = useState(true);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [loadingAttendance, setLoadingAttendance] = useState(true);
 
   const [search, setSearch] = useState('');
   const [searchDebounce, setSearchDebounce] = useState('');
-  const [page, setPage] = useState(1);
-  const pageSize = 20;
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
+  const [collapsedSites, setCollapsedSites] = useState<Set<string>>(new Set());
 
-  // Site filter
-  const [sites, setSites] = useState<SiteOption[]>([]);
-  const [selectedSite, setSelectedSite] = useState('');
-  const [loadingSites, setLoadingSites] = useState(true);
+  // Share dialog state
+  const [shareDialogSite, setShareDialogSite] = useState<SiteOption | null>(null);
+  const [shareDate, setShareDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  // Attendance sheet (existing component) state
+  const [attendanceSheetSite, setAttendanceSheetSite] = useState<SiteOption | null>(null);
 
   const month = parseInt(selectedMonth, 10);
   const year = parseInt(selectedYear, 10);
@@ -981,28 +646,37 @@ export function AttendancePage() {
     return map;
   }, [attendanceRecords]);
 
-  // Debounce search input
+  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearchDebounce(search);
-      setPage(1);
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  const totalPages = Math.ceil(totalEmployees / pageSize);
-
-  // Fetch sites for the site filter dropdown
+  // Fetch sites
   useEffect(() => {
     const fetchSites = async () => {
       try {
         const res = await fetch('/api/sites');
         const data = await res.json();
         if (data.success) {
-          setSites((data.data.sites || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
+          const s: SiteOption[] = (data.data.sites || []).map((s: Record<string, unknown>) => ({
+            id: s.id as string,
+            name: s.name as string,
+            clientName: (s.clientName as string | null | undefined) || null,
+            projectName: (s.projectName as string | null | undefined) || null,
+            isActive: s.isActive as boolean,
+          }));
+          // Show only active sites first, then inactive — both alphabetical
+          s.sort((a, b) => {
+            if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+          setSites(s);
         }
       } catch {
-        // silently fail
+        // silent
       } finally {
         setLoadingSites(false);
       }
@@ -1010,41 +684,44 @@ export function AttendancePage() {
     fetchSites();
   }, []);
 
-  // Fetch employees with search, site filter and pagination
+  // Fetch ALL active employees (we'll group them by site client-side)
   useEffect(() => {
     let cancelled = false;
     const fetchEmployees = async () => {
       setLoadingEmployees(true);
       try {
-        const params = new URLSearchParams({
-          limit: String(pageSize),
-          page: String(page),
-          status: 'active',
-        });
-        if (searchDebounce) params.set('search', searchDebounce);
-        if (selectedSite) params.set('site', selectedSite);
-        const res = await fetch(`/api/employees?${params.toString()}`);
+        // Pull up to 1000 active employees — covers most installations.
+        // We fetch all and group client-side so the page can render all
+        // sites in one shot without per-site fetches.
+        const res = await fetch(`/api/employees?limit=1000&status=active`);
         const data = await res.json();
         if (cancelled) return;
         if (data.success) {
-          const emps: Employee[] = (data.data.employees || []).filter(
-            (e: Employee) => e.currentSite !== 'Idle'
-          );
+          // Exclude 'Idle' (no currentSite) employees from the attendance grid
+          const emps: Employee[] = (data.data.employees || [])
+            .filter((e: Employee) => e.currentSite && e.currentSite !== 'Idle')
+            .map((e: Employee) => ({
+              id: e.id,
+              fullName: e.fullName,
+              employeeId: e.employeeId,
+              currentSite: e.currentSite,
+              status: e.status,
+              trade: e.trade || null,
+              position: (e as { position?: string | null }).position || null,
+              isTeamLeader: (e as { isTeamLeader?: boolean }).isTeamLeader || false,
+              isSupervisor: (e as { isSupervisor?: boolean }).isSupervisor || false,
+            }));
           setEmployees(emps);
-          setTotalEmployees(data.data.total || 0);
-          if (!selectedEmployeeId && emps.length > 0) {
-            setSelectedEmployeeId(emps[0].id);
-          }
         }
       } catch {
-        toast({ title: 'Error', description: 'Failed to fetch employees', variant: 'destructive' });
+        // silent
       } finally {
         if (!cancelled) setLoadingEmployees(false);
       }
     };
     fetchEmployees();
     return () => { cancelled = true; };
-  }, [searchDebounce, page, selectedSite]);
+  }, []);
 
   // Fetch attendance
   useEffect(() => {
@@ -1060,7 +737,7 @@ export function AttendancePage() {
           setAttendanceRecords(data.data.records || []);
         }
       } catch {
-        toast({ title: 'Error', description: 'Failed to fetch attendance', variant: 'destructive' });
+        // silent
       } finally {
         if (!cancelled) setLoadingAttendance(false);
       }
@@ -1069,11 +746,33 @@ export function AttendancePage() {
     return () => { cancelled = true; };
   }, [yearStr, monthStr]);
 
-  // Reset pagination and selected employee when site filter changes
-  useEffect(() => {
-    setPage(1);
-    setSelectedEmployeeId('');
-  }, [selectedSite]);
+  // Group employees by site name
+  const employeesBySite = useMemo(() => {
+    const map = new Map<string, Employee[]>();
+    for (const emp of employees) {
+      const siteName = emp.currentSite || '';
+      if (!siteName) continue;
+      if (!map.has(siteName)) map.set(siteName, []);
+      map.get(siteName)!.push(emp);
+    }
+    return map;
+  }, [employees]);
+
+  // Apply search filter (matches employee name/ID/trade)
+  const filteredEmployeesBySite = useMemo(() => {
+    if (!searchDebounce.trim()) return employeesBySite;
+    const q = searchDebounce.toLowerCase();
+    const map = new Map<string, Employee[]>();
+    for (const [siteName, emps] of employeesBySite.entries()) {
+      const filtered = emps.filter((e) =>
+        e.fullName.toLowerCase().includes(q) ||
+        e.employeeId.toLowerCase().includes(q) ||
+        (e.trade || '').toLowerCase().includes(q)
+      );
+      if (filtered.length > 0) map.set(siteName, filtered);
+    }
+    return map;
+  }, [employeesBySite, searchDebounce]);
 
   // Handle status change
   const handleStatusChange = useCallback(
@@ -1090,7 +789,6 @@ export function AttendancePage() {
         });
         const data = await res.json();
         if (data.success) {
-          // Optimistically update local state
           setAttendanceRecords((prev) => {
             const exists = prev.find(
               (r) => r.employeeId === employeeId && r.date === date
@@ -1142,8 +840,104 @@ export function AttendancePage() {
   };
 
   const isCurrentMonth = month === currentMonth && year === currentYear;
-
   const monthLabel = MONTHS.find((m) => m.value === monthStr)?.label || '';
+
+  // Toggle site collapse
+  const toggleSiteCollapse = useCallback((siteName: string) => {
+    setCollapsedSites((prev) => {
+      const next = new Set(prev);
+      if (next.has(siteName)) next.delete(siteName);
+      else next.add(siteName);
+      return next;
+    });
+  }, []);
+
+  const collapseAll = useCallback(() => {
+    setCollapsedSites(new Set(sites.map((s) => s.name)));
+  }, [sites]);
+
+  const expandAll = useCallback(() => {
+    setCollapsedSites(new Set());
+  }, []);
+
+  // ── Share handlers ──
+  const openShareDialog = useCallback((site: SiteOption) => {
+    setShareDialogSite(site);
+    setShareUrl(null);
+    setShareDate(new Date().toISOString().split('T')[0]);
+  }, []);
+
+  const closeShareDialog = useCallback(() => {
+    setShareDialogSite(null);
+    setShareUrl(null);
+  }, []);
+
+  const handleGenerateShare = useCallback(async () => {
+    if (!shareDialogSite || !shareDate) return;
+    setShareLoading(true);
+    try {
+      const res = await fetch('/api/attendance/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: shareDialogSite.id, date: shareDate }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Build absolute URL so it can be opened from anywhere
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        setShareUrl(`${origin}${data.data.url}`);
+      } else {
+        toast({ title: 'Error', description: data.error || 'Failed to generate share link', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to generate share link', variant: 'destructive' });
+    } finally {
+      setShareLoading(false);
+    }
+  }, [shareDialogSite, shareDate]);
+
+  const handleCopyShareUrl = useCallback(() => {
+    if (!shareUrl) return;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        toast({ title: 'Copied', description: 'Share link copied to clipboard' });
+      }).catch(() => {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = shareUrl;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast({ title: 'Copied', description: 'Share link copied to clipboard' });
+      });
+    }
+  }, [shareUrl]);
+
+  // ── Attendance Sheet handlers ──
+  const openAttendanceSheet = useCallback((site: SiteOption) => {
+    setAttendanceSheetSite(site);
+  }, []);
+
+  const closeAttendanceSheet = useCallback(() => {
+    setAttendanceSheetSite(null);
+  }, []);
+
+  // Employees for the currently-open attendance sheet site
+  const attendanceSheetEmployees = useMemo(() => {
+    if (!attendanceSheetSite) return [];
+    return (employeesBySite.get(attendanceSheetSite.name) || []).map((e) => ({
+      id: e.id,
+      fullName: e.fullName,
+      employeeId: e.employeeId,
+      position: e.position || e.trade || '',
+      isTeamLeader: e.isTeamLeader,
+      currentSite: e.currentSite,
+    }));
+  }, [attendanceSheetSite, employeesBySite]);
+
+  // Loading state
+  const isLoading = loadingSites || loadingEmployees || loadingAttendance;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1152,40 +946,12 @@ export function AttendancePage() {
         <div>
           <h2 className="text-2xl font-bold text-white">Attendance Management</h2>
           <p className="text-slate-400 mt-1 text-sm">
-            Track and manage daily employee attendance
+            Site-wise daily attendance · TL/Supervisors shown first
           </p>
-        </div>
-
-        {/* View Toggle */}
-        <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5">
-          <button
-            onClick={() => setViewMode('list')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              viewMode === 'list'
-                ? 'bg-emerald-500 text-white'
-                : 'text-slate-400 hover:text-white'
-            )}
-          >
-            <List className="h-4 w-4" />
-            List
-          </button>
-          <button
-            onClick={() => setViewMode('calendar')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-              viewMode === 'calendar'
-                ? 'bg-emerald-500 text-white'
-                : 'text-slate-400 hover:text-white'
-            )}
-          >
-            <Calendar className="h-4 w-4" />
-            Calendar
-          </button>
         </div>
       </div>
 
-      {/* Month/Year Navigation + Filters */}
+      {/* Month/Year Navigation + Search */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         {/* Month Navigation */}
         <div className="flex items-center gap-1">
@@ -1241,129 +1007,220 @@ export function AttendancePage() {
           </SelectContent>
         </Select>
 
-        {/* Site Filter */}
-        {!loadingSites && sites.length > 0 && (
-          <SiteFilter
-            sites={sites}
-            selectedSite={selectedSite}
-            onSiteChange={setSelectedSite}
-          />
-        )}
-
-        {/* Search - disabled in calendar view */}
-        <div className={cn('relative flex-1 max-w-xs', viewMode === 'calendar' && 'opacity-40 pointer-events-none')}>
+        {/* Search */}
+        <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
             placeholder="Search employees..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            disabled={viewMode === 'calendar'}
-            className="pl-9 h-9 bg-slate-800 border-slate-700 text-sm text-white placeholder:text-slate-500 focus-visible:border-emerald-500/50 focus-visible:ring-emerald-500/20 disabled:cursor-not-allowed"
+            className="pl-9 h-9 bg-slate-800 border-slate-700 text-sm text-white placeholder:text-slate-500 focus-visible:border-emerald-500/50 focus-visible:ring-emerald-500/20"
           />
-          {viewMode === 'calendar' && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="text-[11px] text-slate-500 bg-slate-900/80 px-2 py-0.5 rounded">
-                Search in employee dropdown
-              </span>
-            </div>
+          {search && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-slate-400 hover:text-white"
+              onClick={() => setSearch('')}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
           )}
         </div>
+
+        {/* Expand/Collapse all */}
+        {sites.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            <Button variant="ghost" size="sm" onClick={expandAll} className="text-slate-400 hover:text-white text-xs h-7">
+              Expand All
+            </Button>
+            <Button variant="ghost" size="sm" onClick={collapseAll} className="text-slate-400 hover:text-white text-xs h-7">
+              Collapse All
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Pagination - only for list view */}
-      {viewMode === 'list' && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-slate-400">
-            Showing <span className="text-white font-medium">{employees.length}</span> of{' '}
-            <span className="text-white font-medium">{totalEmployees}</span> employees
-            {searchDebounce && <span> matching &ldquo;<span className="text-emerald-400">{searchDebounce}</span>&rdquo;</span>}
-            {selectedSite && <span> in <span className="text-emerald-400">{selectedSite}</span></span>}
-          </p>
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-slate-400 hover:text-white hover:bg-slate-700"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center gap-1 px-2">
-                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                  let pageNum: number;
-                  if (totalPages <= 5) {
-                    pageNum = i + 1;
-                  } else if (page <= 3) {
-                    pageNum = i + 1;
-                  } else if (page >= totalPages - 2) {
-                    pageNum = totalPages - 4 + i;
-                  } else {
-                    pageNum = page - 2 + i;
-                  }
-                  return (
-                    <Button
-                      key={pageNum}
-                      variant="ghost"
-                      size="sm"
-                      className={cn(
-                        'h-8 w-8 text-sm font-medium',
-                        page === pageNum
-                          ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-700'
-                      )}
-                      onClick={() => setPage(pageNum)}
-                    >
-                      {pageNum}
-                    </Button>
-                  );
-                })}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-slate-400 hover:text-white hover:bg-slate-700"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
+      {/* Content */}
+      {isLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 bg-slate-800 rounded-lg" />
+          ))}
+        </div>
+      ) : sites.length === 0 ? (
+        <Card className="bg-slate-800/50 border-slate-700/50">
+          <CardContent className="py-16 text-center">
+            <Building2 className="h-10 w-10 text-slate-600 mx-auto mb-3" />
+            <p className="text-sm text-slate-400">No sites found</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Create sites first to manage attendance per site.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {sites.map((site) => {
+            const siteEmployees = filteredEmployeesBySite.get(site.name) || [];
+            // Skip sites with no employees when searching
+            if (searchDebounce && siteEmployees.length === 0) return null;
+            return (
+              <SiteListView
+                key={site.id}
+                site={site}
+                employees={siteEmployees}
+                attendanceMap={attendanceMap}
+                daysInMonth={daysInMonth}
+                monthStr={monthStr}
+                yearStr={yearStr}
+                month={month}
+                year={year}
+                isCurrentMonthView={isCurrentMonthView}
+                isCollapsed={collapsedSites.has(site.name)}
+                onToggleCollapse={() => toggleSiteCollapse(site.name)}
+                onStatusChange={handleStatusChange}
+                onShare={() => openShareDialog(site)}
+                onAttendanceSheet={() => openAttendanceSheet(site)}
+              />
+            );
+          })}
         </div>
       )}
 
-      {/* Content */}
-      <div className="relative">
-        {viewMode === 'list' ? (
-          <ListView
-            employees={employees}
-            attendanceMap={attendanceMap}
-            daysInMonth={daysInMonth}
-            monthStr={monthStr}
-            yearStr={yearStr}
-            month={month}
-            year={year}
-            loading={loadingEmployees || loadingAttendance}
-            isCurrentMonthView={isCurrentMonthView}
-            onStatusChange={handleStatusChange}
-          />
-        ) : (
-          <CalendarView
-            employees={employees}
-            attendanceMap={attendanceMap}
-            monthStr={monthStr}
-            yearStr={yearStr}
-            month={month}
-            year={year}
-            loading={loadingEmployees || loadingAttendance}
-            selectedEmployeeId={selectedEmployeeId}
-            onSelectedEmployeeChange={setSelectedEmployeeId}
-            onStatusChange={handleStatusChange}
-          />
-        )}
-      </div>
+      {/* Share Dialog */}
+      <Dialog open={!!shareDialogSite} onOpenChange={(open) => { if (!open) closeShareDialog(); }}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Share2 className="h-5 w-5 text-amber-400" />
+              Share Attendance Link
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Generate a shareable link for <span className="text-white font-medium">{shareDialogSite?.name}</span>.
+              The Team Leader / Supervisor can open the link on their phone, mark each employee as
+              Present or Absent, and submit. The link becomes read-only after submission.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                Date for attendance
+              </label>
+              <Input
+                type="date"
+                value={shareDate}
+                onChange={(e) => setShareDate(e.target.value)}
+                className="bg-slate-900 border-slate-600 text-white"
+              />
+              <p className="text-[11px] text-slate-500">
+                The link records attendance for this specific date only.
+              </p>
+            </div>
+
+            {shareUrl && (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-300 uppercase tracking-wide">
+                  Share link (read-only after submission)
+                </label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={shareUrl}
+                    readOnly
+                    className="bg-slate-900 border-slate-600 text-white text-xs font-mono"
+                  />
+                  <Button
+                    onClick={handleCopyShareUrl}
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5 shrink-0"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </Button>
+                </div>
+                <a
+                  href={shareUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 mt-1"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open link in new tab
+                </a>
+                <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-[11px] text-amber-300">
+                  Send this link to the Team Leader or Supervisor. They can mark attendance
+                  without logging in. Once submitted, the same link shows a read-only summary.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeShareDialog} className="text-slate-400 hover:text-white">
+              {shareUrl ? 'Close' : 'Cancel'}
+            </Button>
+            {!shareUrl && (
+              <Button
+                onClick={handleGenerateShare}
+                disabled={shareLoading || !shareDate}
+                className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+              >
+                {shareLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Share2 className="h-4 w-4" />
+                )}
+                Generate Link
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Attendance Sheet (full-screen overlay) */}
+      {attendanceSheetSite && (
+        <AttendanceSheetLazy
+          site={attendanceSheetSite}
+          employees={attendanceSheetEmployees}
+          onClose={closeAttendanceSheet}
+        />
+      )}
     </div>
+  );
+}
+
+/* ───────── Attendance Sheet (lazy wrapper around the existing component) ───────── */
+// We lazy-load the attendance sheet so its heavy deps (html2canvas, jsPDF)
+// don't bloat the main attendance page bundle.
+import { AttendanceSheet } from '@/components/attendance/attendance-sheet';
+
+function AttendanceSheetLazy({
+  site,
+  employees,
+  onClose,
+}: {
+  site: SiteOption;
+  employees: Array<{
+    id: string;
+    fullName: string;
+    employeeId: string;
+    position: string;
+    isTeamLeader: boolean;
+    currentSite: string | null;
+  }>;
+  onClose: () => void;
+}) {
+  return (
+    <AttendanceSheet
+      site={{
+        id: site.id,
+        name: site.name,
+        clientName: site.clientName,
+        projectName: site.projectName,
+      }}
+      employees={employees}
+      onClose={onClose}
+    />
   );
 }

@@ -136,6 +136,7 @@ model Site {
   monthActivations  SiteMonthActivation[]
   workLogs          WorkLog[]
   salaryRecords     SalaryRecord[]
+  attendanceShares  AttendanceShare[]
 }
 
 model Attendance {
@@ -497,4 +498,49 @@ model Advance {
   @@index([effectiveMonth, effectiveYear])
   @@index([effectiveYear])
   @@index([deletedAt])
+}
+
+// ---------------------------------------------------------------------------
+// AttendanceShare
+// ---------------------------------------------------------------------------
+// A shareable, auth-free link that lets a Team Leader / Supervisor mark
+// attendance for a single site on a single date.
+//
+// Lifecycle:
+//   - status = "open"     : link is active and waiting for submission
+//   - status = "submitted": attendance has been recorded via this link,
+//                           further edits are blocked
+//   - status = "expired"  : admin manually closed the link (no submission)
+//
+// The token is unguessable (cuid) and tied to a single site + date.
+// Once submitted, the same link returns a "submitted" view-only page so
+// the TL/Supervisor can confirm their entries were saved.
+// ---------------------------------------------------------------------------
+model AttendanceShare {
+  id          String   @id @default(cuid())
+  token       String   @unique // The unguessable share token (used in URL)
+  siteId      String   // FK to Site.id
+  siteName    String   // Denormalized for display
+  clientName  String?  // Denormalized for the attendance sheet header
+  projectName String?  // Denormalized for the attendance sheet header
+  // The date the attendance is for (YYYY-MM-DD). The TL marks who was
+  // present/absent on this specific date.
+  date        String   // YYYY-MM-DD
+  // Status: open (waiting), submitted (saved), expired (admin voided)
+  status      String   @default("open")
+  // When submitted, snapshot of what was marked (JSON array of
+  // { employeeId, status } for audit / re-display).
+  submittedSnapshot String?
+  submittedById   String? // Employee.id of the TL/Sup who submitted (optional)
+  submittedByName String? // Denormalized name
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime? // Optional expiry timestamp
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@index([date])
+  @@index([status])
+  @@index([token])
 }

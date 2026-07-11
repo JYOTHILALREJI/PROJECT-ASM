@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { ArrowLeft, Download, Printer, Calendar, Loader2 } from 'lucide-react';
+import { ArrowLeft, Download, Printer, Calendar, Loader2, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -426,6 +426,23 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
     setIsGenerating(true);
 
     try {
+      // Pre-fetch the logo as a data URL so html2canvas doesn't choke on
+      // cross-origin images. The logo is served from the same origin so this
+      // is safe and reliable.
+      let logoDataUrl = '';
+      try {
+        const logoResp = await fetch('/logo_asm.png');
+        const logoBlob = await logoResp.blob();
+        logoDataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(logoBlob);
+        });
+      } catch {
+        // Non-fatal — the PDF will just render without the logo
+      }
+
       const iframe = document.createElement('iframe');
       iframe.style.position = 'fixed';
       iframe.style.left = '-9999px';
@@ -441,13 +458,22 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
         return;
       }
 
+      // Inline the logo as a data URL so html2canvas can render it without
+      // cross-origin taint issues.
+      const html = generateAllPagesHtml().replace(
+        /src="\/logo_asm\.png"/g,
+        `src="${logoDataUrl}"`,
+      );
+
       iframeDoc.open();
       iframeDoc.write(`<!DOCTYPE html><html><head><style>${getPrintCSS()}</style></head><body>`);
-      iframeDoc.write(generateAllPagesHtml());
+      iframeDoc.write(html);
       iframeDoc.write(`</body></html>`);
       iframeDoc.close();
 
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      // Wait for the DOM + any remaining image to settle. 800ms is enough
+      // for the inlined data URL logo to render.
+      await new Promise((resolve) => setTimeout(resolve, 800));
 
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -464,6 +490,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
           allowTaint: true,
           backgroundColor: '#ffffff',
           logging: false,
+          imageTimeout: 0, // Don't wait for external images (we inlined them)
         });
 
         const imgData = canvas.toDataURL('image/png');
@@ -476,13 +503,109 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
       document.body.removeChild(iframe);
     } catch (error) {
       console.error('Error generating PDF:', error);
+      // Surface the error to the user so they know the snapshot failed
+      alert('Failed to generate PDF snapshot. Please try the Print option instead.');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [isGenerating, site.name, date, generateAllPagesHtml]);
+
+  /* ── Snapshot (download PNG of the first page) ── */
+  // Captures the first page of the attendance sheet as a PNG image. Useful
+  // for sharing via chat apps where PDF isn't ideal.
+  const handleSnapshot = useCallback(async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+    try {
+      let logoDataUrl = '';
+      try {
+        const logoResp = await fetch('/logo_asm.png');
+        const logoBlob = await logoResp.blob();
+        logoDataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(logoBlob);
+        });
+      } catch {
+        // ignore
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '-9999px';
+      iframe.style.width = '794px';
+      iframe.style.height = '1123px';
+      document.body.appendChild(iframe);
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!iframeDoc) {
+        document.body.removeChild(iframe);
+        return;
+      }
+
+      const html = generateAllPagesHtml().replace(
+        /src="\/logo_asm\.png"/g,
+        `src="${logoDataUrl}"`,
+      );
+
+      iframeDoc.open();
+      iframeDoc.write(`<!DOCTYPE html><html><head><style>${getPrintCSS()}</style></head><body>`);
+      iframeDoc.write(html);
+      iframeDoc.write(`</body></html>`);
+      iframeDoc.close();
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      const pageDiv = iframeDoc.querySelector('.page') as HTMLElement | null;
+      if (!pageDiv) {
+        document.body.removeChild(iframe);
+        return;
+      }
+
+      const canvas = await html2canvas(pageDiv, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        imageTimeout: 0,
+      });
+
+      const fileName = `attendance-${site.name.replace(/\s+/g, '-')}-${date.toISOString().split('T')[0]}.png`;
+      const link = document.createElement('a');
+      link.download = fileName;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+      document.body.removeChild(iframe);
+    } catch (error) {
+      console.error('Error generating snapshot:', error);
+      alert('Failed to generate snapshot. Please try Print instead.');
     } finally {
       setIsGenerating(false);
     }
   }, [isGenerating, site.name, date, generateAllPagesHtml]);
 
   /* ── Print with @page margin:0 to suppress browser headers/footers ── */
-  const handlePrint = useCallback(() => {
+  const handlePrint = useCallback(async () => {
+    // Inline the logo as a data URL so the print output renders it reliably
+    // (some browsers block relative image refs inside print iframes).
+    let logoDataUrl = '';
+    try {
+      const logoResp = await fetch('/logo_asm.png');
+      const logoBlob = await logoResp.blob();
+      logoDataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(logoBlob);
+      });
+    } catch {
+      // ignore
+    }
+
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.left = '-9999px';
@@ -497,9 +620,14 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
       return;
     }
 
+    const html = generateAllPagesHtml().replace(
+      /src="\/logo_asm\.png"/g,
+      `src="${logoDataUrl}"`,
+    );
+
     iframeDoc.open();
     iframeDoc.write(`<!DOCTYPE html><html><head><style>${getPrintCSS()}</style></head><body>`);
-    iframeDoc.write(generateAllPagesHtml());
+    iframeDoc.write(html);
     iframeDoc.write(`</body></html>`);
     iframeDoc.close();
 
@@ -574,6 +702,22 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSnapshot}
+              disabled={isGenerating}
+              className="gap-1.5"
+              title="Save first page as PNG image"
+            >
+              {isGenerating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Camera className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Snapshot</span>
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
