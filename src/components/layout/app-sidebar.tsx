@@ -170,9 +170,11 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
     <div className="flex h-full flex-col bg-slate-900 border-r border-slate-700/50">
       {/* Logo Section */}
       <div className="flex items-center gap-3 px-4 py-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500 font-bold text-white text-lg shrink-0">
-          A
-        </div>
+        <img
+          src="/logo_asm.png"
+          alt="ASM"
+          className="h-10 w-10 rounded-lg object-contain shrink-0"
+        />
         {!collapsed && (
           <div className="flex flex-col min-w-0">
             <span className="font-bold text-white text-lg leading-tight">ASM</span>

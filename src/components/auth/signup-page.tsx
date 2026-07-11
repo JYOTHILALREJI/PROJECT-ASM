@@ -87,9 +87,11 @@ export function SignupPage() {
       <div className="w-full max-w-md">
         {/* Branding */}
         <div className="flex flex-col items-center mb-8">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500 shadow-lg shadow-blue-500/25 mb-4">
-            <Shield className="h-7 w-7 text-white" />
-          </div>
+          <img
+            src="/logo_asm.png"
+            alt="ASM"
+            className="h-14 w-14 rounded-2xl object-contain shadow-lg mb-4"
+          />
           <h1 className="text-2xl font-bold text-white">ASM</h1>
           <p className="text-sm text-slate-400 mt-1">
             Arabian Shield Manpower

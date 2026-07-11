@@ -35,9 +35,11 @@ function LoadingScreen() {
     <div className="flex min-h-screen items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-6 w-full max-w-sm px-4">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-14 w-14 rounded-2xl bg-blue-500 shadow-lg shadow-blue-500/25 flex items-center justify-center">
-            <span className="text-2xl font-bold text-white">A</span>
-          </div>
+          <img
+            src="/logo_asm.png"
+            alt="ASM"
+            className="h-14 w-14 rounded-2xl object-contain shadow-lg"
+          />
           <Skeleton className="h-7 w-24 bg-slate-800" />
           <Skeleton className="h-4 w-48 bg-slate-800" />
         </div>
