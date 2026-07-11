@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   Users,
+  Wallet,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/store/app-store';
 
 /* ───────── Types ───────── */
 
@@ -293,6 +295,7 @@ function mergeApiEntries(
 /* ───────── Main Component ───────── */
 
 export function AccountsPage() {
+  const { setCurrentView } = useAppStore();
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [sites, setSites] = useState<SiteData[]>([]);
@@ -307,6 +310,10 @@ export function AccountsPage() {
 
   // Original data for reverting
   const [originalSiteEmployees, setOriginalSiteEmployees] = useState<Record<string, MergedEmployeeRow[]>>({});
+
+  // Pending advances for this month — map of empId -> total pending amount
+  const [pendingAdvancesByEmp, setPendingAdvancesByEmp] = useState<Map<string, number>>(new Map());
+  const [totalPendingAdvances, setTotalPendingAdvances] = useState(0);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -356,6 +363,55 @@ export function AccountsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Fetch pending advances for the selected month and merge them into the
+  // employee rows as the "advance" field (only when NOT in edit mode, so
+  // editing doesn't fight with the auto-merge).
+  useEffect(() => {
+    const fetchPendingAdvances = async () => {
+      try {
+        const res = await fetch(`/api/advances/pending-by-month?month=${monthStr}&year=${selectedYear}`);
+        const data = await res.json();
+        if (data.success) {
+          const byEmp = new Map<string, number>();
+          for (const item of (data.data.byEmployee || []) as Array<{ empId: string; total: number }>) {
+            byEmp.set(item.empId, item.total);
+          }
+          setPendingAdvancesByEmp(byEmp);
+          setTotalPendingAdvances(data.data.totalPending || 0);
+
+          // Merge pending advances into employee rows (only when not in edit mode)
+          // — for each row, set advance = max(saved advance, pending advance total).
+          // This ensures the salary sheet shows the latest pending advance even
+          // before the salary record is saved.
+          if (!editMode) {
+            setSiteEmployees((prev) => {
+              const next: Record<string, MergedEmployeeRow[]> = {};
+              for (const [siteId, emps] of Object.entries(prev)) {
+                next[siteId] = emps.map((emp) => {
+                  const pendingAmt = byEmp.get(emp.empId) || 0;
+                  // Use whichever is larger: existing saved advance or pending total
+                  // (the saved value already includes applied advances; pending ones
+                  //  will be applied on the next save).
+                  const effectiveAdvance = Math.max(emp.advance, pendingAmt);
+                  const newBalance = emp.totalSalary - emp.deduction - effectiveAdvance;
+                  return { ...emp, advance: effectiveAdvance, balanceSalary: newBalance };
+                });
+              }
+              return next;
+            });
+          }
+        } else {
+          setPendingAdvancesByEmp(new Map());
+          setTotalPendingAdvances(0);
+        }
+      } catch {
+        setPendingAdvancesByEmp(new Map());
+        setTotalPendingAdvances(0);
+      }
+    };
+    fetchPendingAdvances();
+  }, [monthStr, selectedYear, editMode]);
 
   // Reset edit mode when month/year changes
   useEffect(() => {
@@ -731,9 +787,11 @@ export function AccountsPage() {
       if (json.success) {
         const savedCount = json.data?.savedCount ?? allRecords.length;
         const softDeleted = json.data?.softDeletedCount ?? 0;
+        const advancesApplied = json.data?.advancesApplied ?? 0;
+        const advancesSkipped = json.data?.advancesSkipped ?? 0;
         toast({
           title: 'Saved',
-          description: `${savedCount} record(s) saved successfully.${softDeleted > 0 ? ` ${softDeleted} removed.` : ''}`,
+          description: `${savedCount} record(s) saved successfully.${softDeleted > 0 ? ` ${softDeleted} removed.` : ''}${advancesApplied > 0 ? ` ${advancesApplied} advance(s) applied.` : ''}${advancesSkipped > 0 ? ` ${advancesSkipped} advance(s) skipped (no salary record).` : ''}`,
         });
         setEditMode(false);
         fetchData();
@@ -852,6 +910,21 @@ export function AccountsPage() {
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Advance button — opens the Advance management page */}
+          <Button
+            onClick={() => setCurrentView('advance')}
+            className="bg-amber-600 hover:bg-amber-700 text-white gap-2 shadow-lg shadow-amber-600/20"
+            title="Manage employee cash advances"
+          >
+            <Wallet className="h-4 w-4" />
+            Advance
+            {totalPendingAdvances > 0 && (
+              <Badge variant="secondary" className="ml-1 bg-amber-300 text-amber-900 text-[10px] px-1.5 py-0 h-4 min-w-[20px] flex items-center justify-center">
+                {totalPendingAdvances > 999 ? '999+' : Math.round(totalPendingAdvances)}
+              </Badge>
+            )}
+          </Button>
+
           {/* Edit / Save / Cancel buttons */}
           {sites.length > 0 && (
             <>

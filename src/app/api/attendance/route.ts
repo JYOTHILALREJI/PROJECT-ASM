@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 
 // Calculate total working days in a month (excluding Fridays)
 function getWorkingDaysInMonth(year: number, month: number): number {
@@ -208,6 +209,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ── Sync salary record from attendance ──
+    // Each present day = 10 hours, written to the employee's salary record
+    // at their current site for this month. Allocation engine then runs to
+    // split hours across standard/premium tiers and update totals.
+    const [yyyy, mm, dd] = date.split('-');
+    void dd;
+    const monthKey = `${yyyy}-${mm}`;
+    let salarySync: { ok: boolean; skipped: boolean; totalHours: number; reason?: string } | null = null;
+    try {
+      salarySync = await syncEmployeeSalaryFromAttendance(employeeId, monthKey);
+    } catch (err) {
+      console.error('[attendance POST] salary sync failed:', err);
+    }
+
     // Check for consecutive absences (auto-warning)
     if (status === 'absent') {
       const consecutiveAbsences = await checkConsecutiveAbsences(employeeId, date);
@@ -268,6 +283,14 @@ export async function POST(request: NextRequest) {
           updatedAt: attendance.updatedAt.toISOString(),
         },
         rating,
+        salarySync: salarySync
+          ? {
+              ok: salarySync.ok,
+              skipped: salarySync.skipped,
+              totalHours: salarySync.totalHours,
+              reason: salarySync.reason || undefined,
+            }
+          : null,
       },
     });
   } catch (error: unknown) {

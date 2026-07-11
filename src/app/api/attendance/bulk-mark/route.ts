@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 
 // POST /api/attendance/bulk-mark - Mark employees as present for a specific date
 // If employeeIds array is provided, only mark those employees.
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Bulk upsert attendance records for the target employees
-    const results = [];
+    const results: Array<{ employeeId: string; skipped?: boolean; reason?: string; id?: string; updated?: boolean }> = [];
     const errors: string[] = [];
 
     for (const emp of employees) {
@@ -77,6 +78,14 @@ export async function POST(request: NextRequest) {
             overtimeHours: status === 'overtime' ? (body.overtimeHours || 2) : null,
           },
         });
+
+        // Sync salary record from attendance (10 hrs per present day)
+        try {
+          const monthKey = date.substring(0, 7); // YYYY-MM
+          await syncEmployeeSalaryFromAttendance(emp.id, monthKey);
+        } catch (syncErr) {
+          console.error('[bulk-mark] salary sync failed for', emp.id, syncErr);
+        }
 
         results.push({ employeeId: emp.id, id: record.id, updated: true });
       } catch (err) {

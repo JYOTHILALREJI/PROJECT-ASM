@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 
 // Calculate total working days in a month (excluding Fridays)
 function getWorkingDaysInMonth(year: number, month: number): number {
@@ -85,6 +86,14 @@ export async function PUT(
         where: { id: existing.employeeId },
         data: { rating },
       });
+    }
+
+    // Sync salary record from attendance (10 hrs per present day)
+    try {
+      const monthKey = `${yearStr}-${String(monthStr).padStart(2, '0')}`;
+      await syncEmployeeSalaryFromAttendance(existing.employeeId, monthKey);
+    } catch (syncErr) {
+      console.error('[attendance PUT] salary sync failed:', syncErr);
     }
 
     return NextResponse.json({

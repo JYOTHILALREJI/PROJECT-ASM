@@ -19,6 +19,7 @@ import { CancellationRequestPage } from '@/components/cancellation-requests/canc
 import { UniformRegistryPage } from '@/components/uniform-registry/uniform-registry-page';
 import { AccountsPage } from '@/components/accounts/accounts-page';
 import { ConsolidatedSalaryPage } from '@/components/consolidated-salary/consolidated-salary-page';
+import { AdvancePage } from '@/components/advance/advance-page';
 import { EmployeeHoursLedger } from '@/components/employees/employee-hours-ledger';
 import { EmployeeHoursDirectory } from '@/components/employees/employee-hours-directory';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -57,7 +58,7 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'uniform_registry', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'accounts', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins'];
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId } = useAppStore();
@@ -108,6 +109,7 @@ function MainLayout() {
   // Map sub-views to their parent permission slug
   const VIEW_PERMISSION_MAP: Record<string, string> = {
     employee_hours_ledger: 'employees', // Uses employees permission
+    advance: 'accounts', // Advance is a sub-feature of Accounts
   };
 
   // Dynamic view permission check
@@ -148,6 +150,8 @@ function MainLayout() {
         return <AttendancePage />;
       case 'accounts':
         return <AccountsPage />;
+      case 'advance':
+        return <AdvancePage />;
       case 'consolidated_salary':
         return <ConsolidatedSalaryPage />;
       case 'uniform_registry':

@@ -108,6 +108,7 @@ model Employee {
   salaryRecords        SalaryRecord[]
   workingHours         TotalEmployeeWorkingHours[]
   workLogs             WorkLog[]
+  advances             Advance[]
 
   @@index([trade])
   @@index([isTeamLeader])
@@ -450,4 +451,49 @@ model WorkLog {
 
   @@unique([employeeId, siteId, year, month])
   @@index([employeeId, year, month], name: "idx_work_logs_chrono")
+}
+
+// ---------------------------------------------------------------------------
+// Advance
+// ---------------------------------------------------------------------------
+// An Advance is a cash payment given to an employee ahead of salary.
+// It is deducted from the employee's NEXT salary record.
+//
+// Lifecycle:
+//   1. status = "pending"  — created via the Advance bucket UI, not yet applied
+//   2. status = "applied"  — applied to a salary record (advance field set)
+//   3. status = "cancelled" — admin cancelled before it was applied
+//
+// The "appliedToSalaryRecordId" field links the advance to the salary record
+// it was deducted from, for traceability.
+// ---------------------------------------------------------------------------
+model Advance {
+  id            String   @id @default(cuid())
+  empId         String // FK to Employee.id
+  empName       String
+  employeeCode  String   @default("") // employee.employeeId (e.g. ASM-001)
+  amount        Float    @default(0)
+  reason        String   @default("")
+  // Status: pending (not yet applied), applied (deducted from salary),
+  //         cancelled (admin voided before applying)
+  status        String   @default("pending")
+  // Effective month/year: which salary month this advance should be deducted from.
+  // Format: month = "YYYY-MM", year = integer.
+  // Default: next month from creation date.
+  effectiveMonth String  // YYYY-MM
+  effectiveYear  Int
+  // If applied, link to the salary record it was deducted from
+  appliedToSalaryRecordId String?
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  employee Employee @relation(fields: [empId], references: [id], onDelete: Cascade)
+
+  @@index([empId])
+  @@index([status])
+  @@index([effectiveMonth, effectiveYear])
+  @@index([effectiveYear])
+  @@index([deletedAt])
 }

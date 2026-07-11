@@ -360,6 +360,73 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // ── Apply pending advances to the saved salary records ──
+      // For each unique (month, year) in the saved records, find pending advances
+      // and add their amount to the corresponding salary record's `advance` field.
+      const monthYearCombosForAdvances = new Set(
+        savedRecords.map((r) => `${r.month}|${r.year}`),
+      );
+      let advancesApplied = 0;
+      let advancesSkipped = 0;
+      for (const combo of monthYearCombosForAdvances) {
+        const [advMonth, advYearStr] = combo.split('|');
+        const advYear = parseInt(advYearStr, 10);
+
+        const pendingAdvances = await db.advance.findMany({
+          where: {
+            effectiveMonth: advMonth,
+            effectiveYear: advYear,
+            status: 'pending',
+            deletedAt: null,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        for (const advance of pendingAdvances) {
+          // Find this employee's salary records for this month/year (across all sites)
+          const empSalaryRecords = await db.salaryRecord.findMany({
+            where: {
+              empId: advance.empId,
+              month: advMonth,
+              year: advYear,
+              isDeleted: false,
+            },
+            orderBy: [{ rateTier: 'asc' }], // standard first
+          });
+
+          if (empSalaryRecords.length === 0) {
+            // No salary record exists yet — skip; advance stays pending
+            advancesSkipped++;
+            continue;
+          }
+
+          // Prefer the 'standard' tier record; fall back to the first
+          const targetRecord =
+            empSalaryRecords.find((r) => r.rateTier === 'standard') || empSalaryRecords[0];
+
+          const newAdvance = targetRecord.advance + advance.amount;
+          const newBalance = targetRecord.totalSalary - targetRecord.deduction - newAdvance;
+
+          const updatedSalaryRecord = await db.salaryRecord.update({
+            where: { id: targetRecord.id },
+            data: {
+              advance: newAdvance,
+              balanceSalary: newBalance,
+            },
+          });
+
+          // Mark the advance as applied
+          await db.advance.update({
+            where: { id: advance.id },
+            data: {
+              status: 'applied',
+              appliedToSalaryRecordId: updatedSalaryRecord.id,
+            },
+          });
+          advancesApplied++;
+        }
+      }
+
       // Group post-allocation records by (empId, siteId, month, year) to compute total hours per employee-site-month
       const workLogSyncMap = new Map<string, { empId: string; siteId: string; year: number; month: number; totalHours: number }>();
       for (const record of postAllocationRecords) {
@@ -469,6 +536,8 @@ export async function POST(request: NextRequest) {
         data: {
           savedCount: savedRecords.length,
           softDeletedCount: 0, // Allocation engine handles deletes internally
+          advancesApplied,
+          advancesSkipped,
           records: finalRecords.map((r) => ({
             ...r,
             createdAt: r.createdAt.toISOString(),
@@ -565,11 +634,54 @@ export async function POST(request: NextRequest) {
         where: { id: { in: finalRecordIds } },
       });
 
+      // Apply pending advances in manual mode too
+      const manualMonthYearCombos = new Set(
+        savedRecords.map((r) => `${r.month}|${r.year}`),
+      );
+      let manualAdvancesApplied = 0;
+      let manualAdvancesSkipped = 0;
+      for (const combo of manualMonthYearCombos) {
+        const [advMonth, advYearStr] = combo.split('|');
+        const advYear = parseInt(advYearStr, 10);
+        const pendingAdvances = await db.advance.findMany({
+          where: {
+            effectiveMonth: advMonth,
+            effectiveYear: advYear,
+            status: 'pending',
+            deletedAt: null,
+          },
+        });
+        for (const advance of pendingAdvances) {
+          const empSalaryRecords = await db.salaryRecord.findMany({
+            where: { empId: advance.empId, month: advMonth, year: advYear, isDeleted: false },
+            orderBy: [{ rateTier: 'asc' }],
+          });
+          if (empSalaryRecords.length === 0) {
+            manualAdvancesSkipped++;
+            continue;
+          }
+          const target = empSalaryRecords.find((r) => r.rateTier === 'standard') || empSalaryRecords[0];
+          const newAdvance = target.advance + advance.amount;
+          const newBalance = target.totalSalary - target.deduction - newAdvance;
+          const updated = await db.salaryRecord.update({
+            where: { id: target.id },
+            data: { advance: newAdvance, balanceSalary: newBalance },
+          });
+          await db.advance.update({
+            where: { id: advance.id },
+            data: { status: 'applied', appliedToSalaryRecordId: updated.id },
+          });
+          manualAdvancesApplied++;
+        }
+      }
+
       return NextResponse.json({
         success: true,
         data: {
           savedCount: savedRecords.length,
           softDeletedCount,
+          advancesApplied: manualAdvancesApplied,
+          advancesSkipped: manualAdvancesSkipped,
           records: finalRecords.map((r) => ({
             ...r,
             createdAt: r.createdAt.toISOString(),
