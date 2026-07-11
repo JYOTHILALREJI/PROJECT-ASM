@@ -196,11 +196,31 @@ export async function syncEmployeeSalaryFromAttendance(
       },
     });
 
+    // Soft-delete any existing WorkLog for this employee+site+month so the
+    // Employee Hours Ledger doesn't show stale hours from a previous mark.
+    await db.workLog.updateMany({
+      where: {
+        employeeId,
+        siteId: site.id,
+        year,
+        month: monthNum,
+        deletedAt: null,
+      },
+      data: { deletedAt: new Date() },
+    });
+
     // Run allocation to clean up premium records too
     try {
       await allocateEmployeeHours(month, year);
     } catch (err) {
       console.error('[attendance-sync] allocateEmployeeHours failed:', err);
+    }
+
+    // Recalculate downstream months since hours changed
+    try {
+      await recalcEmployeeFromMonth(employeeId, year, monthNum);
+    } catch (err) {
+      console.error('[attendance-sync] recalcEmployeeFromMonth (zero hours) failed:', err);
     }
 
     return {
@@ -302,6 +322,39 @@ export async function syncEmployeeSalaryFromAttendance(
       siteName: site.name,
       month,
       deletedDate: null,
+    },
+  });
+
+  // 6b. Upsert a WorkLog entry so the Employee Hours Ledger reflects the
+  // attendance-derived hours.
+  //
+  // The hours ledger (GET /api/employees/[id]/worklogs) reads from WorkLog
+  // first and falls back to SalaryRecord only if no WorkLog exists. Without
+  // this upsert, the ledger would show stale WorkLog hours (or no entry at
+  // all if only a SalaryRecord was created). By keeping the WorkLog in sync
+  // with the attendance-derived hours, the ledger always shows the correct
+  // total whenever attendance changes.
+  await db.workLog.upsert({
+    where: {
+      employeeId_siteId_year_month: {
+        employeeId: employeeId,
+        siteId: site.id,
+        year,
+        month: monthNum,
+      },
+    },
+    update: {
+      hoursWorked: totalHours,
+      deletedAt: null, // un-soft-delete if previously deleted
+    },
+    create: {
+      employeeId: employeeId,
+      siteId: site.id,
+      year,
+      month: monthNum,
+      hoursWorked: totalHours,
+      allowances: 0,
+      deductions: 0,
     },
   });
 
