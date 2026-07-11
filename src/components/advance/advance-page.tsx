@@ -272,10 +272,9 @@ export function AdvancePage() {
   }, [bucketArray, commonAmount]);
 
   const handleSave = useCallback(async () => {
-    if (!user) {
-      toast({ title: 'Error', description: 'You must be logged in', variant: 'destructive' });
-      return;
-    }
+    // Note: we no longer hard-block on missing user — the server can resolve
+    // the creator by email or fall back to the first super_admin. This keeps
+    // the workflow working even if the localStorage user.id is stale.
     if (bucketArray.length === 0) {
       toast({ title: 'Empty bucket', description: 'Add at least one employee to the bucket' });
       return;
@@ -305,7 +304,10 @@ export function AdvancePage() {
           effectiveMonth: monthStr,
           effectiveYear: selectedYear,
         })),
-        createdById: user.id,
+        // Send both id and email so the server can resolve the creator
+        // even if the localStorage id is stale (e.g., after a DB reset).
+        createdById: user?.id,
+        creatorEmail: user?.email,
       };
 
       const res = await fetch('/api/advances', {

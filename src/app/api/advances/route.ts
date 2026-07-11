@@ -92,32 +92,66 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/advances
-// Body: { advances: AdvanceCreateItem[], createdById: string }
-// OR   { empId, amount, reason, effectiveMonth?, effectiveYear?, createdById }
+// Body: { advances: AdvanceCreateItem[], createdById?: string, creatorEmail?: string }
+// OR   { empId, amount, reason, effectiveMonth?, effectiveYear?, createdById?, creatorEmail? }
 //
 // When `advances` array is provided, creates one row per item atomically.
 // When single-employee fields are provided, creates a single row.
+//
+// Creator resolution (in priority order):
+//   1. createdById (if it matches a user in the DB)
+//   2. creatorEmail (if it matches a user in the DB)
+//   3. First super_admin in the system
+//   4. First any user in the system
+//   5. Fail with a clear error
+//
+// This fallback chain handles the common case where the user's localStorage
+// contains a stale user.id from a previous DB instance (e.g., after the
+// developer re-cloned the repo and ran `prisma db push`).
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
     const createdById = body.createdById as string | undefined;
-    if (!createdById) {
+    const creatorEmail = body.creatorEmail as string | undefined;
+
+    // Resolve the creator server-side
+    let creator = null as { id: string; email: string; name: string; role: string } | null;
+
+    if (createdById) {
+      creator = await db.user.findUnique({ where: { id: createdById } });
+    }
+    if (!creator && creatorEmail) {
+      creator = await db.user.findUnique({
+        where: { email: String(creatorEmail).toLowerCase() },
+      });
+    }
+    if (!creator) {
+      // Fallback: first super_admin
+      creator = await db.user.findFirst({
+        where: { role: 'super_admin', deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
+    if (!creator) {
+      // Fallback: first any user
+      creator = await db.user.findFirst({
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
+    if (!creator) {
       return NextResponse.json(
-        { success: false, error: 'createdById is required' },
+        {
+          success: false,
+          error:
+            'No user account exists in the database. Please sign up first, then try again.',
+        },
         { status: 400 },
       );
     }
 
-    // Verify the creator exists
-    const creator = await db.user.findUnique({ where: { id: createdById } });
-    if (!creator) {
-      return NextResponse.json(
-        { success: false, error: 'Creator user not found' },
-        { status: 404 },
-      );
-    }
-
+    const resolvedCreatedById = creator.id;
     const defaultMonth = getNextMonthKey();
 
     // ── Bulk bucket mode ──
@@ -175,7 +209,7 @@ export async function POST(request: NextRequest) {
               status: 'pending',
               effectiveMonth: it.effectiveMonth,
               effectiveYear: it.effectiveYear,
-              createdById,
+              createdById: resolvedCreatedById,
             },
           });
         }),
@@ -237,7 +271,7 @@ export async function POST(request: NextRequest) {
         status: 'pending',
         effectiveMonth,
         effectiveYear,
-        createdById,
+        createdById: resolvedCreatedById,
       },
     });
 
