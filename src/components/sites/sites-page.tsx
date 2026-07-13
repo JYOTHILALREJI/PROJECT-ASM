@@ -6,6 +6,7 @@ import {
   Users,
   Eye,
   Trash2,
+  GitBranch,
   UserMinus,
   Plus,
   Search,
@@ -37,6 +38,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -89,12 +97,20 @@ import { cn } from '@/lib/utils';
 import { AttendanceSheet } from '@/components/attendance/attendance-sheet';
 
 /* ───────── types ───────── */
+interface Branch {
+  id: string;
+  name: string;
+  code: string | null;
+}
+
 interface Site {
   id: string;
   name: string;
   clientName?: string | null;
   projectName?: string | null;
   projectId?: string | null;
+  branchId?: string | null;
+  branch?: Branch | null;
   isActive: boolean;
   createdAt: string;
   employeeCount: number;
@@ -207,27 +223,52 @@ function SiteCardsGrid({
     }
   };
 
-  // Group filtered sites by clientName. Sites with no client go into a
-  // dedicated "Unassigned Client" group so they're still visible.
-  const groupedByClient = useMemo(() => {
-    const groups = new Map<string, Site[]>();
-    const unassignedKey = '__unassigned__';
+  // Group filtered sites by Branch → Client.
+  // Sites with no branch go into "Unassigned Branch".
+  // Within each branch, sites with no client go into "Unassigned Client".
+  const groupedByBranch = useMemo(() => {
+    const branchMap = new Map<string, { branchName: string; branchCode: string | null; clients: Map<string, Site[]> }>();
+    const unassignedBranchKey = '__unassigned_branch__';
+
     for (const s of filteredSites) {
-      const key = (s.clientName && s.clientName.trim()) ? s.clientName.trim() : unassignedKey;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(s);
+      const bKey = s.branchId || unassignedBranchKey;
+      const bName = s.branch?.name || 'Unassigned Branch';
+      const bCode = s.branch?.code || null;
+
+      if (!branchMap.has(bKey)) {
+        branchMap.set(bKey, { branchName: bName, branchCode: bCode, clients: new Map() });
+      }
+      const branchEntry = branchMap.get(bKey)!;
+
+      const cKey = (s.clientName && s.clientName.trim()) ? s.clientName.trim() : '__unassigned_client__';
+      if (!branchEntry.clients.has(cKey)) {
+        branchEntry.clients.set(cKey, []);
+      }
+      branchEntry.clients.get(cKey)!.push(s);
     }
-    // Convert to array and sort alphabetically by client name, with the
-    // "unassigned" group always last.
-    return Array.from(groups.entries())
+
+    // Convert to sorted array: branches alphabetically (unassigned last),
+    // clients within each branch alphabetically (unassigned last).
+    return Array.from(branchMap.entries())
       .sort((a, b) => {
-        if (a[0] === unassignedKey) return 1;
-        if (b[0] === unassignedKey) return -1;
-        return a[0].localeCompare(b[0]);
+        if (a[0] === unassignedBranchKey) return 1;
+        if (b[0] === unassignedBranchKey) return -1;
+        return a[1].branchName.localeCompare(b[1].branchName);
       })
-      .map(([client, sitesList]) => ({
-        client,
-        sites: sitesList.sort((x, y) => x.name.localeCompare(y.name)),
+      .map(([bKey, bData]) => ({
+        branchKey: bKey,
+        branchName: bData.branchName,
+        branchCode: bData.branchCode,
+        clientGroups: Array.from(bData.clients.entries())
+          .sort((a, b) => {
+            if (a[0] === '__unassigned_client__') return 1;
+            if (b[0] === '__unassigned_client__') return -1;
+            return a[0].localeCompare(b[0]);
+          })
+          .map(([client, sitesList]) => ({
+            client,
+            sites: sitesList.sort((x, y) => x.name.localeCompare(y.name)),
+          })),
       }));
   }, [filteredSites]);
 
@@ -255,145 +296,181 @@ function SiteCardsGrid({
 
   return (
     <div className="space-y-8">
-      {groupedByClient.map(({ client, sites: sitesList }) => {
-        const isUnassigned = client === '__unassigned__';
-        const clientLabel = isUnassigned ? 'Unassigned Client' : client;
-        const totalEmployeesInGroup = sitesList.reduce((sum, s) => sum + s.employeeCount, 0);
+      {groupedByBranch.map(({ branchKey, branchName, branchCode, clientGroups }) => {
+        const isUnassignedBranch = branchKey === '__unassigned_branch__';
+        const totalEmployeesInBranch = clientGroups.reduce(
+          (sum, cg) => sum + cg.sites.reduce((s, site) => s + site.employeeCount, 0),
+          0,
+        );
+        const totalSitesInBranch = clientGroups.reduce((sum, cg) => sum + cg.sites.length, 0);
+
         return (
-          <div key={client} className="space-y-3">
-            {/* Client group header */}
-            <div className="flex items-center gap-3 pb-2 border-b border-slate-700/60">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
-                <Building2 className="h-4 w-4 text-blue-400" />
+          <div key={branchKey} className="space-y-4">
+            {/* Branch header */}
+            <div className="flex items-center gap-3 pb-2 border-b-2 border-emerald-600/40">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10">
+                <GitBranch className="h-4 w-4 text-emerald-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold text-white truncate uppercase tracking-wide">
-                  {clientLabel}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white uppercase tracking-wide">
+                    {branchName}
+                  </h3>
+                  {branchCode && (
+                    <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0 h-4">
+                      {branchCode}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-[11px] text-slate-500">
-                  {sitesList.length} site{sitesList.length !== 1 ? 's' : ''} · {totalEmployeesInGroup} employee{totalEmployeesInGroup !== 1 ? 's' : ''}
+                  {totalSitesInBranch} site{totalSitesInBranch !== 1 ? 's' : ''} · {totalEmployeesInBranch} employee{totalEmployeesInBranch !== 1 ? 's' : ''}
+                  {' · '}
+                  {clientGroups.length} client{clientGroups.length !== 1 ? 's' : ''}
                 </p>
               </div>
             </div>
 
-            {/* Site cards in this client group */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sitesList.map((site) => (
-                <Card
-                  key={site.id}
-                  className={cn(
-                    "border-slate-700/50 hover:border-slate-600/50 transition-all group",
-                    site.isActive ? "bg-slate-800/50" : "bg-slate-800/30 opacity-80"
-                  )}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "flex h-10 w-10 items-center justify-center rounded-lg transition-colors",
-                          site.isActive
-                            ? "bg-emerald-500/10 group-hover:bg-emerald-500/20"
-                            : "bg-slate-600/20 group-hover:bg-slate-600/30"
-                        )}>
-                          <Building2 className={cn(
-                            "h-5 w-5",
-                            site.isActive ? "text-emerald-400" : "text-slate-500"
-                          )} />
-                        </div>
-                        <div className="min-w-0">
-                          <CardTitle className="text-base text-white truncate">
-                            {site.name}
-                          </CardTitle>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            Created {formatDate(site.createdAt)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-0.5">
-                        {/* Active/Inactive Toggle */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className={cn(
-                            "h-8 w-8 shrink-0",
-                            site.isActive
-                              ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
-                              : "text-slate-500 hover:text-slate-400 hover:bg-slate-500/10"
-                          )}
-                          onClick={() => onToggleActive(site)}
-                          title={site.isActive ? 'Deactivate site' : 'Activate site'}
-                        >
-                          {site.isActive ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 shrink-0"
-                          onClick={() => onEditSite(site)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-500/10 shrink-0"
-                          onClick={() => onDeleteSite(site)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0 space-y-3">
-                    {/* Project & Project ID info */}
-                    {(site.projectName || site.projectId) && (
-                      <div className="space-y-0.5">
-                        {site.projectName && (
-                          <p className="text-xs text-slate-400 truncate">
-                            <span className="text-slate-500">Project:</span> {site.projectName}
-                          </p>
-                        )}
-                        {site.projectId && (
-                          <p className="text-xs text-slate-400 truncate">
-                            <span className="text-slate-500">Project ID:</span>{' '}
-                            <span className="font-mono text-amber-300">{site.projectId}</span>
-                          </p>
-                        )}
-                      </div>
-                    )}
+            {/* Client groups within this branch */}
+            <div className="space-y-6 pl-2 sm:pl-4 border-l-2 border-slate-700/30 ml-4">
+              {clientGroups.map(({ client, sites: sitesList }) => {
+                const isUnassignedClient = client === '__unassigned_client__';
+                const clientLabel = isUnassignedClient ? 'Unassigned Client' : client;
+                const totalEmployeesInGroup = sitesList.reduce((sum, s) => sum + s.employeeCount, 0);
 
-                    <div className="flex items-center gap-2 text-sm text-slate-400">
-                      <Users className="h-4 w-4" />
-                      <span>
-                        <span className="text-white font-semibold">{site.employeeCount}</span>{' '}
-                        {site.employeeCount === 1 ? 'employee' : 'employees'}
+                return (
+                  <div key={client} className="space-y-3">
+                    {/* Client sub-header */}
+                    <div className="flex items-center gap-2 pb-1">
+                      <div className="flex h-6 w-6 items-center justify-center rounded bg-blue-500/10">
+                        <Building2 className="h-3 w-3 text-blue-400" />
+                      </div>
+                      <span className="text-xs font-semibold text-blue-300 uppercase tracking-wide">
+                        {clientLabel}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        {sitesList.length} site{sitesList.length !== 1 ? 's' : ''} · {totalEmployeesInGroup} emp
                       </span>
                     </div>
 
-                    {/* Action Buttons */}
-                    <div className="flex flex-col gap-2">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          className="flex-1 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 gap-2 transition-all"
-                          onClick={() => onViewEmployees(site)}
+                    {/* Site cards in this client group */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {sitesList.map((site) => (
+                        <Card
+                          key={site.id}
+                          className={cn(
+                            "border-slate-700/50 hover:border-slate-600/50 transition-all group",
+                            site.isActive ? "bg-slate-800/50" : "bg-slate-800/30 opacity-80"
+                          )}
                         >
-                          <Eye className="h-4 w-4" />
-                          View Employees
-                        </Button>
-                        <Button
-                          variant="outline"
-                          className="bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 gap-2 transition-all shrink-0"
-                          onClick={() => onAttendanceSheet(site)}
-                          title="Attendance Sheet"
-                        >
-                          <FileSpreadsheet className="h-4 w-4" />
-                        </Button>
-                      </div>
+                          <CardHeader className="pb-3">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className={cn(
+                                  "flex h-10 w-10 items-center justify-center rounded-lg transition-colors",
+                                  site.isActive
+                                    ? "bg-emerald-500/10 group-hover:bg-emerald-500/20"
+                                    : "bg-slate-600/20 group-hover:bg-slate-600/30"
+                                )}>
+                                  <Building2 className={cn(
+                                    "h-5 w-5",
+                                    site.isActive ? "text-emerald-400" : "text-slate-500"
+                                  )} />
+                                </div>
+                                <div className="min-w-0">
+                                  <CardTitle className="text-base text-white truncate">
+                                    {site.name}
+                                  </CardTitle>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    Created {formatDate(site.createdAt)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={cn(
+                                    "h-8 w-8 shrink-0",
+                                    site.isActive
+                                      ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                                      : "text-slate-500 hover:text-slate-400 hover:bg-slate-500/10"
+                                  )}
+                                  onClick={() => onToggleActive(site)}
+                                  title={site.isActive ? 'Deactivate site' : 'Activate site'}
+                                >
+                                  {site.isActive ? <Power className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 shrink-0"
+                                  onClick={() => onEditSite(site)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-500/10 shrink-0"
+                                  onClick={() => onDeleteSite(site)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="pt-0 space-y-3">
+                            {(site.projectName || site.projectId) && (
+                              <div className="space-y-0.5">
+                                {site.projectName && (
+                                  <p className="text-xs text-slate-400 truncate">
+                                    <span className="text-slate-500">Project:</span> {site.projectName}
+                                  </p>
+                                )}
+                                {site.projectId && (
+                                  <p className="text-xs text-slate-400 truncate">
+                                    <span className="text-slate-500">Project ID:</span>{' '}
+                                    <span className="font-mono text-amber-300">{site.projectId}</span>
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2 text-sm text-slate-400">
+                              <Users className="h-4 w-4" />
+                              <span>
+                                <span className="text-white font-semibold">{site.employeeCount}</span>{' '}
+                                {site.employeeCount === 1 ? 'employee' : 'employees'}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  className="flex-1 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 gap-2 transition-all"
+                                  onClick={() => onViewEmployees(site)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View Employees
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  className="bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 gap-2 transition-all shrink-0"
+                                  onClick={() => onAttendanceSheet(site)}
+                                  title="Attendance Sheet"
+                                >
+                                  <FileSpreadsheet className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -679,6 +756,8 @@ export function SitesPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(''); // '' = all branches
   const [activeTab, setActiveTab] = useState<string>('active');
 
   // Add/Edit/Delete site dialogs
@@ -686,6 +765,7 @@ export function SitesPage() {
   const [addSiteClientName, setAddSiteClientName] = useState('');
   const [addSiteProjectName, setAddSiteProjectName] = useState('');
   const [addSiteProjectId, setAddSiteProjectId] = useState('');
+  const [addSiteBranchId, setAddSiteBranchId] = useState<string>('');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
 
@@ -694,6 +774,7 @@ export function SitesPage() {
   const [editSiteClientName, setEditSiteClientName] = useState('');
   const [editSiteProjectName, setEditSiteProjectName] = useState('');
   const [editSiteProjectId, setEditSiteProjectId] = useState('');
+  const [editSiteBranchId, setEditSiteBranchId] = useState<string>('');
   const [editLoading, setEditLoading] = useState(false);
 
   const [deleteSiteTarget, setDeleteSiteTarget] = useState<Site | null>(null);
@@ -749,6 +830,19 @@ export function SitesPage() {
     }
   }, []);
 
+  /* ── Fetch branches ── */
+  const fetchBranches = useCallback(async () => {
+    try {
+      const res = await fetch('/api/branches');
+      const json = await res.json();
+      if (json.success) {
+        setBranches(json.data.branches || []);
+      }
+    } catch {
+      setBranches([]);
+    }
+  }, []);
+
   /* ── Fetch available clients (distinct client names) ── */
   const fetchClients = useCallback(async () => {
     try {
@@ -765,11 +859,17 @@ export function SitesPage() {
   useEffect(() => {
     fetchSites();
     fetchClients();
-  }, [fetchSites, fetchClients]);
+    fetchBranches();
+  }, [fetchSites, fetchClients, fetchBranches]);
 
-  /* ── Split sites by active status ── */
-  const activeSites = useMemo(() => sites.filter((s) => s.isActive), [sites]);
-  const inactiveSites = useMemo(() => sites.filter((s) => !s.isActive), [sites]);
+  /* ── Split sites by active status + branch filter ── */
+  const branchFilteredSites = useMemo(() => {
+    if (!selectedBranchId) return sites;
+    return sites.filter((s) => s.branchId === selectedBranchId);
+  }, [sites, selectedBranchId]);
+
+  const activeSites = useMemo(() => branchFilteredSites.filter((s) => s.isActive), [branchFilteredSites]);
+  const inactiveSites = useMemo(() => branchFilteredSites.filter((s) => !s.isActive), [branchFilteredSites]);
 
   /* ── Fetch site employees ── */
   const fetchSiteEmployees = useCallback(async (siteName: string) => {
@@ -880,6 +980,7 @@ export function SitesPage() {
           clientName: addSiteClientName.trim() || undefined,
           projectName: addSiteProjectName.trim() || undefined,
           projectId: addSiteProjectId.trim() || undefined,
+          branchId: addSiteBranchId || undefined,
         }),
       });
       const json = await res.json();
@@ -888,6 +989,7 @@ export function SitesPage() {
         setAddSiteClientName('');
         setAddSiteProjectName('');
         setAddSiteProjectId('');
+        setAddSiteBranchId('');
         setShowAddDialog(false);
         fetchSites();
         fetchClients();
@@ -916,6 +1018,7 @@ export function SitesPage() {
           clientName: editSiteClientName.trim(),
           projectName: editSiteProjectName.trim(),
           projectId: editSiteProjectId.trim(),
+          branchId: editSiteBranchId || null,
         }),
       });
       const json = await res.json();
@@ -925,6 +1028,7 @@ export function SitesPage() {
         setEditSiteClientName('');
         setEditSiteProjectName('');
         setEditSiteProjectId('');
+        setEditSiteBranchId('');
         fetchSites();
         fetchClients();
         // Update viewSite name if we're viewing this site's employees
@@ -1341,15 +1445,38 @@ export function SitesPage() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Search - shared between tabs */}
-            <div className="relative max-w-sm mt-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search sites..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-500 focus:ring-emerald-500/20 focus:border-emerald-500/50"
-              />
+            {/* Branch filter + Search - shared between tabs */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mt-4">
+              {/* Branch filter */}
+              {branches.length > 0 && (
+                <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                  <SelectTrigger className="w-[180px] bg-slate-800 border-slate-700 text-slate-200">
+                    <GitBranch className="h-4 w-4 mr-2 text-emerald-400" />
+                    <SelectValue placeholder="All Branches" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-600">
+                    <SelectItem value="" className="text-slate-200 focus:bg-slate-700 focus:text-white">
+                      All Branches
+                    </SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id} className="text-slate-200 focus:bg-slate-700 focus:text-white">
+                        {b.name}{b.code ? ` (${b.code})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Search */}
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search sites..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10 bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-500 focus:ring-emerald-500/20 focus:border-emerald-500/50"
+                />
+              </div>
             </div>
 
             <TabsContent value="active" className="mt-4">
@@ -1366,6 +1493,7 @@ export function SitesPage() {
                   setEditSiteClientName(site.clientName || '');
                   setEditSiteProjectName(site.projectName || '');
                   setEditSiteProjectId(site.projectId || '');
+                  setEditSiteBranchId(site.branchId || '');
                 }}
                 onToggleActive={handleToggleActive}
                 onAttendanceSheet={handleAttendanceSheet}
@@ -1386,6 +1514,7 @@ export function SitesPage() {
                   setEditSiteClientName(site.clientName || '');
                   setEditSiteProjectName(site.projectName || '');
                   setEditSiteProjectId(site.projectId || '');
+                  setEditSiteBranchId(site.branchId || '');
                 }}
                 onToggleActive={handleToggleActive}
                 onAttendanceSheet={handleAttendanceSheet}
@@ -1691,9 +1820,28 @@ export function SitesPage() {
                 onKeyDown={(e) => e.key === 'Enter' && handleAddSite()}
               />
             </div>
+            {branches.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-slate-300">Branch</Label>
+                <Select value={addSiteBranchId} onValueChange={setAddSiteBranchId}>
+                  <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                    <GitBranch className="h-4 w-4 mr-2 text-emerald-400" />
+                    <SelectValue placeholder="Select a branch (optional)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-600">
+                    <SelectItem value="" className="text-slate-300 focus:bg-slate-700 focus:text-white">No branch</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id} className="text-slate-200 focus:bg-slate-700 focus:text-white">
+                        {b.name}{b.code ? ` (${b.code})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => { setShowAddDialog(false); setAddSiteName(''); setAddSiteClientName(''); setAddSiteProjectName(''); setAddSiteProjectId(''); }} className="text-slate-400 hover:text-white">
+            <Button variant="ghost" onClick={() => { setShowAddDialog(false); setAddSiteName(''); setAddSiteClientName(''); setAddSiteProjectName(''); setAddSiteProjectId(''); setAddSiteBranchId(''); }} className="text-slate-400 hover:text-white">
               Cancel
             </Button>
             <Button
@@ -1766,6 +1914,25 @@ export function SitesPage() {
                 onKeyDown={(e) => e.key === 'Enter' && handleEditSite()}
               />
             </div>
+            {branches.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-slate-300">Branch</Label>
+                <Select value={editSiteBranchId} onValueChange={setEditSiteBranchId}>
+                  <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                    <GitBranch className="h-4 w-4 mr-2 text-emerald-400" />
+                    <SelectValue placeholder="Select a branch (optional)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-600">
+                    <SelectItem value="" className="text-slate-300 focus:bg-slate-700 focus:text-white">No branch</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id} className="text-slate-200 focus:bg-slate-700 focus:text-white">
+                        {b.name}{b.code ? ` (${b.code})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -1776,6 +1943,7 @@ export function SitesPage() {
                 setEditSiteClientName('');
                 setEditSiteProjectName('');
                 setEditSiteProjectId('');
+                setEditSiteBranchId('');
               }}
               className="text-slate-400 hover:text-white"
             >
