@@ -7,7 +7,7 @@ export async function GET() {
   try {
     const sites = await db.site.findMany({
       where: { deletedAt: null },
-      select: { id: true, name: true, clientName: true, projectName: true, projectId: true, isActive: true, createdAt: true },
+      select: { id: true, name: true, clientName: true, projectName: true, projectId: true, branchId: true, isActive: true, createdAt: true, branch: { select: { id: true, name: true, code: true } } },
       orderBy: { name: 'asc' },
     });
 
@@ -52,7 +52,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, clientName, projectName, projectId, isActive, actorUserId, actorDisplayName } = body;
+    const { name, clientName, projectName, projectId, branchId, isActive, actorUserId, actorDisplayName } = body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json(
@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
         clientName: typeof clientName === 'string' ? clientName.trim() : undefined,
         projectName: typeof projectName === 'string' ? projectName.trim() : undefined,
         projectId: typeof projectId === 'string' ? projectId.trim() : undefined,
+        branchId: typeof branchId === 'string' && branchId ? branchId : null,
         isActive: typeof isActive === 'boolean' ? isActive : true,
       },
     });
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, clientName, projectName, projectId, isActive, actorUserId, actorDisplayName } = body;
+    const { id, name, clientName, projectName, projectId, branchId, isActive, actorUserId, actorDisplayName } = body;
 
     if (!id || !name || typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json(
@@ -169,6 +170,9 @@ export async function PUT(request: NextRequest) {
     }
     if (projectId !== undefined) {
       updateData.projectId = typeof projectId === 'string' ? projectId.trim() : null;
+    }
+    if (branchId !== undefined) {
+      updateData.branchId = typeof branchId === 'string' && branchId ? branchId : null;
     }
     if (isActive !== undefined) {
       updateData.isActive = typeof isActive === 'boolean' ? isActive : true;

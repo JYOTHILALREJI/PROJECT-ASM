@@ -92,6 +92,7 @@ model Employee {
   role             String    @default("Standard") // "Standard", "Team Leader", "Supervisor"
   customHourlyRate Float? // Nullable - overrides standard tier rates for this employee
   hoursThreshold   Int       @default(1000) // Hours threshold for rate switching (basic vs premium)
+  branchId         String?  // FK to Branch — which branch this employee belongs to
   // Custom current total working hours — manually settable at ANY point in time.
   // Represents the employee's running cumulative total hours and can be overridden
   // by an admin whenever needed (e.g. to correct historical data).
@@ -104,6 +105,7 @@ model Employee {
   currentSiteRef  Site?  @relation("EmployeeCurrentSite", fields: [currentSiteId], references: [id])
   teamLeaderSite  Site?  @relation("EmployeeTeamLeaderSite", fields: [teamLeaderSiteId], references: [id])
   supervisorSite  Site?  @relation("EmployeeSupervisorSite", fields: [supervisorSiteId], references: [id])
+  branch          Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
   attendance           Attendance[]
   warnings             Warning[]
   fines                Fine[]
@@ -121,6 +123,31 @@ model Employee {
   @@index([isSupervisor])
   @@index([currentSite])
   @@index([currentSiteId])
+  @@index([branchId])
+}
+
+// ---------------------------------------------------------------------------
+// Branch
+// ---------------------------------------------------------------------------
+// A Branch is a regional/organisational division of the company. Each branch
+// has its own set of sites and employees. The same client can appear in
+// different branches. Employees normally work within their branch but can
+// (rarely) be assigned to a site in another branch.
+// ---------------------------------------------------------------------------
+model Branch {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "Riyadh Branch", "Jeddah Branch"
+  code      String?  // Short code e.g. "RYD", "JED"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  sites      Site[]
+  employees  Employee[]
+
+  @@index([isActive])
+  @@index([deletedAt])
 }
 
 model Site {
@@ -129,9 +156,12 @@ model Site {
   clientName  String?
   projectName String?
   projectId   String? // Free-text project ID (e.g. client's internal project code)
+  branchId    String?  // FK to Branch — which branch this site belongs to
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   deletedAt   DateTime?
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   // Back-relations for the Employee -> Site FKs
   currentEmployees Employee[] @relation("EmployeeCurrentSite")

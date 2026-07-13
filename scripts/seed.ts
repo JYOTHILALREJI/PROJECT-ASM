@@ -45,28 +45,47 @@ async function main() {
   await db.cancellationRequest.deleteMany();
   await db.employee.deleteMany();
   await db.site.deleteMany();
+  await db.branch.deleteMany();
   console.log('   ✅ Cleared.\n');
 
-  // ── 3. Create 10 sites ──
-  console.log('3. Creating 10 sites...');
+  // ── 3. Create branches ──
+  console.log('3. Creating branches...');
+  const branchData = [
+    { name: 'Riyadh Branch', code: 'RYD' },
+    { name: 'Jeddah Branch', code: 'JED' },
+    { name: 'Dammam Branch', code: 'DAM' },
+  ];
+  const branches = [];
+  for (const b of branchData) {
+    const branch = await db.branch.create({ data: b });
+    branches.push(branch);
+    console.log(`   ✅ ${branch.name} (${branch.code})`);
+  }
+  console.log();
+
+  // ── 4. Create 10 sites (assigned to branches) ──
+  console.log('4. Creating 10 sites...');
   const siteData = [
-    { name: 'Riyadh Tower Site', clientName: 'Saudi Oger', projectName: 'Riyadh Tower', projectId: 'PRJ-001' },
-    { name: 'Jeddah Mall Project', clientName: 'Saudi Oger', projectName: 'Jeddah Mall', projectId: 'PRJ-002' },
-    { name: 'Dammam Refinery', clientName: 'Aramco', projectName: 'Refinery Expansion', projectId: 'PRJ-003' },
-    { name: 'Mecca Hotel Complex', clientName: 'Binladin Group', projectName: 'Mecca Hotel', projectId: 'PRJ-004' },
-    { name: 'Medina Residential', clientName: 'Binladin Group', projectName: 'Medina Housing', projectId: 'PRJ-005' },
-    { name: 'Khobar Corniche', clientName: 'Al-Falak', projectName: 'Corniche Development', projectId: 'PRJ-006' },
-    { name: 'Riyadh Metro Station', clientName: 'Bechtel', projectName: 'Metro Station 4', projectId: 'PRJ-007' },
-    { name: 'Yanbu Industrial', clientName: 'Aramco', projectName: 'Yanbu Petrochemical', projectId: 'PRJ-008' },
-    { name: 'Abha Resort', clientName: 'Al-Falak', projectName: 'Abha Mountain Resort', projectId: 'PRJ-009' },
-    { name: 'Riyadh Airport Terminal', clientName: 'Bechtel', projectName: 'Terminal 5 Expansion', projectId: 'PRJ-010' },
+    { name: 'Riyadh Tower Site', clientName: 'Saudi Oger', projectName: 'Riyadh Tower', projectId: 'PRJ-001', branchIdx: 0 },
+    { name: 'Jeddah Mall Project', clientName: 'Saudi Oger', projectName: 'Jeddah Mall', projectId: 'PRJ-002', branchIdx: 1 },
+    { name: 'Dammam Refinery', clientName: 'Aramco', projectName: 'Refinery Expansion', projectId: 'PRJ-003', branchIdx: 2 },
+    { name: 'Mecca Hotel Complex', clientName: 'Binladin Group', projectName: 'Mecca Hotel', projectId: 'PRJ-004', branchIdx: 1 },
+    { name: 'Medina Residential', clientName: 'Binladin Group', projectName: 'Medina Housing', projectId: 'PRJ-005', branchIdx: 1 },
+    { name: 'Khobar Corniche', clientName: 'Al-Falak', projectName: 'Corniche Development', projectId: 'PRJ-006', branchIdx: 2 },
+    { name: 'Riyadh Metro Station', clientName: 'Bechtel', projectName: 'Metro Station 4', projectId: 'PRJ-007', branchIdx: 0 },
+    { name: 'Yanbu Industrial', clientName: 'Aramco', projectName: 'Yanbu Petrochemical', projectId: 'PRJ-008', branchIdx: 1 },
+    { name: 'Abha Resort', clientName: 'Al-Falak', projectName: 'Abha Mountain Resort', projectId: 'PRJ-009', branchIdx: 2 },
+    { name: 'Riyadh Airport Terminal', clientName: 'Bechtel', projectName: 'Terminal 5 Expansion', projectId: 'PRJ-010', branchIdx: 0 },
   ];
 
   const sites = [];
   for (const s of siteData) {
-    const site = await db.site.create({ data: s });
+    const { branchIdx, ...siteFields } = s;
+    const site = await db.site.create({
+      data: { ...siteFields, branchId: branches[branchIdx].id },
+    });
     sites.push(site);
-    console.log(`   ✅ ${site.name} (${site.clientName})`);
+    console.log(`   ✅ ${site.name} (${site.clientName}) → ${branches[branchIdx].name}`);
   }
   console.log();
 
@@ -168,6 +187,7 @@ async function main() {
           companyName: company,
           currentSite: site.name,
           currentSiteId: site.id,
+          branchId: site.branchId, // Employee belongs to the same branch as their site
           rating: 3.5 + (i % 3) * 0.5,
           status: 'active',
           isTeamLeader,
@@ -224,7 +244,8 @@ async function main() {
   console.log('     via Admin Management and share their credentials.\n');
   console.log('Data created:');
   console.log(`  • 0 users (signup page will show)`);
-  console.log(`  • ${sites.length} sites (grouped by 4 clients)`);
+  console.log(`  • ${branches.length} branches (Riyadh, Jeddah, Dammam)`);
+  console.log(`  • ${sites.length} sites (grouped by branch → client)`);
   console.log(`  • ${employeeCounter} employees:`);
   console.log(`      - Riyadh Tower Site: 55 (50+ → multi-page PDF test)`);
   console.log(`      - Jeddah Mall Project: 55 (50+ → multi-page PDF test)`);

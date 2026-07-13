@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
     const idleFilter = searchParams.get('idle') || '';
     const teamLeaderFilter = searchParams.get('teamLeaders') || '';
     const supervisorFilter = searchParams.get('supervisors') || '';
+    const branchFilter = searchParams.get('branchId') || '';
 
     const where: Record<string, unknown> = {
       status: { not: 'deleted' },
@@ -64,6 +65,10 @@ export async function GET(request: NextRequest) {
 
     if (siteFilter) {
       where.currentSite = siteFilter;
+    }
+
+    if (branchFilter) {
+      where.branchId = branchFilter;
     }
 
     if (tradeFilter) {
