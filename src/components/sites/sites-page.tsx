@@ -1449,13 +1449,13 @@ export function SitesPage() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mt-4">
               {/* Branch filter */}
               {branches.length > 0 && (
-                <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                <Select value={selectedBranchId || '__all__'} onValueChange={(v) => setSelectedBranchId(v === '__all__' ? '' : v)}>
                   <SelectTrigger className="w-[180px] bg-slate-800 border-slate-700 text-slate-200">
                     <GitBranch className="h-4 w-4 mr-2 text-emerald-400" />
                     <SelectValue placeholder="All Branches" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-800 border-slate-600">
-                    <SelectItem value="" className="text-slate-200 focus:bg-slate-700 focus:text-white">
+                    <SelectItem value="__all__" className="text-slate-200 focus:bg-slate-700 focus:text-white">
                       All Branches
                     </SelectItem>
                     {branches.map((b) => (
@@ -1823,13 +1823,13 @@ export function SitesPage() {
             {branches.length > 0 && (
               <div className="space-y-2">
                 <Label className="text-slate-300">Branch</Label>
-                <Select value={addSiteBranchId} onValueChange={setAddSiteBranchId}>
+                <Select value={addSiteBranchId || '__none__'} onValueChange={(v) => setAddSiteBranchId(v === '__none__' ? '' : v)}>
                   <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
                     <GitBranch className="h-4 w-4 mr-2 text-emerald-400" />
                     <SelectValue placeholder="Select a branch (optional)" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-800 border-slate-600">
-                    <SelectItem value="" className="text-slate-300 focus:bg-slate-700 focus:text-white">No branch</SelectItem>
+                    <SelectItem value="__none__" className="text-slate-300 focus:bg-slate-700 focus:text-white">No branch</SelectItem>
                     {branches.map((b) => (
                       <SelectItem key={b.id} value={b.id} className="text-slate-200 focus:bg-slate-700 focus:text-white">
                         {b.name}{b.code ? ` (${b.code})` : ''}
@@ -1917,13 +1917,13 @@ export function SitesPage() {
             {branches.length > 0 && (
               <div className="space-y-2">
                 <Label className="text-slate-300">Branch</Label>
-                <Select value={editSiteBranchId} onValueChange={setEditSiteBranchId}>
+                <Select value={editSiteBranchId || '__none__'} onValueChange={(v) => setEditSiteBranchId(v === '__none__' ? '' : v)}>
                   <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
                     <GitBranch className="h-4 w-4 mr-2 text-emerald-400" />
                     <SelectValue placeholder="Select a branch (optional)" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-800 border-slate-600">
-                    <SelectItem value="" className="text-slate-300 focus:bg-slate-700 focus:text-white">No branch</SelectItem>
+                    <SelectItem value="__none__" className="text-slate-300 focus:bg-slate-700 focus:text-white">No branch</SelectItem>
                     {branches.map((b) => (
                       <SelectItem key={b.id} value={b.id} className="text-slate-200 focus:bg-slate-700 focus:text-white">
                         {b.name}{b.code ? ` (${b.code})` : ''}
