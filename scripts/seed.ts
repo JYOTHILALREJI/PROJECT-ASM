@@ -13,13 +13,21 @@
 
 import { execSync } from 'child_process';
 
-// Run prisma generate first so the Prisma client includes all models
-// (especially after schema changes like adding Branch).
+// Run prisma generate + db push first so the Prisma client includes all
+// models AND the database has the corresponding tables.
 console.log('⚙️  Running prisma generate...\n');
 try {
   execSync('npx prisma generate', { stdio: 'inherit', cwd: process.cwd() });
 } catch {
   console.error('❌ prisma generate failed. Make sure prisma is installed.');
+  process.exit(1);
+}
+
+console.log('⚙️  Running prisma db push (sync schema to database)...\n');
+try {
+  execSync('npx prisma db push --accept-data-loss', { stdio: 'inherit', cwd: process.cwd() });
+} catch {
+  console.error('❌ prisma db push failed. Check your DATABASE_URL in .env');
   process.exit(1);
 }
 
