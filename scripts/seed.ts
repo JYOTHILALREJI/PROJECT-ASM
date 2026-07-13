@@ -1,9 +1,5 @@
-import { db } from '../src/lib/db';
-import { hashPassword } from '../src/lib/auth';
-import { encrypt } from '../src/lib/crypto';
-
 // ---------------------------------------------------------------------------
-// Seed script — run with: bunx tsx scripts/seed.ts
+// Seed script — run with: npm run db:seed
 // ---------------------------------------------------------------------------
 // This script:
 //   1. Clears all existing users (so the signup page shows on next load)
@@ -14,6 +10,26 @@ import { encrypt } from '../src/lib/crypto';
 // After running this, the app will show the signup page because no super
 // admin exists. The first person to register becomes the super admin.
 // ---------------------------------------------------------------------------
+
+import { execSync } from 'child_process';
+
+// Run prisma generate first so the Prisma client includes all models
+// (especially after schema changes like adding Branch).
+console.log('⚙️  Running prisma generate...\n');
+try {
+  execSync('npx prisma generate', { stdio: 'inherit', cwd: process.cwd() });
+} catch {
+  console.error('❌ prisma generate failed. Make sure prisma is installed.');
+  process.exit(1);
+}
+
+// Now require the db — after generate so the client is fresh
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { db } = require('../src/lib/db');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { hashPassword } = require('../src/lib/auth');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { encrypt } = require('../src/lib/crypto');
 
 async function main() {
   console.log('🌱 Starting seed...\n');
