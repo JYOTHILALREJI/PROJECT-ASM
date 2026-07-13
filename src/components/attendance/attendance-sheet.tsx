@@ -168,13 +168,9 @@ function buildPageHtml(params: {
       </div>
     `;
   } else {
+    // Subsequent pages: just the date at the top, then the table continues
     html += `
-      <div style="position:relative; border:1px solid #000; background:#E8E8E8; padding:6px 12px; margin-bottom:8px; -webkit-print-color-adjust:exact; print-color-adjust:exact;">
-        <div style="font-size:14px; font-weight:bold; text-align:center; text-transform:uppercase; letter-spacing:0.08em; color:#000;">ARABIAN SHIELD MANPOWER</div>
-        <div style="background:${HEADER_BG}; color:${HEADER_TEXT}; text-align:center; padding:4px; font-size:13px; font-weight:bold; letter-spacing:0.15em; text-transform:uppercase; margin-top:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact;">DAILY ATTENDANCE</div>
-      </div>
-      <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:8px; text-transform:uppercase; color:#374151;">
-        <span><strong style="font-family:'Times New Roman', Times, serif;">CLIENT:</strong> <span style="font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(clientName)}</span> &nbsp;&nbsp; <strong style="font-family:'Times New Roman', Times, serif;">PROJECT:</strong> <span style="font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(projectName)}</span></span>
+      <div style="display:flex; justify-content:flex-end; font-size:12px; margin-bottom:6px; text-transform:uppercase; color:#374151;">
         <span><strong>DATE:</strong> ${upper(dateInput)}</span>
       </div>
     `;
@@ -811,23 +807,15 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                   </>
                 ) : (
                   <>
-                    <div className="relative border border-black bg-gray-200 p-2">
-                      <h1 className="text-[14px] font-bold text-center text-black tracking-[0.08em] uppercase">
-                        ARABIAN SHIELD MANPOWER
-                      </h1>
-                      <div className="mt-1 text-center py-1 text-[13px] font-bold tracking-[0.15em] uppercase" style={{ background: HEADER_BG, color: HEADER_TEXT }}>
-                        DAILY ATTENDANCE
-                      </div>
-                    </div>
-                    <div className="mt-3 flex justify-between text-[12px] uppercase text-gray-600">
-                      <span><strong style={{ fontFamily: "'Times New Roman', Times, serif" }}>CLIENT:</strong> <span style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }}>{upper(clientName)}</span> &nbsp;&nbsp; <strong style={{ fontFamily: "'Times New Roman', Times, serif" }}>PROJECT:</strong> <span style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }}>{upper(projectName)}</span></span>
+                    {/* Subsequent pages: just the date at top, then table continues */}
+                    <div className="flex justify-end text-[12px] uppercase text-gray-600 pb-1">
                       <span><strong>DATE:</strong> {upper(dateInput)}</span>
                     </div>
                   </>
                 )}
 
                 {/* Main Employee Table */}
-                <div className="mt-4 pb-2">
+                <div className={isFirstPage ? 'mt-4 pb-2' : 'mt-1 pb-2'}>
                   <table className="w-full border-collapse text-[13px] uppercase">
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
