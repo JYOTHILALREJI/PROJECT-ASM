@@ -70,8 +70,14 @@ async function main() {
   }
   console.log();
 
-  // ── 4. Create 70 employees ──
-  console.log('4. Creating 70 employees...');
+  // ── 4. Create employees ──
+  // Distribution:
+  //   Site 0 (Riyadh Tower)       → 55 employees (50+ for multi-page PDF test)
+  //   Site 1 (Jeddah Mall)        → 55 employees (50+ for multi-page PDF test)
+  //   Site 2 (Dammam Refinery)    → 30 employees (25+)
+  //   Sites 3-9 (7 remaining)     → 8 each = 56
+  //   Total: 55 + 55 + 30 + 56 = 196 employees
+  console.log('4. Creating employees...');
 
   const firstNames = [
     'Ahmed', 'Mohammed', 'Ali', 'Hassan', 'Omar', 'Khalid', 'Faisal', 'Saud',
@@ -82,7 +88,13 @@ async function main() {
     'Carlos', 'Juan', 'Luis', 'Miguel', 'Jorge', 'Pedro', 'Ricardo',
     'Khan', 'Bilal', 'Imran', 'Zubair', 'Fahad', 'Waleed', 'Mansoor',
     'Anwar', 'Naveed', 'Tahir', 'Yasir', 'Bashir', 'Latif', 'Majid',
-    'Rahul', 'Amit', 'Nitin', 'Sachin', 'Vivek', 'Ajay', 'Rohit', 'Sandeep', 'Pradeep', 'Harish',
+    'Rahul', 'Amit', 'Nitin', 'Sachin', 'Vivek', 'Ajay', 'Rohit', 'Sandeep',
+    'Pradeep', 'Harish', 'Suresh', 'Naresh', 'Dinesh', 'Rakesh', 'Vikram',
+    'Akram', 'Asad', 'Farhan', 'Hamza', 'Junaid', 'Kamran', 'Nadeem',
+    'Owais', 'Saad', 'Umair', 'Waheed', 'Zaid', 'Adnan', 'Bilal',
+    'George', 'Thomas', 'Charles', 'Daniel', 'Edward', 'Frank', 'Henry',
+    'Ivan', 'Kevin', 'Larry', 'Martin', 'Nicholas', 'Peter', 'Richard',
+    'Samuel', 'Timothy', 'Vincent', 'Walter', 'Abdul', 'Babar', 'Danish',
   ];
 
   const lastNames = [
@@ -92,14 +104,20 @@ async function main() {
     'Garcia', 'Rodriguez', 'Martinez', 'Lopez', 'Hernandez', 'Gonzalez',
     'Rahman', 'Malik', 'Sheikh', 'Abbasi', 'Qureshi', 'Siddiqui', 'Butt',
     'Iqbal', 'Awan', 'Rana', 'Bhatti', 'Cheema', 'Mughal', 'Hashmi',
-    'Shah', 'Khan', 'Das', 'Mehta', 'Joshi', 'Pillai', 'Menon', 'Rao',
-    'Pawar', 'Deshmukh', 'Kulkarni', 'Shetty', 'Naidu', 'Reddy', 'Yadav', 'Pandey', 'Tiwari', 'Mishra',
+    'Shah', 'Das', 'Mehta', 'Joshi', 'Pillai', 'Menon', 'Rao',
+    'Pawar', 'Deshmukh', 'Kulkarni', 'Shetty', 'Naidu', 'Yadav', 'Pandey',
+    'Tiwari', 'Mishra', 'Agarwal', 'Bansal', 'Chopra', 'Desai', 'Gandhi',
+    'Al-Ghamdi', 'Al-Qahtani', 'Al-Subaie', 'Al-Dossari', 'Al-Mutairi',
+    'Al-Shehri', 'Al-Zahrani', 'Al-Amri', 'Al-Balawi', 'Al-Juhani',
+    'Fernandez', 'Cruz', 'Reyes', 'Santos', 'Lim', 'Tan', 'Wong',
+    'Nguyen', 'Tran', 'Le', 'Pham', 'Ho', 'Vu',
   ];
 
   const trades = [
     'Mason', 'Electrician', 'Welder', 'Carpenter', 'Plumber', 'Painter',
     'Steel Fixer', 'Scaffolder', 'Heavy Equipment Operator', 'Crane Operator',
     'Foreman', 'Surveyor', 'QA/QC Inspector', 'Safety Officer', 'Rigger',
+    'Helper', 'Driver', 'Mechanic', 'Technician', 'Storekeeper',
   ];
 
   const nationalities = [
@@ -109,52 +127,68 @@ async function main() {
 
   const companies = ['ASM Contracting', 'Arabian Shield LLC', 'Gulf Manpower Co.'];
 
+  // Site → employee count mapping
+  const siteEmployeeCounts = [
+    55, // Site 0: Riyadh Tower (50+ for multi-page PDF)
+    55, // Site 1: Jeddah Mall (50+ for multi-page PDF)
+    30, // Site 2: Dammam Refinery (25+)
+    8, 8, 8, 8, 8, 8, 8, // Sites 3-9: 8 each
+  ];
+  const totalEmployees = siteEmployeeCounts.reduce((a, b) => a + b, 0);
+
   let employeeCounter = 0;
-  for (let i = 0; i < 70; i++) {
-    const site = sites[i % sites.length]; // Distribute across all 10 sites
-    const firstName = firstNames[i % firstNames.length];
-    const lastName = lastNames[i % lastNames.length];
-    const fullName = `${firstName} ${lastName}`;
-    const employeeId = `ASM-2026-${String(i + 1).padStart(3, '0')}`;
-    const trade = trades[i % trades.length];
-    const nationality = nationalities[i % nationalities.length];
-    const company = companies[i % companies.length];
+  for (let siteIdx = 0; siteIdx < sites.length; siteIdx++) {
+    const site = sites[siteIdx];
+    const count = siteEmployeeCounts[siteIdx] || 5;
 
-    // Every 7th employee is a Team Leader, every 14th is a Supervisor
-    const isTeamLeader = i % 7 === 0 && i < 70;
-    const isSupervisor = i % 14 === 0 && i > 0;
+    for (let j = 0; j < count; j++) {
+      const i = employeeCounter;
+      const firstName = firstNames[i % firstNames.length];
+      const lastName = lastNames[(i * 3 + siteIdx) % lastNames.length];
+      // Append a suffix if names repeat to keep them unique enough
+      const suffix = i >= firstNames.length * lastNames.length ? ` ${Math.floor(i / (firstNames.length * lastNames.length)) + 2}` : '';
+      const fullName = `${firstName} ${lastName}${suffix}`;
+      const employeeId = `ASM-2026-${String(i + 1).padStart(3, '0')}`;
+      const trade = trades[i % trades.length];
+      const nationality = nationalities[i % nationalities.length];
+      const company = companies[i % companies.length];
 
-    await db.employee.create({
-      data: {
-        fullName,
-        employeeId,
-        nationality,
-        trade,
-        position: trade,
-        joinDate: new Date(2024, i % 12, (i % 28) + 1),
-        companyName: company,
-        currentSite: site.name,
-        currentSiteId: site.id,
-        rating: 3.5 + (i % 3) * 0.5, // 3.5, 4.0, or 4.5
-        status: 'active',
-        isTeamLeader,
-        isSupervisor,
-        teamLeaderSiteId: isTeamLeader ? site.id : null,
-        supervisorSiteId: isSupervisor ? site.id : null,
-        role: isTeamLeader ? 'Team Leader' : isSupervisor ? 'Supervisor' : 'Standard',
-        hoursThreshold: 1000,
-        currentTotalWorkingHours: 0,
-        phone: `+9715${String(10000000 + i).slice(0, 8)}`,
-        // Encrypt a dummy ID number
-        idNumber: encrypt(`ID${String(1000000 + i)}`),
-        passportNumber: encrypt(`P${String(2000000 + i)}`),
-        passportStatus: i % 3 === 0 ? 'Expired' : 'Valid',
-        idStatus: i % 4 === 0 ? 'Pending' : 'Valid',
-      },
-    });
-    employeeCounter++;
+      // First employee at each site is Team Leader, second is Supervisor
+      const isTeamLeader = j === 0;
+      const isSupervisor = j === 1;
+
+      await db.employee.create({
+        data: {
+          fullName,
+          employeeId,
+          nationality,
+          trade,
+          position: trade,
+          joinDate: new Date(2024, i % 12, (i % 28) + 1),
+          companyName: company,
+          currentSite: site.name,
+          currentSiteId: site.id,
+          rating: 3.5 + (i % 3) * 0.5,
+          status: 'active',
+          isTeamLeader,
+          isSupervisor,
+          teamLeaderSiteId: isTeamLeader ? site.id : null,
+          supervisorSiteId: isSupervisor ? site.id : null,
+          role: isTeamLeader ? 'Team Leader' : isSupervisor ? 'Supervisor' : 'Standard',
+          hoursThreshold: 1000,
+          currentTotalWorkingHours: 0,
+          phone: `+9715${String(10000000 + i).slice(0, 8)}`,
+          idNumber: encrypt(`ID${String(1000000 + i)}`),
+          passportNumber: encrypt(`P${String(2000000 + i)}`),
+          passportStatus: i % 3 === 0 ? 'Expired' : 'Valid',
+          idStatus: i % 4 === 0 ? 'Pending' : 'Valid',
+        },
+      });
+      employeeCounter++;
+    }
+    console.log(`   ✅ ${site.name}: ${count} employees`);
   }
-  console.log(`   ✅ Created ${employeeCounter} employees across ${sites.length} sites.\n`);
+  console.log(`   Total: ${employeeCounter} employees across ${sites.length} sites.\n`);
 
   // ── 5. Seed permissions ──
   console.log('5. Seeding permissions table...');
@@ -191,7 +225,11 @@ async function main() {
   console.log('Data created:');
   console.log(`  • 0 users (signup page will show)`);
   console.log(`  • ${sites.length} sites (grouped by 4 clients)`);
-  console.log(`  • ${employeeCounter} employees (with trades, nationalities, TL/Sup)`);
+  console.log(`  • ${employeeCounter} employees:`);
+  console.log(`      - Riyadh Tower Site: 55 (50+ → multi-page PDF test)`);
+  console.log(`      - Jeddah Mall Project: 55 (50+ → multi-page PDF test)`);
+  console.log(`      - Dammam Refinery: 30 (25+)`);
+  console.log(`      - 7 other sites: 8 each`);
   console.log(`  • ${permissions.length} permissions`);
   console.log('═══════════════════════════════════════════════════════════\n');
 }
