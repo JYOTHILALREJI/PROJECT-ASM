@@ -22,6 +22,8 @@ import {
   Calendar,
   Check,
   RotateCcw,
+  Package,
+  Minus,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -673,6 +675,9 @@ function TableSkeleton() {
 /* ───────── Main Component ───────── */
 
 export function UniformRegistryPage() {
+  // Tab state: 'tokens' or 'stock'
+  const [activeTab, setActiveTab] = useState<'tokens' | 'stock'>('tokens');
+
   // List state
   const [entries, setEntries] = useState<UniformEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -1291,21 +1296,50 @@ export function UniformRegistryPage() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Uniform Registry</h2>
+          <h2 className="text-2xl font-bold text-white">Materials Registry</h2>
           <p className="text-slate-400 mt-1">
-            Track uniform and equipment distribution for employees.
+            Track material and equipment distribution for employees.
           </p>
         </div>
-        <Button
-          onClick={openCreateDialog}
-          className="bg-blue-500 hover:bg-blue-600 text-white gap-2 self-start"
-        >
-          <Plus className="h-4 w-4" />
-          New Entry
-        </Button>
+        {activeTab === 'tokens' && (
+          <Button
+            onClick={openCreateDialog}
+            className="bg-blue-500 hover:bg-blue-600 text-white gap-2 self-start"
+          >
+            <Plus className="h-4 w-4" />
+            New Entry
+          </Button>
+        )}
       </div>
 
-      {/* Search & Filters */}
+      {/* Tab Toggle */}
+      <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5 w-fit">
+        <button
+          onClick={() => setActiveTab('tokens')}
+          className={cn(
+            'flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors',
+            activeTab === 'tokens' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'
+          )}
+        >
+          <FileText className="h-4 w-4" />
+          Tokens
+        </button>
+        <button
+          onClick={() => setActiveTab('stock')}
+          className={cn(
+            'flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors',
+            activeTab === 'stock' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white'
+          )}
+        >
+          <Package className="h-4 w-4" />
+          Stock Management
+        </button>
+      </div>
+
+      {activeTab === 'stock' ? (
+        <StockManagement />
+      ) : (
+      <>
       <Card className="bg-slate-800 border-slate-700 rounded-xl">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-3">
@@ -1613,7 +1647,7 @@ export function UniformRegistryPage() {
         <DialogContent className="bg-slate-800 border-slate-700 text-slate-200 max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white">
-              {isRenewal ? 'Renew Uniform Entry' : 'New Uniform Registry Entry'}
+              {isRenewal ? 'Renew Material Entry' : 'New Materials Registry Entry'}
             </DialogTitle>
             <DialogDescription className="text-slate-400">
               {isRenewal
@@ -1980,6 +2014,9 @@ export function UniformRegistryPage() {
         </DialogContent>
       </Dialog>
 
+      </>
+      )}
+
       {/* ──────── Delete Confirmation Dialog ──────── */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="bg-slate-800 border-slate-700 text-slate-200">
@@ -2019,6 +2056,239 @@ export function UniformRegistryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/* ───────── Stock Management Component ───────── */
+
+interface StockItemData {
+  id: string;
+  itemName: string;
+  size: string | null;
+  quantity: number;
+  minQuantity: number;
+  updatedAt: string;
+}
+
+function StockManagement() {
+  const { toast } = useToast();
+  const [stockItems, setStockItems] = useState<StockItemData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemSize, setNewItemSize] = useState('');
+  const [newItemQty, setNewItemQty] = useState('');
+  const [newItemMin, setNewItemMin] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const fetchStock = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/stock');
+      const json = await res.json();
+      if (json.success) {
+        setStockItems(json.data.stockItems || []);
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load stock', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchStock();
+  }, [fetchStock]);
+
+  const handleAddStock = async () => {
+    if (!newItemName.trim()) {
+      toast({ title: 'Error', description: 'Item name is required', variant: 'destructive' });
+      return;
+    }
+    setAdding(true);
+    try {
+      const res = await fetch('/api/stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemName: newItemName.trim(),
+          size: newItemSize.trim() || null,
+          quantity: parseInt(newItemQty) || 0,
+          minQuantity: parseInt(newItemMin) || 0,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: 'Stock Added', description: `${newItemName} added to stock` });
+        setNewItemName('');
+        setNewItemSize('');
+        setNewItemQty('');
+        setNewItemMin('');
+        setShowAddForm(false);
+        fetchStock();
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to add stock', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to add stock', variant: 'destructive' });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleUpdateQty = async (id: string, newQty: number) => {
+    try {
+      const res = await fetch('/api/stock', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, quantity: Math.max(0, newQty) }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setStockItems((prev) => prev.map((i) => i.id === id ? { ...i, quantity: Math.max(0, newQty) } : i));
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update quantity', variant: 'destructive' });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this stock item?')) return;
+    try {
+      await fetch(`/api/stock?id=${id}`, { method: 'DELETE' });
+      setStockItems((prev) => prev.filter((i) => i.id !== id));
+      toast({ title: 'Deleted', description: 'Stock item removed' });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to delete', variant: 'destructive' });
+    }
+  };
+
+  // Group by itemName
+  const grouped = useMemo(() => {
+    const map = new Map<string, StockItemData[]>();
+    for (const item of stockItems) {
+      if (!map.has(item.itemName)) map.set(item.itemName, []);
+      map.get(item.itemName)!.push(item);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [stockItems]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-400">
+          Manage material stock by item and size. Quantities are automatically reduced when tokens are issued.
+        </p>
+        <Button onClick={() => setShowAddForm(!showAddForm)} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+          <Plus className="h-4 w-4" />
+          Add Stock
+        </Button>
+      </div>
+
+      {showAddForm && (
+        <Card className="bg-slate-800 border-slate-700">
+          <CardContent className="p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <Label className="text-slate-300 text-xs mb-1">Item Name *</Label>
+                <Input placeholder="e.g. Uniform, Shoes" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+              </div>
+              <div>
+                <Label className="text-slate-300 text-xs mb-1">Size</Label>
+                <Input placeholder="e.g. L, XL, 42" value={newItemSize} onChange={(e) => setNewItemSize(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+              </div>
+              <div>
+                <Label className="text-slate-300 text-xs mb-1">Quantity *</Label>
+                <Input type="number" min="0" placeholder="0" value={newItemQty} onChange={(e) => setNewItemQty(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+              </div>
+              <div>
+                <Label className="text-slate-300 text-xs mb-1">Min Qty (alert)</Label>
+                <Input type="number" min="0" placeholder="0" value={newItemMin} onChange={(e) => setNewItemMin(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <Button onClick={handleAddStock} disabled={adding} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+                {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Save
+              </Button>
+              <Button variant="ghost" onClick={() => setShowAddForm(false)} className="text-slate-400">Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {loading ? (
+        <Skeleton className="h-48 bg-slate-800 rounded-lg" />
+      ) : stockItems.length === 0 ? (
+        <Card className="bg-slate-800/50 border-slate-700/50">
+          <CardContent className="py-16 text-center">
+            <Package className="h-10 w-10 text-slate-600 mx-auto mb-3" />
+            <p className="text-sm text-slate-400">No stock items yet</p>
+            <p className="text-xs text-slate-500 mt-1">Click "Add Stock" to create your first stock item.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {grouped.map(([itemName, items]) => (
+            <Card key={itemName} className="bg-slate-800/50 border-slate-700/50 overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-700/50 flex items-center gap-2">
+                <Package className="h-4 w-4 text-emerald-400" />
+                <span className="text-sm font-bold text-white">{itemName}</span>
+                <Badge className="bg-slate-700 text-slate-300 text-[10px] ml-auto">
+                  {items.reduce((s, i) => s + i.quantity, 0)} total
+                </Badge>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700/30 text-xs text-slate-400">
+                      <th className="text-left px-4 py-2 font-medium">Size</th>
+                      <th className="text-right px-4 py-2 font-medium">Quantity</th>
+                      <th className="text-right px-4 py-2 font-medium">Min Qty</th>
+                      <th className="text-center px-4 py-2 font-medium">Status</th>
+                      <th className="text-right px-4 py-2 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => {
+                      const isLow = item.quantity <= item.minQuantity;
+                      const isOut = item.quantity === 0;
+                      return (
+                        <tr key={item.id} className="border-b border-slate-700/20 hover:bg-slate-700/20">
+                          <td className="px-4 py-2.5 text-slate-300 font-mono">{item.size || 'One Size'}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button onClick={() => handleUpdateQty(item.id, item.quantity - 1)} className="h-5 w-5 rounded bg-slate-700 hover:bg-slate-600 text-white flex items-center justify-center">
+                                <Minus className="h-3 w-3" />
+                              </button>
+                              <span className={cn('text-sm font-bold font-mono w-10 text-center', isOut ? 'text-red-400' : isLow ? 'text-amber-400' : 'text-white')}>{item.quantity}</span>
+                              <button onClick={() => handleUpdateQty(item.id, item.quantity + 1)} className="h-5 w-5 rounded bg-slate-700 hover:bg-slate-600 text-white flex items-center justify-center">
+                                <Plus className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-slate-400 font-mono">{item.minQuantity}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            {isOut ? <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-[10px]">Out of Stock</Badge>
+                              : isLow ? <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]">Low Stock</Badge>
+                              : <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]">In Stock</Badge>}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button onClick={() => handleDelete(item.id)} className="text-slate-500 hover:text-red-400 transition-colors">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

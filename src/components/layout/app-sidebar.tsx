@@ -63,7 +63,7 @@ const navItems: NavItem[] = [
   { id: 'attendance_copy', label: 'Attendance Copy', icon: Link2, permissionSlug: 'attendance', roles: ['super_admin'] },
   { id: 'accounts', label: 'Accounts', icon: DollarSign, permissionSlug: 'accounts', roles: ['super_admin'] },
   { id: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, permissionSlug: 'consolidated_salary', roles: ['super_admin'] },
-  { id: 'uniform_registry', label: 'Uniform Registry', icon: Shirt, permissionSlug: 'uniform_registry' },
+  { id: 'uniform_registry', label: 'Materials Registry', icon: Shirt, permissionSlug: 'uniform_registry' },
   { id: 'leave_requests', label: 'Leave Requests', icon: FileText, permissionSlug: 'leave_requests', roles: ['super_admin'] },
   { id: 'cancellation_requests', label: 'Cancellations', icon: Ban, permissionSlug: 'cancellation_requests', roles: ['super_admin'] },
   { id: 'notifications', label: 'Notifications', icon: Bell, permissionSlug: 'notifications', roles: ['super_admin'] },

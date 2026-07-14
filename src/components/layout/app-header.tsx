@@ -33,7 +33,7 @@ const viewTitles: Record<string, string> = {
   attendance: 'Attendance Tracking',
   attendance_copy: 'Attendance Copy',
   all_logs: 'All Logs',
-  uniform_registry: 'Uniform Registry',
+  uniform_registry: 'Materials Registry',
   leave_requests: 'Leave Requests',
   cancellation_requests: 'Cancellation Requests',
   notifications: 'Notifications',

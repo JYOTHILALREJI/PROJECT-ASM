@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
       documentType,
       documentNumber,
       items,
+      sizes,
       siteName,
       teamLeaderName,
       isRenewal,
@@ -162,6 +163,7 @@ export async function POST(request: NextRequest) {
         documentType,
         documentNumber,
         items: typeof items === 'string' ? items : JSON.stringify(items),
+        sizes: sizes ? (typeof sizes === 'string' ? sizes : JSON.stringify(sizes)) : null,
         siteName: siteName || null,
         teamLeaderName: teamLeaderName || null,
         isRenewal: isRenewal ?? false,
@@ -182,6 +184,41 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+
+    // ── Deduct stock for each issued item ──
+    // Parse the items JSON to know which items were issued, then parse sizes
+    // to know which size to deduct. Only deduct if the item has a matching
+    // stock entry.
+    try {
+      const itemsObj = typeof items === 'string' ? JSON.parse(items) : items;
+      const sizesObj = sizes
+        ? (typeof sizes === 'string' ? JSON.parse(sizes) : sizes)
+        : {};
+
+      for (const [itemKey, isIssued] of Object.entries(itemsObj)) {
+        if (!isIssued) continue; // Only deduct items that were actually issued
+
+        const itemSize = sizesObj[itemKey] || null;
+        // Find the matching stock item
+        const stockItem = await db.stockItem.findFirst({
+          where: {
+            itemName: itemKey,
+            size: itemSize,
+            deletedAt: null,
+          },
+        });
+
+        if (stockItem && stockItem.quantity > 0) {
+          await db.stockItem.update({
+            where: { id: stockItem.id },
+            data: { quantity: Math.max(0, stockItem.quantity - 1) },
+          });
+        }
+      }
+    } catch (stockErr) {
+      console.error('[UNIFORM_REGISTRY_POST] stock deduction failed:', stockErr);
+      // Non-fatal — the token was already created, stock deduction is best-effort
+    }
 
     // Log the activity
     await logActivity({

@@ -319,6 +319,7 @@ model UniformRegistry {
   documentType    String // "id" or "passport"
   documentNumber  String // Stored encrypted
   items           String // JSON string
+  sizes           String?  // JSON string of item sizes, e.g. {"uniform":"L","shoes":"42"}
   siteName        String?
   teamLeaderName  String?
   isRenewal       Boolean  @default(false)
@@ -336,6 +337,28 @@ model UniformRegistry {
   @@index([createdAt])
   @@index([uniformId])
   @@index([isHidden])
+  @@index([deletedAt])
+}
+
+// ---------------------------------------------------------------------------
+// StockItem
+// ---------------------------------------------------------------------------
+// Tracks the available stock of each material (uniform, shoes, helmet, etc.)
+// by size. When a token is issued, the corresponding stock is decremented.
+// Admins can add/replenish stock at any time.
+// ---------------------------------------------------------------------------
+model StockItem {
+  id          String   @id @default(cuid())
+  itemName    String   // e.g. "Uniform", "Shoes", "Helmet", "Water Bottle"
+  size        String?  // e.g. "S", "M", "L", "XL", "42", "43", "One Size"
+  quantity    Int      @default(0)
+  minQuantity Int      @default(0) // Low-stock threshold for alerts
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([itemName, size])
+  @@index([itemName])
   @@index([deletedAt])
 }
 
