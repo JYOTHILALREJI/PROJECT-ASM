@@ -7,6 +7,8 @@ import { logActivity } from '@/lib/activity-logger';
 // ---------------------------------------------------------------------------
 // GET  — list all stock items (optionally filtered by itemName)
 // POST — create or add quantity to a stock item (upsert by itemName + size)
+// PUT  — update a stock item (set quantity, minQuantity, etc.)
+// DELETE — soft-delete a stock item
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
@@ -45,7 +47,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { itemName, size, quantity, minQuantity, actorUserId, actorDisplayName } = body;
+    const itemName = body.itemName;
+    const size = body.size;
+    const quantity = body.quantity;
+    const minQuantity = body.minQuantity;
+    const actorUserId = body.actorUserId;
+    const actorDisplayName = body.actorDisplayName;
 
     if (!itemName || typeof itemName !== 'string' || itemName.trim().length === 0) {
       return NextResponse.json(
@@ -56,8 +63,24 @@ export async function POST(request: NextRequest) {
 
     const trimmedName = itemName.trim();
     const trimmedSize = typeof size === 'string' && size.trim() ? size.trim() : null;
-    const addQty = typeof quantity === 'number' && quantity > 0 ? quantity : 0;
-    const minQty = typeof minQuantity === 'number' && minQty >= 0 ? minQuantity : 0;
+
+    // Parse quantity — accept number or string, default to 0
+    let addQty = 0;
+    if (typeof quantity === 'number' && !isNaN(quantity)) {
+      addQty = quantity > 0 ? quantity : 0;
+    } else if (typeof quantity === 'string') {
+      const parsed = parseInt(quantity, 10);
+      addQty = !isNaN(parsed) && parsed > 0 ? parsed : 0;
+    }
+
+    // Parse minQuantity — accept number or string, default to 0
+    let minQty = 0;
+    if (typeof minQuantity === 'number' && !isNaN(minQuantity) && minQuantity >= 0) {
+      minQty = minQuantity;
+    } else if (typeof minQuantity === 'string') {
+      const parsed = parseInt(minQuantity, 10);
+      minQty = !isNaN(parsed) && parsed >= 0 ? parsed : 0;
+    }
 
     // Upsert: if (itemName, size) already exists, add to quantity. Otherwise create.
     const existing = await db.stockItem.findFirst({
@@ -70,7 +93,7 @@ export async function POST(request: NextRequest) {
         where: { id: existing.id },
         data: {
           quantity: existing.quantity + addQty,
-          minQuantity: minQty || existing.minQuantity,
+          minQuantity: minQty > 0 ? minQty : existing.minQuantity,
         },
       });
     } else {
@@ -109,13 +132,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// PUT — update a stock item (set quantity, minQuantity, etc.)
-// ---------------------------------------------------------------------------
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, quantity, minQuantity, actorUserId, actorDisplayName } = body;
+    const id = body.id;
+    const quantity = body.quantity;
+    const minQuantity = body.minQuantity;
+    const actorUserId = body.actorUserId;
+    const actorDisplayName = body.actorDisplayName;
 
     if (!id) {
       return NextResponse.json(
@@ -166,9 +190,6 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// DELETE — soft-delete a stock item
-// ---------------------------------------------------------------------------
 export async function DELETE(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
