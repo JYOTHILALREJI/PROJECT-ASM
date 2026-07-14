@@ -704,15 +704,35 @@ export function DashboardPage() {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 sm:gap-6 ml-0 sm:ml-auto flex-wrap">
+                      <div className="flex items-center gap-3 sm:gap-4 ml-0 sm:ml-auto flex-wrap">
                         <div className="flex items-center gap-1.5">
                           <Users className="h-3.5 w-3.5 text-blue-400" />
-                          <span className="text-xs text-slate-400">Employees</span>
+                          <span className="text-xs text-slate-400">Emp</span>
                           <span className="text-sm font-bold text-white">{site.employeeCount}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
+                          <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                          <span className="text-xs text-slate-400">Present</span>
+                          <span className="text-sm font-bold text-emerald-400">
+                            {(() => {
+                              const siteEmpIds = emps.map(e => e.empId);
+                              return attendanceRecords.filter(r => siteEmpIds.includes(r.employeeId) && (r.status === 'present' || r.status === 'overtime')).length;
+                            })()}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <XCircle className="h-3.5 w-3.5 text-red-400" />
+                          <span className="text-xs text-slate-400">Absent</span>
+                          <span className="text-sm font-bold text-red-400">
+                            {(() => {
+                              const siteEmpIds = emps.map(e => e.empId);
+                              return attendanceRecords.filter(r => siteEmpIds.includes(r.employeeId) && r.status === 'absent').length;
+                            })()}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
                           <Clock className="h-3.5 w-3.5 text-cyan-400" />
-                          <span className="text-xs text-slate-400">Hours</span>
+                          <span className="text-xs text-slate-400">Hrs</span>
                           <span className="text-sm font-bold text-white">{formatHours(siteTotalHours)}</span>
                         </div>
                       </div>
@@ -732,40 +752,85 @@ export function DashboardPage() {
                               <TableHead className="text-slate-400 font-semibold text-xs w-12 text-center">Sl No</TableHead>
                               <TableHead className="text-slate-400 font-semibold text-xs min-w-[100px]">Emp ID</TableHead>
                               <TableHead className="text-slate-400 font-semibold text-xs min-w-[160px]">Name</TableHead>
-                              <TableHead className="text-slate-400 font-semibold text-xs text-right min-w-[100px]">Total Hours</TableHead>
+                              <TableHead className="text-slate-400 font-semibold text-xs text-right min-w-[90px]">Month Hrs</TableHead>
+                              <TableHead className="text-slate-400 font-semibold text-xs text-right min-w-[90px]">Lifetime Hrs</TableHead>
+                              <TableHead className="text-slate-400 font-semibold text-xs text-center min-w-[90px]">Rate</TableHead>
+                              <TableHead className="text-slate-400 font-semibold text-xs text-center min-w-[70px]">Status</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {emps.map((emp) => (
-                              <TableRow
-                                key={emp.empId}
-                                className={`border-slate-700/20 hover:bg-slate-700/20 ${emp.isPaid ? 'bg-emerald-500/5' : ''}`}
-                              >
-                                <TableCell className="text-slate-500 text-xs text-center font-mono">
-                                  {emp.slNo}
-                                </TableCell>
-                                <TableCell className="text-slate-300 text-xs font-mono">
-                                  <div className="flex items-center gap-1.5">
-                                    {emp.employeeCode || '-'}
-                                    {emp.isTeamLeader && (
-                                      <Crown className="h-3 w-3 text-amber-400 shrink-0" />
-                                    )}
-                                    {emp.isSupervisor && (
-                                      <ShieldCheck className="h-3 w-3 text-emerald-400 shrink-0" />
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="text-sm text-white font-medium">{emp.empName}</div>
-                                  <div className="text-[11px] text-slate-500">
-                                    {emp.trade}{emp.nationality ? ` - ${emp.nationality}` : ''}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-slate-200 text-xs text-right font-mono font-semibold">
-                                  {formatHours(emp.totalHours)}
-                                </TableCell>
-                              </TableRow>
-                            ))}
+                            {emps.map((emp) => {
+                              const lifetimeHours = emp.previousCumulativeHours + emp.totalHours;
+                              const isAboveThreshold = lifetimeHours >= emp.hoursThreshold;
+                              const effectiveRate = emp.isCustomRate
+                                ? emp.lowRate
+                                : isAboveThreshold ? emp.highRate : emp.lowRate;
+                              const siteEmpIds = emps.map(e => e.empId);
+                              const empAttRecords = attendanceRecords.filter(r => r.employeeId === emp.empId);
+                              const presentCount = empAttRecords.filter(r => r.status === 'present' || r.status === 'overtime').length;
+                              const absentCount = empAttRecords.filter(r => r.status === 'absent').length;
+                              const notMarkedCount = empAttRecords.filter(r => r.status === 'not_marked' || r.status === 'no_site').length;
+
+                              return (
+                                <TableRow
+                                  key={emp.empId}
+                                  className={`border-slate-700/20 hover:bg-slate-700/20 ${emp.isPaid ? 'bg-emerald-500/5' : ''}`}
+                                >
+                                  <TableCell className="text-slate-500 text-xs text-center font-mono">
+                                    {emp.slNo}
+                                  </TableCell>
+                                  <TableCell className="text-slate-300 text-xs font-mono">
+                                    <div className="flex items-center gap-1.5">
+                                      {emp.employeeCode || '-'}
+                                      {emp.isTeamLeader && (
+                                        <Crown className="h-3 w-3 text-amber-400 shrink-0" />
+                                      )}
+                                      {emp.isSupervisor && (
+                                        <ShieldCheck className="h-3 w-3 text-emerald-400 shrink-0" />
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="text-sm text-white font-medium">{emp.empName}</div>
+                                    <div className="text-[11px] text-slate-500">
+                                      {emp.trade}{emp.nationality ? ` - ${emp.nationality}` : ''}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-slate-200 text-xs text-right font-mono font-semibold">
+                                    {formatHours(emp.totalHours)}
+                                  </TableCell>
+                                  <TableCell className="text-slate-200 text-xs text-right font-mono font-semibold">
+                                    {formatHours(lifetimeHours)}
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <Badge
+                                      className={`text-[10px] px-1.5 py-0.5 font-medium ${
+                                        emp.isCustomRate
+                                          ? 'bg-violet-500/15 text-violet-400 border-violet-500/25'
+                                          : isAboveThreshold
+                                            ? 'bg-orange-500/15 text-orange-400 border-orange-500/25'
+                                            : 'bg-slate-600/30 text-slate-300 border-slate-500/25'
+                                      }`}
+                                    >
+                                      {effectiveRate.toFixed(1)}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <div className="flex flex-col gap-0.5 items-center">
+                                      <span className="text-[10px] text-emerald-400 font-medium">
+                                        P: {presentCount}
+                                      </span>
+                                      <span className="text-[10px] text-red-400 font-medium">
+                                        A: {absentCount}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 font-medium">
+                                        N: {notMarkedCount}
+                                      </span>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
                             <TableRow className="border-slate-600/50 bg-slate-800/60 hover:bg-slate-800/60">
                               <TableCell colSpan={3} className="text-white text-xs font-bold">
                                 Site Total ({emps.length} employees)
@@ -773,6 +838,11 @@ export function DashboardPage() {
                               <TableCell className="text-white text-xs text-right font-mono font-bold">
                                 {formatHours(siteTotalHours)}
                               </TableCell>
+                              <TableCell className="text-white text-xs text-right font-mono font-bold">
+                                {formatHours(emps.reduce((s, e) => s + e.previousCumulativeHours + e.totalHours, 0))}
+                              </TableCell>
+                              <TableCell />
+                              <TableCell />
                             </TableRow>
                           </TableBody>
                         </Table>
