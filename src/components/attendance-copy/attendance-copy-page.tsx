@@ -176,20 +176,40 @@ export function AttendanceCopyPage() {
   const handleCopyUrl = useCallback((url: string) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const fullUrl = `${origin}${url}`;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+
+    // Try modern Clipboard API (requires HTTPS or localhost)
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
       navigator.clipboard.writeText(fullUrl).then(() => {
         toast({ title: 'Copied', description: 'Share link copied to clipboard' });
       }).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = fullUrl;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        toast({ title: 'Copied', description: 'Share link copied to clipboard' });
+        copyFallback(fullUrl);
       });
+    } else {
+      copyFallback(fullUrl);
     }
   }, []);
+
+  const copyFallback = (text: string) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        toast({ title: 'Copied', description: 'Share link copied to clipboard' });
+      } else {
+        toast({ title: 'Copy failed', description: 'Please copy the URL manually', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Copy failed', description: 'Please copy the URL manually', variant: 'destructive' });
+    }
+  };
 
   // ── Version history dialog state ──
   const { user } = useAuthStore();

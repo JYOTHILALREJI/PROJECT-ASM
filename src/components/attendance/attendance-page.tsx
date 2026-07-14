@@ -1049,21 +1049,45 @@ export function AttendancePage() {
 
   const handleCopyShareUrl = useCallback(() => {
     if (!shareUrl) return;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+
+    // Try the modern Clipboard API first (requires HTTPS or localhost)
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
       navigator.clipboard.writeText(shareUrl).then(() => {
         toast({ title: 'Copied', description: 'Share link copied to clipboard' });
       }).catch(() => {
-        // Fallback
-        const ta = document.createElement('textarea');
-        ta.value = shareUrl;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        toast({ title: 'Copied', description: 'Share link copied to clipboard' });
+        // Clipboard API failed — fall back to the textarea method
+        copyToClipboardFallback(shareUrl);
       });
+    } else {
+      // Clipboard API not available (non-secure context like http://IP:port)
+      copyToClipboardFallback(shareUrl);
     }
   }, [shareUrl]);
+
+  const copyToClipboardFallback = (text: string) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      // Position it off-screen so it's not visible
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      // execCommand is deprecated but still works in all browsers
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        toast({ title: 'Copied', description: 'Share link copied to clipboard' });
+      } else {
+        // Last resort — open the URL in a new window so the user can manually copy
+        toast({ title: 'Copy failed', description: 'Please copy the URL manually from the text box', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Copy failed', description: 'Please copy the URL manually from the text box', variant: 'destructive' });
+    }
+  };
 
   // ── Attendance Sheet handlers ──
   const openAttendanceSheet = useCallback((site: SiteOption) => {
