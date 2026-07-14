@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Users,
   Wallet,
+  GitBranch,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -89,6 +90,8 @@ interface SiteData {
   name: string;
   clientName?: string | null;
   projectName?: string | null;
+  branchId?: string | null;
+  branch?: { id: string; name: string; code: string | null } | null;
   employeeCount: number;
   totalHours: number;
   totalSalary: number;
@@ -151,6 +154,8 @@ interface ApiSiteResult {
     name: string;
     clientName?: string | null;
     projectName?: string | null;
+    branchId?: string | null;
+    branch?: { id: string; name: string; code: string | null } | null;
   };
   employeeCount: number;
   totalHours: number;
@@ -304,6 +309,7 @@ export function AccountsPage() {
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedSites, setCollapsedSites] = useState<Set<string>>(new Set());
+  const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
 
   // Mutable merged employee rows per site (keyed by siteId)
   const [siteEmployees, setSiteEmployees] = useState<Record<string, MergedEmployeeRow[]>>({});
@@ -335,6 +341,8 @@ export function AccountsPage() {
           name: s.site.name,
           clientName: s.site.clientName,
           projectName: s.site.projectName,
+          branchId: s.site.branchId || null,
+          branch: s.site.branch || null,
           employeeCount: s.employeeCount,
           totalHours: s.totalHours,
           totalSalary: s.totalSalary,
@@ -823,6 +831,39 @@ export function AccountsPage() {
     return { totalHours, totalSalary, totalDeductions, totalAdvances, totalBalance, totalEmployees, paidCount, unpaidCount };
   }, [sites, siteEmployees]);
 
+  // Group sites by branch
+  const groupedByBranch = useMemo(() => {
+    const branchMap = new Map<string, { branchId: string; branchName: string; branchCode: string | null; sites: SiteData[] }>();
+    const unassignedKey = '__unassigned_branch__';
+
+    for (const site of sites) {
+      const bKey = site.branchId || unassignedKey;
+      const bName = site.branch?.name || 'Unassigned Branch';
+      const bCode = site.branch?.code || null;
+
+      if (!branchMap.has(bKey)) {
+        branchMap.set(bKey, { branchId: bKey, branchName: bName, branchCode: bCode, sites: [] });
+      }
+      branchMap.get(bKey)!.sites.push(site);
+    }
+
+    return Array.from(branchMap.values())
+      .sort((a, b) => {
+        if (a.branchId === unassignedKey) return 1;
+        if (b.branchId === unassignedKey) return -1;
+        return a.branchName.localeCompare(b.branchName);
+      });
+  }, [sites]);
+
+  const toggleBranchCollapse = useCallback((branchId: string) => {
+    setCollapsedBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(branchId)) next.delete(branchId);
+      else next.add(branchId);
+      return next;
+    });
+  }, []);
+
   // ── Column headers ──
   const lowRateHeader = 'Rate 2.5/3.0';
   const highRateHeader = 'Rate 5.0/5.5';
@@ -1104,16 +1145,61 @@ export function AccountsPage() {
         </div>
       ) : (
         /* ── Site Sections ── */
-        <div className="space-y-4">
-          {sites.map((site, siteIndex) => {
-            const employees = siteEmployees[site.id] || [];
-            const isCollapsed = collapsedSites.has(site.id);
-            const colorScheme = SITE_HEADER_COLORS[siteIndex % SITE_HEADER_COLORS.length];
+        <div className="space-y-6">
+          {groupedByBranch.map((branchGroup) => {
+            const isBranchCollapsed = collapsedBranches.has(branchGroup.branchId);
+            const branchSites = branchGroup.sites;
+            const branchTotalSalary = branchSites.reduce((s, site) => {
+              const emps = siteEmployees[site.id] || [];
+              return s + emps.reduce((sum, e) => sum + e.totalSalary, 0);
+            }, 0);
+            const branchTotalEmployees = branchSites.reduce((s, site) => {
+              const emps = siteEmployees[site.id] || [];
+              return s + emps.length;
+            }, 0);
 
-            // Site totals
-            const siteTotalHours = employees.reduce((s, e) => s + e.totalHours, 0);
-            const siteTotalLowRateHours = employees.reduce((s, e) => s + e.lowRateHours, 0);
-            const siteTotalHighRateHours = employees.reduce((s, e) => s + e.highRateHours, 0);
+            return (
+              <div key={branchGroup.branchId} className="space-y-3">
+                {/* Branch header */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleBranchCollapse(branchGroup.branchId)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranchCollapse(branchGroup.branchId); } }}
+                  className="flex items-center gap-3 px-4 py-3 bg-slate-900/60 border border-emerald-600/30 rounded-lg cursor-pointer hover:bg-slate-900/80 transition-colors"
+                >
+                  {isBranchCollapsed ? <ChevronRight className="h-5 w-5 text-emerald-400" /> : <ChevronDown className="h-5 w-5 text-emerald-400" />}
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10">
+                    <GitBranch className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-white">{branchGroup.branchName}</h3>
+                      {branchGroup.branchCode && (
+                        <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0 h-4">
+                          {branchGroup.branchCode}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {branchSites.length} site{branchSites.length !== 1 ? 's' : ''} · {branchTotalEmployees} employee{branchTotalEmployees !== 1 ? 's' : ''}
+                      {' · '}<span className="text-emerald-400 font-medium">{formatNumber(branchTotalSalary)} DHS</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Sites within this branch */}
+                {!isBranchCollapsed && (
+                  <div className="space-y-4 pl-2 sm:pl-4 border-l-2 border-slate-700/30 ml-4">
+                    {branchSites.map((site, siteIndex) => {
+                      const employees = siteEmployees[site.id] || [];
+                      const isCollapsed = collapsedSites.has(site.id);
+                      const colorScheme = SITE_HEADER_COLORS[siteIndex % SITE_HEADER_COLORS.length];
+
+                      // Site totals
+                      const siteTotalHours = employees.reduce((s, e) => s + e.totalHours, 0);
+                      const siteTotalLowRateHours = employees.reduce((s, e) => s + e.lowRateHours, 0);
+                      const siteTotalHighRateHours = employees.reduce((s, e) => s + e.highRateHours, 0);
             const siteTotalSalary = employees.reduce((s, e) => s + e.totalSalary, 0);
             const siteTotalDeduction = employees.reduce((s, e) => s + e.deduction, 0);
             const siteTotalAdvance = employees.reduce((s, e) => s + e.advance, 0);
@@ -1445,6 +1531,11 @@ export function AccountsPage() {
                         </Button>
                       </div>
                     )}
+                  </div>
+                )}
+              </div>
+            );
+                    })}
                   </div>
                 )}
               </div>

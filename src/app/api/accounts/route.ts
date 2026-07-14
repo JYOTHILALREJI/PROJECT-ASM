@@ -437,7 +437,7 @@ export async function GET(request: NextRequest) {
     const sites = siteIds.length > 0
       ? await db.site.findMany({
           where: { id: { in: siteIds } },
-          select: { id: true, name: true, clientName: true, projectName: true },
+          select: { id: true, name: true, clientName: true, projectName: true, branchId: true, branch: { select: { id: true, name: true, code: true } } },
         })
       : [];
     const siteInfoMap = new Map(sites.map((s) => [s.id, s]));
@@ -629,6 +629,8 @@ export async function GET(request: NextRequest) {
           name: siteInfo?.name || sData.siteName,
           clientName: siteInfo?.clientName || null,
           projectName: siteInfo?.projectName || null,
+          branchId: siteInfo?.branchId || null,
+          branch: siteInfo?.branch || null,
         },
         employeeCount: allSiteEmpIds.length,
         totalHours: siteSalaryRecords.reduce((sum, r) => sum + r.totalHours, 0),

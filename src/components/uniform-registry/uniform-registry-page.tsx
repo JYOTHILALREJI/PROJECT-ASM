@@ -2072,7 +2072,6 @@ interface StockItemData {
 }
 
 function StockManagement() {
-  const { toast } = useToast();
   const [stockItems, setStockItems] = useState<StockItemData[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
