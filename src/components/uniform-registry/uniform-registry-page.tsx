@@ -698,6 +698,8 @@ export function UniformRegistryPage() {
   const [documentType, setDocumentType] = useState<string>('');
   const [documentNumber, setDocumentNumber] = useState('');
   const [items, setItems] = useState<ItemsMap>({ ...DEFAULT_ITEMS });
+  const [itemSizes, setItemSizes] = useState<Record<string, string>>({}); // e.g. { uniform: "L", shoes: "42" }
+  const [stockItems, setStockItems] = useState<Array<{ id: string; itemName: string; size: string | null; quantity: number }>>([]);
   const [selectedSite, setSelectedSite] = useState<Site | null>(null);
   const [teamLeaderName, setTeamLeaderName] = useState<string | null>(null);
   const [teamLeaderLoading, setTeamLeaderLoading] = useState(false);
@@ -869,6 +871,7 @@ export function UniformRegistryPage() {
     setDocumentType('');
     setDocumentNumber('');
     setItems({ ...DEFAULT_ITEMS });
+    setItemSizes({});
     setSelectedSite(null);
     setTeamLeaderName(null);
     setCurrentTeamLeader(null);
@@ -878,6 +881,10 @@ export function UniformRegistryPage() {
     setPreviousTokenId(null);
     setCreateDialogOpen(true);
     fetchEmployees();
+    // Fetch stock items so we know which sizes are available
+    fetch('/api/stock').then(res => res.json()).then(data => {
+      if (data.success) setStockItems(data.data.stockItems || []);
+    }).catch(() => {});
   }, [fetchEmployees]);
 
   /* ── Open Renew Dialog ── */
@@ -1092,6 +1099,7 @@ export function UniformRegistryPage() {
       }
 
       const itemsJson = JSON.stringify(items);
+      const sizesJson = JSON.stringify(itemSizes);
 
       const res = await fetch('/api/uniform-registry', {
         method: 'POST',
@@ -1102,6 +1110,7 @@ export function UniformRegistryPage() {
           documentType,
           documentNumber: documentNumber.trim(),
           items: itemsJson,
+          sizes: sizesJson,
           siteName: selectedSite?.name || null,
           teamLeaderName: setAsTeamLeader ? selectedEmployee.fullName : teamLeaderName,
           isRenewal,
@@ -1138,6 +1147,7 @@ export function UniformRegistryPage() {
     setDocumentType('');
     setDocumentNumber('');
     setItems({ ...DEFAULT_ITEMS });
+    setItemSizes({});
     setSelectedSite(null);
     setTeamLeaderName(null);
     setCurrentTeamLeader(null);
@@ -1721,30 +1731,78 @@ export function UniformRegistryPage() {
               </div>
             </div>
 
-            {/* Items Checkboxes */}
+            {/* Items Checkboxes + Size Selectors */}
             <div className="space-y-2">
               <Label className="text-slate-300 text-sm">
                 Items Given <span className="text-red-400">*</span>
               </Label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-                {(Object.keys(DEFAULT_ITEMS) as (keyof ItemsMap)[]).map((key) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`item-${key}`}
-                      checked={items[key]}
-                      onCheckedChange={(checked) =>
-                        setItems((prev) => ({ ...prev, [key]: !!checked }))
-                      }
-                      className="border-slate-600 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
-                    />
-                    <label
-                      htmlFor={`item-${key}`}
-                      className="text-sm text-slate-300 cursor-pointer select-none"
-                    >
-                      {ITEM_ICONS[key]} {ITEM_LABELS[key]}
-                    </label>
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                {(Object.keys(DEFAULT_ITEMS) as (keyof ItemsMap)[]).map((key) => {
+                  const isChecked = items[key];
+                  // Items that require a size selection
+                  const needsSize = key === 'uniform' || key === 'shoes';
+                  // Available sizes from stock for this item
+                  const availableSizes = stockItems
+                    .filter((s) => s.itemName === key && s.quantity > 0)
+                    .map((s) => s.size || 'One Size');
+
+                  return (
+                    <div key={key} className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={`item-${key}`}
+                          checked={isChecked}
+                          onCheckedChange={(checked) => {
+                            setItems((prev) => ({ ...prev, [key]: !!checked }));
+                            if (!checked) {
+                              setItemSizes((prev) => {
+                                const next = { ...prev };
+                                delete next[key];
+                                return next;
+                              });
+                            }
+                          }}
+                          className="border-slate-600 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
+                        />
+                        <label
+                          htmlFor={`item-${key}`}
+                          className="text-sm text-slate-300 cursor-pointer select-none"
+                        >
+                          {ITEM_ICONS[key]} {ITEM_LABELS[key]}
+                        </label>
+                        {isChecked && needsSize && availableSizes.length > 0 && (
+                          <Badge className="bg-slate-700 text-slate-400 text-[9px] px-1.5 py-0 h-4 ml-auto">
+                            {stockItems.filter(s => s.itemName === key && s.quantity > 0).reduce((sum, s) => sum + s.quantity, 0)} in stock
+                          </Badge>
+                        )}
+                      </div>
+                      {/* Size dropdown for uniform and shoes when checked */}
+                      {isChecked && needsSize && (
+                        <div className="pl-6">
+                          {availableSizes.length > 0 ? (
+                            <Select
+                              value={itemSizes[key] || ''}
+                              onValueChange={(val) => setItemSizes((prev) => ({ ...prev, [key]: val }))}
+                            >
+                              <SelectTrigger className="h-7 text-xs bg-slate-900 border-slate-600 text-white w-[140px]">
+                                <SelectValue placeholder="Select size" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-slate-800 border-slate-600">
+                                {availableSizes.map((size) => (
+                                  <SelectItem key={size} value={size} className="text-slate-200 focus:bg-slate-700 focus:text-white">
+                                    {size}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <p className="text-[10px] text-amber-400/80">No stock for this item. Add stock in the Stock Management tab first.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
