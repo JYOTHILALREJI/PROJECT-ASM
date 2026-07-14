@@ -524,7 +524,7 @@ export function DashboardPage() {
             <p className="text-emerald-400 font-medium text-sm">{todayDisplay}</p>
           </div>
           <p className="text-slate-400 mt-1">
-            Overview of your workforce metrics, attendance, and site salary data.
+            Overview of your workforce metrics, attendance, and site data.
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -667,7 +667,7 @@ export function DashboardPage() {
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-700/50 mb-3">
                 <Building2 className="h-7 w-7 text-slate-500" />
               </div>
-              <h3 className="text-base font-semibold text-white mb-1">No sites with salary data</h3>
+              <h3 className="text-base font-semibold text-white mb-1">No sites with attendance data</h3>
               <p className="text-sm text-slate-500 max-w-md">
                 No sites have active hour logs for {monthLabel} {year}. Select a different month or generate salary records from the Accounts page.
               </p>
@@ -715,13 +715,6 @@ export function DashboardPage() {
                           <span className="text-xs text-slate-400">Hours</span>
                           <span className="text-sm font-bold text-white">{formatHours(siteTotalHours)}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
-                          <span className="text-xs text-slate-400">Wages</span>
-                          <span className="text-sm font-bold text-emerald-400">
-                            {formatCurrency(siteTotalSalary)} AED
-                          </span>
-                        </div>
                       </div>
                     </div>
                   </AccordionTrigger>
@@ -740,9 +733,6 @@ export function DashboardPage() {
                               <TableHead className="text-slate-400 font-semibold text-xs min-w-[100px]">Emp ID</TableHead>
                               <TableHead className="text-slate-400 font-semibold text-xs min-w-[160px]">Name</TableHead>
                               <TableHead className="text-slate-400 font-semibold text-xs text-right min-w-[100px]">Total Hours</TableHead>
-                              <TableHead className="text-slate-400 font-semibold text-xs text-center min-w-[100px]">Rate Structure</TableHead>
-                              <TableHead className="text-slate-400 font-semibold text-xs min-w-[180px]">Split Computation</TableHead>
-                              <TableHead className="text-slate-400 font-semibold text-xs text-right min-w-[130px]">Total Payout (AED)</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -774,44 +764,6 @@ export function DashboardPage() {
                                 <TableCell className="text-slate-200 text-xs text-right font-mono font-semibold">
                                   {formatHours(emp.totalHours)}
                                 </TableCell>
-                                <TableCell className="text-center">
-                                  <Badge
-                                    className={`text-[10px] px-2 py-0.5 font-medium ${
-                                      emp.isCustomRate
-                                        ? 'bg-violet-500/15 text-violet-400 border-violet-500/25'
-                                        : emp.rateTier === 'split'
-                                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/25'
-                                          : emp.rateTier === 'premium'
-                                            ? 'bg-orange-500/15 text-orange-400 border-orange-500/25'
-                                            : 'bg-slate-600/30 text-slate-300 border-slate-500/25'
-                                    }`}
-                                  >
-                                    {getRateStructure(emp)}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell className="text-xs text-slate-300 font-mono">
-                                  {getSplitComputation(emp)}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="text-sm font-semibold text-emerald-400">
-                                    {formatCurrency(emp.totalSalary)}
-                                  </div>
-                                  {(emp.deduction > 0 || emp.advance > 0) && (
-                                    <div className="text-[10px] text-slate-500">
-                                      {emp.deduction > 0 && (
-                                        <span className="text-red-400/70">
-                                          Ded: {formatCurrency(emp.deduction)}
-                                        </span>
-                                      )}
-                                      {emp.deduction > 0 && emp.advance > 0 && ' / '}
-                                      {emp.advance > 0 && (
-                                        <span className="text-amber-400/70">
-                                          Adv: {formatCurrency(emp.advance)}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                </TableCell>
                               </TableRow>
                             ))}
                             <TableRow className="border-slate-600/50 bg-slate-800/60 hover:bg-slate-800/60">
@@ -820,11 +772,6 @@ export function DashboardPage() {
                               </TableCell>
                               <TableCell className="text-white text-xs text-right font-mono font-bold">
                                 {formatHours(siteTotalHours)}
-                              </TableCell>
-                              <TableCell />
-                              <TableCell />
-                              <TableCell className="text-emerald-400 text-sm text-right font-bold">
-                                {formatCurrency(siteTotalSalary)} AED
                               </TableCell>
                             </TableRow>
                           </TableBody>
