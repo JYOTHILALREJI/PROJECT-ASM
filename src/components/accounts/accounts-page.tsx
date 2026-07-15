@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   DollarSign,
   Search,
@@ -17,6 +17,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Users,
   Wallet,
   GitBranch,
@@ -38,6 +39,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
+import { useSearchNavigation } from '@/lib/use-search-navigation';
 
 /* ───────── Types ───────── */
 
@@ -786,16 +788,96 @@ export function AccountsPage() {
     }
   }, [sites, siteEmployees, monthStr, selectedYear, fetchData]);
 
-  // ── Search highlight logic ──
-  const searchLower = searchQuery.toLowerCase().trim();
+  // ── Search highlight + jump-to-match logic ──
+  //
+  // Build a flat list of (site, branch, employee, rowId) tuples in the same
+  // order they appear in the DOM, so the shared useSearchNavigation hook can
+  // compute matches, track the current one, and scrollIntoView it.
+  //
+  // rowId is globally unique: `${site.id}::${indexWithinSite}`. We use this
+  // same string as the React key on <tr> and as the ref-registration key, so
+  // the hook's rowRefs map lines up with the actual DOM rows.
+  interface SearchableEmployee {
+    rowId: string;
+    siteId: string;
+    branchId: string | null;
+    emp: MergedEmployeeRow;
+  }
 
-  const isRowHighlighted = useCallback((emp: MergedEmployeeRow): boolean => {
-    if (!searchLower) return false;
-    return (
-      emp.empName.toLowerCase().includes(searchLower) ||
-      emp.employeeCode.toLowerCase().includes(searchLower)
-    );
-  }, [searchLower]);
+  const allSearchableEmployees = useMemo<SearchableEmployee[]>(() => {
+    const out: SearchableEmployee[] = [];
+    for (const site of sites) {
+      const emps = siteEmployees[site.id] || [];
+      for (let i = 0; i < emps.length; i++) {
+        out.push({
+          rowId: `${site.id}::${i}`,
+          siteId: site.id,
+          branchId: site.branchId || null,
+          emp: emps[i],
+        });
+      }
+    }
+    return out;
+  }, [sites, siteEmployees]);
+
+  // When the current match changes, auto-expand any collapsed branch / site
+  // that contains the matching row. Without this, the row would stay hidden
+  // inside a collapsed section and scrollIntoView would be a no-op.
+  const handleCurrentMatchChange = useCallback(
+    (rowId: string | null) => {
+      if (!rowId) return;
+      const found = allSearchableEmployees.find((se) => se.rowId === rowId);
+      if (!found) return;
+      setCollapsedBranches((prev) => {
+        if (!found.branchId || !prev.has(found.branchId)) return prev;
+        const next = new Set(prev);
+        next.delete(found.branchId);
+        return next;
+      });
+      setCollapsedSites((prev) => {
+        if (!prev.has(found.siteId)) return prev;
+        const next = new Set(prev);
+        next.delete(found.siteId);
+        return next;
+      });
+    },
+    [allSearchableEmployees],
+  );
+
+  const {
+    matchCount,
+    currentIndex,
+    registerRowRef,
+    goToNext,
+    goToPrev,
+    handleInputKeyDown,
+    isMatch,
+    isCurrent,
+  } = useSearchNavigation(searchQuery, {
+    items: allSearchableEmployees,
+    getItemId: (se) => se.rowId,
+    matchItem: (se, q) =>
+      se.emp.empName.toLowerCase().includes(q) ||
+      se.emp.employeeCode.toLowerCase().includes(q),
+    onCurrentMatchChange: handleCurrentMatchChange,
+  });
+
+  // Helper: returns true if the (site, indexWithinSite) tuple is the current
+  // match or one of the matches. Used inside the row render below.
+  const isRowCurrent = useCallback(
+    (siteId: string, index: number) => {
+      const rowId = `${siteId}::${index}`;
+      return isCurrent({ rowId, siteId, branchId: null, emp: {} as MergedEmployeeRow });
+    },
+    [isCurrent],
+  );
+  const isRowMatched = useCallback(
+    (siteId: string, index: number) => {
+      const rowId = `${siteId}::${index}`;
+      return isMatch({ rowId, siteId, branchId: null, emp: {} as MergedEmployeeRow });
+    },
+    [isMatch],
+  );
 
   const tradeDisplay = (emp: MergedEmployeeRow) => {
     let trade = emp.trade;
@@ -1040,17 +1122,54 @@ export function AccountsPage() {
                   placeholder="Search employee name or ID to highlight..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
+                  onKeyDown={handleInputKeyDown}
+                  className="pl-10 pr-[112px] bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
                 />
+                {/* Match count + prev/next buttons (only shown when there's a query) */}
                 {searchQuery && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-slate-500 hover:text-white"
-                    onClick={() => setSearchQuery('')}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                    {matchCount > 0 && (
+                      <span className="text-[10px] font-mono text-slate-300 bg-slate-800 rounded px-1.5 py-0.5 mr-0.5 whitespace-nowrap">
+                        {currentIndex + 1}/{matchCount}
+                      </span>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      disabled={matchCount === 0}
+                      onClick={goToPrev}
+                      title="Previous match (Shift+Enter)"
+                      className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      disabled={matchCount === 0}
+                      onClick={goToNext}
+                      title="Next match (Enter)"
+                      className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-slate-500 hover:text-white"
+                      onClick={() => setSearchQuery('')}
+                      title="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+                {searchQuery && matchCount === 0 && (
+                  <span className="absolute -bottom-5 left-3 text-[10px] text-amber-400/80">
+                    No matches
+                  </span>
                 )}
               </div>
               {sites.length > 0 && (
@@ -1277,18 +1396,25 @@ export function AccountsPage() {
                           </tr>
                         ) : (
                           employees.map((emp, index) => {
-                            const highlighted = isRowHighlighted(emp);
+                            const rowId = `${site.id}::${index}`;
+                            const isCurrentRow = isRowCurrent(site.id, index);
+                            const isMatchedRow = !isCurrentRow && isRowMatched(site.id, index);
                             const hasSplit = emp.rateTier === 'split';
                             return (
                               <tr
-                                key={`${emp.empId}-${index}`}
+                                key={rowId}
+                                ref={(el) => registerRowRef(rowId, el)}
                                 className={cn(
                                   'border-b border-slate-700/30 transition-colors',
-                                  highlighted && 'bg-yellow-500/15 ring-1 ring-inset ring-yellow-500/30',
-                                  !highlighted && emp.isPaid && 'bg-emerald-500/5',
-                                  !highlighted && !emp.isPaid && hasSplit && 'bg-amber-500/5',
-                                  !highlighted && !emp.isPaid && !hasSplit && 'bg-slate-900/30',
-                                  editMode && !highlighted && 'hover:bg-slate-700/30',
+                                  // Current match: strong yellow background + ring.
+                                  isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
+                                  // Other matches (not current): subtle yellow tint.
+                                  isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
+                                  // Non-match states (only when not highlighted).
+                                  !isCurrentRow && !isMatchedRow && emp.isPaid && 'bg-emerald-500/5',
+                                  !isCurrentRow && !isMatchedRow && !emp.isPaid && hasSplit && 'bg-amber-500/5',
+                                  !isCurrentRow && !isMatchedRow && !emp.isPaid && !hasSplit && 'bg-slate-900/30',
+                                  editMode && !isCurrentRow && !isMatchedRow && 'hover:bg-slate-700/30',
                                 )}
                               >
                                 {/* SL No. */}
@@ -1307,7 +1433,7 @@ export function AccountsPage() {
                                   ) : (
                                     <span className={cn(
                                       'text-[11px] font-medium',
-                                      highlighted ? 'text-yellow-300' : 'text-white'
+                                      isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-white'
                                     )}>
                                       {emp.empName || '-'}
                                     </span>
@@ -1325,7 +1451,7 @@ export function AccountsPage() {
                                   ) : (
                                     <span className={cn(
                                       'text-[11px] font-mono',
-                                      highlighted ? 'text-yellow-300' : 'text-slate-300'
+                                      isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-slate-300'
                                     )}>
                                       {emp.employeeCode || '-'}
                                     </span>

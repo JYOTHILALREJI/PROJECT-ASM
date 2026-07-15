@@ -11,6 +11,7 @@ import {
   Wallet,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CalendarDays,
   AlertCircle,
   CheckCircle2,
@@ -19,11 +20,14 @@ import {
   ShieldAlert,
   Download,
   Loader2,
+  Search,
+  X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -40,6 +44,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { useSearchNavigation } from '@/lib/use-search-navigation';
 
 /* ───────── constants ───────── */
 const MONTHS = [
@@ -445,6 +450,90 @@ export function ConsolidatedSalaryPage() {
     return result;
   }, [siteSummaries]);
 
+  /* ── Search & jump-to-match ── */
+  //
+  // The page groups employees by site, and each site is collapsed by default.
+  // We flatten all merged employees into a single list (in DOM order) so the
+  // shared useSearchNavigation hook can track matches and scroll to them.
+  //
+  // rowId is globally unique: `${siteId}::${empId}::${idx}`. We use this same
+  // string as the React key on <TableRow> and as the ref-registration key so
+  // the hook's rowRefs map lines up with the actual DOM rows.
+  const [searchQuery, setSearchQuery] = useState('');
+
+  interface SearchableEmployee {
+    rowId: string;
+    siteId: string;
+    emp: MergedEmployee;
+  }
+
+  const allSearchableEmployees = useMemo<SearchableEmployee[]>(() => {
+    const out: SearchableEmployee[] = [];
+    for (const site of siteSummaries) {
+      const emps = mergedEmployeesBySite[site.siteId] || [];
+      for (let i = 0; i < emps.length; i++) {
+        out.push({
+          rowId: `${site.siteId}::${emps[i].empId}::${i}`,
+          siteId: site.siteId,
+          emp: emps[i],
+        });
+      }
+    }
+    return out;
+  }, [siteSummaries, mergedEmployeesBySite]);
+
+  // When the current match changes, auto-expand the site that contains the
+  // matching employee so the row is actually visible for scrollIntoView.
+  const handleCurrentMatchChange = useCallback(
+    (rowId: string | null) => {
+      if (!rowId) return;
+      const found = allSearchableEmployees.find((se) => se.rowId === rowId);
+      if (!found) return;
+      setExpandedSites((prev) => {
+        if (prev.has(found.siteId)) return prev;
+        const next = new Set(prev);
+        next.add(found.siteId);
+        return next;
+      });
+    },
+    [allSearchableEmployees],
+  );
+
+  const {
+    matchCount,
+    currentIndex,
+    registerRowRef,
+    goToNext,
+    goToPrev,
+    handleInputKeyDown,
+    isMatch,
+    isCurrent,
+  } = useSearchNavigation(searchQuery, {
+    items: allSearchableEmployees,
+    getItemId: (se) => se.rowId,
+    matchItem: (se, q) =>
+      se.emp.empName.toLowerCase().includes(q) ||
+      se.emp.employeeCode.toLowerCase().includes(q),
+    onCurrentMatchChange: handleCurrentMatchChange,
+  });
+
+  // Helper: returns true if the (site, empId, idx) tuple is the current match
+  // or one of the matches. Used inside the row render below.
+  const isRowCurrent = useCallback(
+    (siteId: string, empId: string, idx: number) => {
+      const rowId = `${siteId}::${empId}::${idx}`;
+      return isCurrent({ rowId, siteId, emp: {} as MergedEmployee });
+    },
+    [isCurrent],
+  );
+  const isRowMatched = useCallback(
+    (siteId: string, empId: string, idx: number) => {
+      const rowId = `${siteId}::${empId}::${idx}`;
+      return isMatch({ rowId, siteId, emp: {} as MergedEmployee });
+    },
+    [isMatch],
+  );
+
   /* ── Summary metrics config ── */
   const metrics: MetricCardProps[] = useMemo(() => [
     {
@@ -637,6 +726,68 @@ export function ConsolidatedSalaryPage() {
             </button>
           </CardHeader>
           <CardContent className="px-4">
+            {/* Search row — search across all employees in all expanded/unexpanded sites.
+                First match is highlighted and scrolled into view; use ↑/↓ buttons or
+                Enter / Shift+Enter to jump between matches. The site containing the
+                current match is auto-expanded. */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                <Input
+                  placeholder="Search employee name or ID to highlight..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={handleInputKeyDown}
+                  className="pl-10 pr-[112px] bg-slate-900 border-slate-700 text-slate-200 placeholder:text-slate-500 h-9"
+                />
+                {searchQuery && (
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                    {matchCount > 0 && (
+                      <span className="text-[10px] font-mono text-slate-300 bg-slate-800 rounded px-1.5 py-0.5 mr-0.5 whitespace-nowrap">
+                        {currentIndex + 1}/{matchCount}
+                      </span>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      disabled={matchCount === 0}
+                      onClick={goToPrev}
+                      title="Previous match (Shift+Enter)"
+                      className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      disabled={matchCount === 0}
+                      onClick={goToNext}
+                      title="Next match (Enter)"
+                      className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-slate-500 hover:text-white"
+                      onClick={() => setSearchQuery('')}
+                      title="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+                {searchQuery && matchCount === 0 && (
+                  <span className="absolute -bottom-5 left-3 text-[10px] text-amber-400/80">
+                    No matches
+                  </span>
+                )}
+              </div>
+            </div>
+
             <div className="overflow-x-auto rounded-lg">
               <Table>
                 <TableHeader>
@@ -746,20 +897,34 @@ export function ConsolidatedSalaryPage() {
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                      {(mergedEmployeesBySite[site.siteId] || []).map((emp, idx) => (
+                                      {(mergedEmployeesBySite[site.siteId] || []).map((emp, idx) => {
+                                        const rowId = `${site.siteId}::${emp.empId}::${idx}`;
+                                        const isCurrentRow = isRowCurrent(site.siteId, emp.empId, idx);
+                                        const isMatchedRow = !isCurrentRow && isRowMatched(site.siteId, emp.empId, idx);
+                                        return (
                                         <TableRow
-                                          key={emp.empId}
+                                          key={rowId}
+                                          ref={(el) => registerRowRef(rowId, el)}
                                           className={cn(
-                                            'border-slate-700/20 hover:bg-slate-800/30',
-                                            emp.rateTier === 'split' && 'bg-amber-500/5',
-                                            emp.isPaid && emp.rateTier !== 'split' && 'bg-emerald-500/5',
+                                            'border-slate-700/20',
+                                            // Current match: strong yellow + ring.
+                                            isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
+                                            // Other matches: subtle yellow tint.
+                                            isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
+                                            // Non-match defaults (only when not highlighted).
+                                            !isCurrentRow && !isMatchedRow && 'hover:bg-slate-800/30',
+                                            !isCurrentRow && !isMatchedRow && emp.rateTier === 'split' && 'bg-amber-500/5',
+                                            !isCurrentRow && !isMatchedRow && emp.isPaid && emp.rateTier !== 'split' && 'bg-emerald-500/5',
                                           )}
                                         >
                                           <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
                                           <TableCell className="text-slate-400 text-xs font-mono">
                                             {emp.employeeCode}
                                           </TableCell>
-                                          <TableCell className="text-slate-300 text-sm font-medium">
+                                          <TableCell className={cn(
+                                            'text-sm font-medium',
+                                            isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-slate-300'
+                                          )}>
                                             <div className="flex items-center gap-1.5">
                                               {emp.empName}
                                               <RoleBadge emp={emp} />
@@ -830,7 +995,8 @@ export function ConsolidatedSalaryPage() {
                                             )}
                                           </TableCell>
                                         </TableRow>
-                                      ))}
+                                        );
+                                      })}
 
                                       {/* Site employee totals */}
                                       {(mergedEmployeesBySite[site.siteId] || []).length > 0 && (
