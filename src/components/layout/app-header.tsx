@@ -85,18 +85,25 @@ export function AppHeader() {
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between gap-4 border-b border-slate-700/50 bg-slate-900/80 backdrop-blur-sm px-4 md:px-6 py-3">
         {/* Left Section */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
           {isMobile && (
             <Button
               variant="ghost"
               size="icon"
-              className="text-slate-400 hover:text-white"
+              className="text-slate-400 hover:text-white shrink-0"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu className="h-5 w-5" />
             </Button>
           )}
-          <h1 className="text-lg font-semibold text-white">{title}</h1>
+          <h1 className="text-lg font-semibold text-white shrink-0">{title}</h1>
+
+          {/* Portal slot — pages can render a search bar (or other controls)
+              directly into the header via createPortal(..., 'header-controls-slot').
+              Only rendered when a page populates it (currently Accounts and
+              Consolidated Salary). The slot grows to fill available space so
+              the search bar stretches naturally on desktop. */}
+          <div id="header-controls-slot" className="flex-1 min-w-0 max-w-md ml-4 hidden sm:block" />
         </div>
 
         {/* Right Section */}

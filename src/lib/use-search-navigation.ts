@@ -74,27 +74,42 @@ export function useSearchNavigation<T>(
 
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // CRITICAL: reset to the FIRST match whenever the query string itself
-  // changes — even if the new match count happens to be the same as or
-  // larger than the old one. Without this, typing a broader query (e.g.
-  // going from "ab" with 3 matches to "a" with 10 matches) would leave
-  // currentIndex at its old value (e.g. 2) and the user would land on a
-  // non-first match — which they perceive as "jumps to the last entry".
-  useEffect(() => {
+  // ── Synchronous query-change reset ──────────────────────────────────────
+  //
+  // CRITICAL FIX for the "jumping" / "goes to last entry" bug.
+  //
+  // Previously the reset was done in a useEffect (which runs AFTER render).
+  // That meant there was an intermediate render where the OLD currentIndex
+  // (e.g. 5) was used with the NEW matchedIds array — the user would see
+  // match #6 flash briefly before the effect reset to match #1. This
+  // manifested as visual "jumping" and the perception that search "goes to
+  // the last entry".
+  //
+  // React's "adjusting state during render" pattern fixes this: if the
+  // query has changed since the last render, we call setState right here
+  // during render. React discards the in-progress render and immediately
+  // re-renders with the new state — no intermediate commit, no flash.
+  //
+  // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [lastQuery, setLastQuery] = useState(queryLower);
+  if (lastQuery !== queryLower) {
+    setLastQuery(queryLower);
     setCurrentIndex(queryLower ? 0 : -1);
-  }, [queryLower]);
+  }
 
   // Safety clamp: if the items list changes underneath us (e.g. data was
   // refetched while a query is active) and currentIndex is now out of
   // bounds, snap it back into range. Tries to preserve the user's current
   // position when possible.
-  useEffect(() => {
-    setCurrentIndex((prev) => {
-      if (matchedIds.length === 0) return -1;
-      if (prev < 0 || prev >= matchedIds.length) return 0;
-      return prev;
-    });
-  }, [matchedIds.length]);
+  const [lastMatchedLen, setLastMatchedLen] = useState(matchedIds.length);
+  if (lastMatchedLen !== matchedIds.length) {
+    setLastMatchedLen(matchedIds.length);
+    if (matchedIds.length === 0) {
+      setCurrentIndex(-1);
+    } else if (currentIndex < 0 || currentIndex >= matchedIds.length) {
+      setCurrentIndex(0);
+    }
+  }
 
   const currentMatchId =
     currentIndex >= 0 && currentIndex < matchedIds.length
@@ -126,17 +141,44 @@ export function useSearchNavigation<T>(
   // the row into view — matches Google Sheets behaviour, where pressing
   // next/prev only nudges the viewport enough to reveal the next match rather
   // than aggressively centering it.
+  //
+  // We use a double-rAF + short timeout instead of a single rAF because the
+  // page's onCurrentMatchChange callback may auto-expand a collapsed
+  // branch/site, which triggers a React re-render + DOM layout that takes
+  // more than one frame to settle. Scrolling too early (while the row is
+  // still hidden inside a collapsed section) is a no-op and the user sees
+  // no scroll at all; scrolling during layout gives a wrong target position
+  // and causes visual "jumping". The 150ms timeout is a safety net for the
+  // worst case (slow device + large table).
   useEffect(() => {
     if (!currentMatchId) return;
-    const el = rowRefs.current.get(currentMatchId);
-    if (!el) return;
-    // Defer one frame so any auto-expand setState has time to render the row
-    // before we try to scroll to it (otherwise the row may still be hidden
-    // inside a collapsed section and scrollIntoView will be a no-op).
-    const raf = requestAnimationFrame(() => {
+
+    let raf1 = 0;
+    let raf2 = 0;
+    let timeout = 0;
+
+    const doScroll = () => {
+      const el = rowRefs.current.get(currentMatchId);
+      if (!el) return;
       el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+
+    // Double rAF: first frame lets React commit any pending state changes
+    // (auto-expand); second frame lets the browser lay out the newly-visible
+    // row. Then a 150ms safety timeout in case the expand triggered async
+    // data loading.
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        doScroll();
+      });
     });
-    return () => cancelAnimationFrame(raf);
+    timeout = window.setTimeout(doScroll, 150);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.clearTimeout(timeout);
+    };
   }, [currentMatchId]);
 
   const goToNext = useCallback(() => {

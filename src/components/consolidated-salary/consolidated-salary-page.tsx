@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Building2,
   Users,
@@ -710,19 +711,22 @@ export function ConsolidatedSalaryPage() {
         </Card>
       )}
 
-      {/* Sticky search bar — stays visible while scrolling the table area,
-          same UX as Google Sheets' find bar. Sits just below the app header
-          (top-14 ≈ 56px) and above the table sticky headers (z-10). */}
-      {!loading && hasData && siteSummaries.length > 0 && (
-        <div className="sticky top-14 z-20 -mx-4 px-4 py-2 bg-slate-900/95 backdrop-blur-sm border-y border-slate-700/50 shadow-lg shadow-black/20">
-          <div className="relative max-w-md mx-auto">
+      {/* Search bar rendered into the global app header via React portal.
+          The header is already sticky, so the search bar stays visible while
+          scrolling the table — same UX as Google Sheets' find bar. Only
+          renders when there's data to search. */}
+      {!loading && hasData && siteSummaries.length > 0 && typeof document !== 'undefined' && (() => {
+        const slot = document.getElementById('header-controls-slot');
+        if (!slot) return null;
+        return createPortal(
+          <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
             <Input
-              placeholder="Search employee name or ID... (Enter = next, Shift+Enter = prev)"
+              placeholder="Search name or ID... (Enter = next)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleInputKeyDown}
-              className="pl-10 pr-[120px] bg-slate-950 border-slate-700 text-slate-200 placeholder:text-slate-500 h-9"
+              className="pl-10 pr-[120px] bg-slate-950 border-slate-700 text-slate-200 placeholder:text-slate-500 h-9 w-full"
             />
             <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
               {searchQuery && matchCount > 0 && (
@@ -731,7 +735,7 @@ export function ConsolidatedSalaryPage() {
                 </span>
               )}
               {searchQuery && matchCount === 0 && (
-                <span className="text-[10px] text-amber-400 mr-1 whitespace-nowrap">No matches</span>
+                <span className="text-[10px] text-amber-400 mr-1 whitespace-nowrap">0 results</span>
               )}
               <Button
                 variant="ghost"
@@ -767,9 +771,10 @@ export function ConsolidatedSalaryPage() {
                 </Button>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          slot,
+        );
+      })()}
 
       {/* Main Table */}
       {!loading && hasData && siteSummaries.length > 0 && (
