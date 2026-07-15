@@ -171,6 +171,30 @@ const ITEM_ICONS: Record<keyof ItemsMap, string> = {
 
 /* ───────── Helpers ───────── */
 
+/**
+ * Normalize an item name for matching: lowercase + strip everything that
+ * isn't a letter or digit. This lets us match stock entries the user typed
+ * (e.g. "Uniform", "Safety Jacket", "safety jacket") against the camelCase
+ * keys in DEFAULT_ITEMS ("uniform", "safetyJacket") and against ITEM_LABELS.
+ */
+function normalizeItemName(s: string): string {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Returns true if a stock item (by its free-form itemName) corresponds to the
+ * given DEFAULT_ITEMS key. Matches against both the raw key and its display
+ * label, so "Uniform" / "uniform" / "UNIFORM" all map to the `uniform` key,
+ * and "Safety Jacket" / "safety jacket" / "safetyJacket" map to `safetyJacket`.
+ */
+function stockMatchesKey(stockItemName: string, key: string): boolean {
+  const normStock = normalizeItemName(stockItemName);
+  if (!normStock) return false;
+  if (normStock === normalizeItemName(key)) return true;
+  if (normStock === normalizeItemName(ITEM_LABELS[key as keyof ItemsMap])) return true;
+  return false;
+}
+
 function parseItems(itemsStr: string): ItemsMap {
   try {
     const parsed = JSON.parse(itemsStr);
@@ -926,6 +950,10 @@ export function UniformRegistryPage() {
 
     setCreateDialogOpen(true);
     fetchEmployees();
+    // Fetch stock items so size dropdowns are populated when renewing too.
+    fetch('/api/stock').then(res => res.json()).then(data => {
+      if (data.success) setStockItems(data.data.stockItems || []);
+    }).catch(() => {});
   }, [sites, findTeamLeaderForSite, fetchEmployees]);
 
   /* ── Handle Employee Selection ── */
@@ -1139,7 +1167,7 @@ export function UniformRegistryPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [selectedEmployee, documentType, documentNumber, items, selectedSite, teamLeaderName, isRenewal, previousTokenId, fetchEntries]);
+  }, [selectedEmployee, documentType, documentNumber, items, itemSizes, selectedSite, teamLeaderName, isRenewal, previousTokenId, fetchEntries]);
 
   /* ── Reset form ── */
   const resetForm = useCallback(() => {
@@ -1741,9 +1769,12 @@ export function UniformRegistryPage() {
                   const isChecked = items[key];
                   // Items that require a size selection
                   const needsSize = key === 'uniform' || key === 'shoes';
-                  // Available sizes from stock for this item
+                  // Available sizes from stock for this item.
+                  // Match stock itemName against both the camelCase key and the
+                  // human-readable label (case- and space-insensitive), so stock
+                  // entered as "Uniform" / "Safety Jacket" shows up here.
                   const availableSizes = stockItems
-                    .filter((s) => s.itemName === key && s.quantity > 0)
+                    .filter((s) => stockMatchesKey(s.itemName, key) && s.quantity > 0)
                     .map((s) => s.size || 'One Size');
 
                   return (
@@ -1772,7 +1803,7 @@ export function UniformRegistryPage() {
                         </label>
                         {isChecked && needsSize && availableSizes.length > 0 && (
                           <Badge className="bg-slate-700 text-slate-400 text-[9px] px-1.5 py-0 h-4 ml-auto">
-                            {stockItems.filter(s => s.itemName === key && s.quantity > 0).reduce((sum, s) => sum + s.quantity, 0)} in stock
+                            {stockItems.filter(s => stockMatchesKey(s.itemName, key) && s.quantity > 0).reduce((sum, s) => sum + s.quantity, 0)} in stock
                           </Badge>
                         )}
                       </div>
