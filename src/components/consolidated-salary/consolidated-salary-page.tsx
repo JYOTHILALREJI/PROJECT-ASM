@@ -710,6 +710,67 @@ export function ConsolidatedSalaryPage() {
         </Card>
       )}
 
+      {/* Sticky search bar — stays visible while scrolling the table area,
+          same UX as Google Sheets' find bar. Sits just below the app header
+          (top-14 ≈ 56px) and above the table sticky headers (z-10). */}
+      {!loading && hasData && siteSummaries.length > 0 && (
+        <div className="sticky top-14 z-20 -mx-4 px-4 py-2 bg-slate-900/95 backdrop-blur-sm border-y border-slate-700/50 shadow-lg shadow-black/20">
+          <div className="relative max-w-md mx-auto">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
+            <Input
+              placeholder="Search employee name or ID... (Enter = next, Shift+Enter = prev)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              className="pl-10 pr-[120px] bg-slate-950 border-slate-700 text-slate-200 placeholder:text-slate-500 h-9"
+            />
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+              {searchQuery && matchCount > 0 && (
+                <span className="text-[10px] font-mono text-slate-300 bg-slate-800 rounded px-1.5 py-0.5 mr-0.5 whitespace-nowrap tabular-nums">
+                  {currentIndex + 1}/{matchCount}
+                </span>
+              )}
+              {searchQuery && matchCount === 0 && (
+                <span className="text-[10px] text-amber-400 mr-1 whitespace-nowrap">No matches</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                disabled={matchCount === 0}
+                onClick={goToPrev}
+                title="Previous match (Shift+Enter)"
+                className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                disabled={matchCount === 0}
+                onClick={goToNext}
+                title="Next match (Enter)"
+                className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+              {searchQuery && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-slate-500 hover:text-white"
+                  onClick={() => setSearchQuery('')}
+                  title="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Table */}
       {!loading && hasData && siteSummaries.length > 0 && (
         <Card className="bg-slate-800/50 border-slate-700/50 py-4">
@@ -726,68 +787,6 @@ export function ConsolidatedSalaryPage() {
             </button>
           </CardHeader>
           <CardContent className="px-4">
-            {/* Search row — search across all employees in all expanded/unexpanded sites.
-                First match is highlighted and scrolled into view; use ↑/↓ buttons or
-                Enter / Shift+Enter to jump between matches. The site containing the
-                current match is auto-expanded. */}
-            <div className="flex items-center gap-3 mb-3">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                <Input
-                  placeholder="Search employee name or ID to highlight..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={handleInputKeyDown}
-                  className="pl-10 pr-[112px] bg-slate-900 border-slate-700 text-slate-200 placeholder:text-slate-500 h-9"
-                />
-                {searchQuery && (
-                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                    {matchCount > 0 && (
-                      <span className="text-[10px] font-mono text-slate-300 bg-slate-800 rounded px-1.5 py-0.5 mr-0.5 whitespace-nowrap">
-                        {currentIndex + 1}/{matchCount}
-                      </span>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      disabled={matchCount === 0}
-                      onClick={goToPrev}
-                      title="Previous match (Shift+Enter)"
-                      className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      disabled={matchCount === 0}
-                      onClick={goToNext}
-                      title="Next match (Enter)"
-                      className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-slate-500 hover:text-white"
-                      onClick={() => setSearchQuery('')}
-                      title="Clear search"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                )}
-                {searchQuery && matchCount === 0 && (
-                  <span className="absolute -bottom-5 left-3 text-[10px] text-amber-400/80">
-                    No matches
-                  </span>
-                )}
-              </div>
-            </div>
-
             <div className="overflow-x-auto rounded-lg">
               <Table>
                 <TableHeader>

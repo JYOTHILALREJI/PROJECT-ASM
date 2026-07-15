@@ -74,8 +74,20 @@ export function useSearchNavigation<T>(
 
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Whenever the query (or item list) changes, jump back to the first match.
-  // Also clamp currentIndex if it has run past the end (e.g. items removed).
+  // CRITICAL: reset to the FIRST match whenever the query string itself
+  // changes — even if the new match count happens to be the same as or
+  // larger than the old one. Without this, typing a broader query (e.g.
+  // going from "ab" with 3 matches to "a" with 10 matches) would leave
+  // currentIndex at its old value (e.g. 2) and the user would land on a
+  // non-first match — which they perceive as "jumps to the last entry".
+  useEffect(() => {
+    setCurrentIndex(queryLower ? 0 : -1);
+  }, [queryLower]);
+
+  // Safety clamp: if the items list changes underneath us (e.g. data was
+  // refetched while a query is active) and currentIndex is now out of
+  // bounds, snap it back into range. Tries to preserve the user's current
+  // position when possible.
   useEffect(() => {
     setCurrentIndex((prev) => {
       if (matchedIds.length === 0) return -1;
@@ -110,6 +122,10 @@ export function useSearchNavigation<T>(
   }, [currentMatchId]);
 
   // Scroll the current match into view whenever it changes.
+  // Use block: 'nearest' so we only scroll the minimum amount needed to bring
+  // the row into view — matches Google Sheets behaviour, where pressing
+  // next/prev only nudges the viewport enough to reveal the next match rather
+  // than aggressively centering it.
   useEffect(() => {
     if (!currentMatchId) return;
     const el = rowRefs.current.get(currentMatchId);
@@ -118,7 +134,7 @@ export function useSearchNavigation<T>(
     // before we try to scroll to it (otherwise the row may still be hidden
     // inside a collapsed section and scrollIntoView will be a no-op).
     const raf = requestAnimationFrame(() => {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
     return () => cancelAnimationFrame(raf);
   }, [currentMatchId]);
