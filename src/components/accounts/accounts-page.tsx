@@ -527,13 +527,18 @@ export function AccountsPage() {
         }),
       });
       const json = await res.json();
-      if (!json.success) {
+      if (!json.success || !json.data || json.data.updatedCount === 0) {
+        // Revert optimistic update — the DB was not changed
         handleCellChange(siteId, index, 'isPaid', currentIsPaid);
-        toast({ title: 'Error', description: json.error || 'Failed to update payment status', variant: 'destructive' });
+        toast({
+          title: 'Error',
+          description: json.error || `No salary records found for ${emp.empName} (${monthStr}/${selectedYear}). Cannot toggle paid status.`,
+          variant: 'destructive',
+        });
       } else {
         toast({
           title: newIsPaid ? 'Marked as Paid' : 'Marked as Unpaid',
-          description: `${emp.empName} - ${emp.siteName}`,
+          description: `${emp.empName} — ${json.data.updatedCount} record(s) updated`,
         });
       }
     } catch {

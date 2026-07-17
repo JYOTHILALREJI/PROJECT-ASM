@@ -11,7 +11,6 @@ import {
   ArrowUpRight,
   Wallet,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
   CalendarDays,
   AlertCircle,
@@ -332,6 +331,185 @@ function MetricCard({ title, value, icon: Icon, color, bgColor, format = 'number
   );
 }
 
+/* ───────── Flat Employee (cross-site merged) ───────── */
+/**
+ * A single employee can work at multiple sites in the same month. This
+ * interface merges ALL of an employee's salary records (across all sites
+ * and both rate tiers) into a single flat row, while preserving the
+ * per-site breakdown in the `sites` array.
+ */
+interface FlatEmployeeSite {
+  siteId: string;
+  siteName: string;
+  belowThresholdHours: number;
+  aboveThresholdHours: number;
+  totalHours: number;
+  grossSalary: number;
+  deduction: number;
+  advance: number;
+  balanceSalary: number;
+  rateTier: 'standard' | 'premium' | 'split';
+  standardRecordId: string | null;
+  premiumRecordId: string | null;
+}
+
+interface FlatEmployee {
+  empId: string;
+  empName: string;
+  employeeCode: string;
+  nationality: string;
+  trade: string;
+  isTeamLeader: boolean;
+  isSupervisor: boolean;
+  customHourlyRate: number | null;
+  // Aggregated across ALL sites
+  totalBelowThresholdHours: number;
+  totalAboveThresholdHours: number;
+  totalHours: number;
+  grossSalary: number;
+  belowSalaryComponent: number;
+  aboveSalaryComponent: number;
+  deduction: number;
+  advance: number;
+  balanceSalary: number;
+  isPaid: boolean;
+  // Per-site breakdown (sorted alphabetically by site name)
+  sites: FlatEmployeeSite[];
+}
+
+/**
+ * Merge ALL salary records (across all sites) into one FlatEmployee per
+ * employee. Each FlatEmployee has a `sites` array with the per-site
+ * breakdown.
+ */
+function buildFlatEmployees(siteSummaries: SiteSummary[]): FlatEmployee[] {
+  // First, collect ALL records from all sites into a flat list
+  const allRecords: SalaryRecord[] = [];
+  for (const site of siteSummaries) {
+    allRecords.push(...site.employees);
+  }
+
+  // Group by empId (across all sites)
+  const empMap = new Map<string, SalaryRecord[]>();
+  for (const record of allRecords) {
+    if (!empMap.has(record.empId)) {
+      empMap.set(record.empId, []);
+    }
+    empMap.get(record.empId)!.push(record);
+  }
+
+  const flatEmployees: FlatEmployee[] = [];
+
+  for (const [empId, empRecords] of empMap) {
+    const baseRecord = empRecords[0];
+    const isTeamLeader = baseRecord.employee?.isTeamLeader ?? false;
+    const isSupervisor = baseRecord.employee?.isSupervisor ?? false;
+    const customHourlyRate = baseRecord.employee?.customHourlyRate ?? null;
+
+    // Group this employee's records by siteId
+    const siteMap = new Map<string, SalaryRecord[]>();
+    for (const record of empRecords) {
+      if (!siteMap.has(record.siteId)) {
+        siteMap.set(record.siteId, []);
+      }
+      siteMap.get(record.siteId)!.push(record);
+    }
+
+    // Build per-site breakdown
+    const sites: FlatEmployeeSite[] = [];
+    let totalBelow = 0;
+    let totalAbove = 0;
+    let totalGross = 0;
+    let totalBelowComponent = 0;
+    let totalAboveComponent = 0;
+    let totalDeduction = 0;
+    let totalAdvance = 0;
+    let isPaid = false;
+
+    for (const [siteId, siteRecords] of siteMap) {
+      const standardRecord = siteRecords.find(r => r.rateTier === 'standard');
+      const premiumRecord = siteRecords.find(r => r.rateTier === 'premium');
+      const base = standardRecord || premiumRecord || siteRecords[0];
+
+      const belowHours = standardRecord?.totalHours ?? 0;
+      const aboveHours = premiumRecord?.totalHours ?? 0;
+      const siteTotalHours = belowHours + aboveHours;
+
+      const { gross, belowComponent, aboveComponent } = computeGrossSalary(
+        belowHours,
+        aboveHours,
+        isTeamLeader,
+        isSupervisor,
+        customHourlyRate,
+      );
+
+      const deduction = standardRecord?.deduction ?? 0;
+      const advance = standardRecord?.advance ?? 0;
+
+      if ((standardRecord?.isPaid ?? false) || (premiumRecord?.isPaid ?? false)) {
+        isPaid = true;
+      }
+
+      let rateTier: 'standard' | 'premium' | 'split' = 'standard';
+      if (standardRecord && premiumRecord) rateTier = 'split';
+      else if (premiumRecord && !standardRecord) rateTier = 'premium';
+
+      sites.push({
+        siteId,
+        siteName: base.siteName,
+        belowThresholdHours: belowHours,
+        aboveThresholdHours: aboveHours,
+        totalHours: siteTotalHours,
+        grossSalary: gross,
+        deduction,
+        advance,
+        balanceSalary: gross - deduction - advance,
+        rateTier,
+        standardRecordId: standardRecord?.id ?? null,
+        premiumRecordId: premiumRecord?.id ?? null,
+      });
+
+      totalBelow += belowHours;
+      totalAbove += aboveHours;
+      totalGross += gross;
+      totalBelowComponent += belowComponent;
+      totalAboveComponent += aboveComponent;
+      totalDeduction += deduction;
+      totalAdvance += advance;
+    }
+
+    // Sort sites alphabetically by name for deterministic display
+    sites.sort((a, b) => a.siteName.localeCompare(b.siteName));
+
+    flatEmployees.push({
+      empId,
+      empName: baseRecord.empName,
+      employeeCode: baseRecord.employeeCode || baseRecord.employee?.employeeId || '',
+      nationality: baseRecord.nationality || baseRecord.employee?.nationality || '',
+      trade: baseRecord.trade || baseRecord.employee?.trade || '',
+      isTeamLeader,
+      isSupervisor,
+      customHourlyRate,
+      totalBelowThresholdHours: totalBelow,
+      totalAboveThresholdHours: totalAbove,
+      totalHours: totalBelow + totalAbove,
+      grossSalary: totalGross,
+      belowSalaryComponent: totalBelowComponent,
+      aboveSalaryComponent: totalAboveComponent,
+      deduction: totalDeduction,
+      advance: totalAdvance,
+      balanceSalary: totalGross - totalDeduction - totalAdvance,
+      isPaid,
+      sites,
+    });
+  }
+
+  // Sort employees alphabetically by name
+  flatEmployees.sort((a, b) => a.empName.localeCompare(b.empName));
+
+  return flatEmployees;
+}
+
 /* ───────── Main Component ───────── */
 export function ConsolidatedSalaryPage() {
   const now = new Date();
@@ -341,7 +519,6 @@ export function ConsolidatedSalaryPage() {
   const [siteSummaries, setSiteSummaries] = useState<SiteSummary[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [hasData, setHasData] = useState(true);
-  const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set());
   const [fetchKey, setFetchKey] = useState(0); // DB-first invalidation key
 
   const yearOptions = useMemo(() => {
@@ -391,19 +568,6 @@ export function ConsolidatedSalaryPage() {
     fetchSalaryData(month, year);
   }, [month, year, fetchSalaryData, fetchKey]);
 
-  /* ── Toggle site expansion ── */
-  const toggleSiteExpand = useCallback((siteId: string) => {
-    setExpandedSites((prev) => {
-      const next = new Set(prev);
-      if (next.has(siteId)) {
-        next.delete(siteId);
-      } else {
-        next.add(siteId);
-      }
-      return next;
-    });
-  }, []);
-
   /* ── Refresh data (DB-first invalidation) ── */
   const refreshData = useCallback(() => {
     setFetchKey(k => k + 1);
@@ -442,63 +606,79 @@ export function ConsolidatedSalaryPage() {
   /* ── Month/Year display label ── */
   const monthLabel = MONTHS.find((m) => m.value === month)?.label || '';
 
-  /* ── Merge employees for expanded view ── */
-  const mergedEmployeesBySite = useMemo(() => {
-    const result: Record<string, MergedEmployee[]> = {};
-    for (const site of siteSummaries) {
-      result[site.siteId] = mergeSalaryRecords(site.employees);
+  /* ── Build flat employee list (merged across all sites) ── */
+  const flatEmployees = useMemo(() => buildFlatEmployees(siteSummaries), [siteSummaries]);
+
+  /* ── Paid toggle handler ── */
+  // Calls the same /api/accounts/salary/toggle-paid endpoint as the Accounts
+  // page. The endpoint updates ALL salary records for empId+month+year
+  // (across all sites), so both pages reflect the change on their next
+  // refresh. We update local state optimistically so the UI feels instant.
+  const handleTogglePaid = useCallback(async (empId: string, currentIsPaid: boolean) => {
+    const newIsPaid = !currentIsPaid;
+    const monthStr = `${year}-${month.padStart(2, '0')}`;
+    const yearNum = parseInt(year, 10);
+
+    // Optimistic: update local siteSummaries so the badge flips immediately
+    setSiteSummaries((prev) =>
+      prev.map((site) => ({
+        ...site,
+        employees: site.employees.map((r) =>
+          r.empId === empId ? { ...r, isPaid: newIsPaid } : r
+        ),
+      })),
+    );
+
+    try {
+      const res = await fetch('/api/accounts/salary/toggle-paid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          empId,
+          month: monthStr,
+          year: yearNum,
+          isPaid: newIsPaid,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success || !json.data || json.data.updatedCount === 0) {
+        // Revert
+        setSiteSummaries((prev) =>
+          prev.map((site) => ({
+            ...site,
+            employees: site.employees.map((r) =>
+              r.empId === empId ? { ...r, isPaid: currentIsPaid } : r
+            ),
+          })),
+        );
+        // Use toast-like alert since this page doesn't import toast
+        console.error('[ConsolidatedSalary] toggle-paid failed:', json.error);
+        alert(json.error || `Failed to toggle paid status for employee ${empId}`);
+      }
+    } catch (err) {
+      // Revert on network error
+      setSiteSummaries((prev) =>
+        prev.map((site) => ({
+          ...site,
+          employees: site.employees.map((r) =>
+            r.empId === empId ? { ...r, isPaid: currentIsPaid } : r
+          ),
+        })),
+      );
+      console.error('[ConsolidatedSalary] toggle-paid network error:', err);
+      alert('Failed to update payment status. Please try again.');
     }
-    return result;
-  }, [siteSummaries]);
+  }, [year, month]);
 
   /* ── Search & jump-to-match ── */
-  //
-  // The page groups employees by site, and each site is collapsed by default.
-  // We flatten all merged employees into a single list (in DOM order) so the
-  // shared useSearchNavigation hook can track matches and scroll to them.
-  //
-  // rowId is globally unique: `${siteId}::${empId}::${idx}`. We use this same
-  // string as the React key on <TableRow> and as the ref-registration key so
-  // the hook's rowRefs map lines up with the actual DOM rows.
   const [searchQuery, setSearchQuery] = useState('');
 
-  interface SearchableEmployee {
-    rowId: string;
-    siteId: string;
-    emp: MergedEmployee;
-  }
-
-  const allSearchableEmployees = useMemo<SearchableEmployee[]>(() => {
-    const out: SearchableEmployee[] = [];
-    for (const site of siteSummaries) {
-      const emps = mergedEmployeesBySite[site.siteId] || [];
-      for (let i = 0; i < emps.length; i++) {
-        out.push({
-          rowId: `${site.siteId}::${emps[i].empId}::${i}`,
-          siteId: site.siteId,
-          emp: emps[i],
-        });
-      }
-    }
-    return out;
-  }, [siteSummaries, mergedEmployeesBySite]);
-
-  // When the current match changes, auto-expand the site that contains the
-  // matching employee so the row is actually visible for scrollIntoView.
-  const handleCurrentMatchChange = useCallback(
-    (rowId: string | null) => {
-      if (!rowId) return;
-      const found = allSearchableEmployees.find((se) => se.rowId === rowId);
-      if (!found) return;
-      setExpandedSites((prev) => {
-        if (prev.has(found.siteId)) return prev;
-        const next = new Set(prev);
-        next.add(found.siteId);
-        return next;
-      });
-    },
-    [allSearchableEmployees],
-  );
+  const allSearchableEmployees = useMemo(() => {
+    return flatEmployees.map((emp, idx) => ({
+      rowId: `${emp.empId}::${idx}`,
+      emp,
+    }));
+  }, [flatEmployees]);
 
   const {
     matchCount,
@@ -515,22 +695,19 @@ export function ConsolidatedSalaryPage() {
     matchItem: (se, q) =>
       se.emp.empName.toLowerCase().includes(q) ||
       se.emp.employeeCode.toLowerCase().includes(q),
-    onCurrentMatchChange: handleCurrentMatchChange,
   });
 
-  // Helper: returns true if the (site, empId, idx) tuple is the current match
-  // or one of the matches. Used inside the row render below.
   const isRowCurrent = useCallback(
-    (siteId: string, empId: string, idx: number) => {
-      const rowId = `${siteId}::${empId}::${idx}`;
-      return isCurrent({ rowId, siteId, emp: {} as MergedEmployee });
+    (empId: string, idx: number) => {
+      const rowId = `${empId}::${idx}`;
+      return isCurrent({ rowId, emp: {} as FlatEmployee });
     },
     [isCurrent],
   );
   const isRowMatched = useCallback(
-    (siteId: string, empId: string, idx: number) => {
-      const rowId = `${siteId}::${empId}::${idx}`;
-      return isMatch({ rowId, siteId, emp: {} as MergedEmployee });
+    (empId: string, idx: number) => {
+      const rowId = `${empId}::${idx}`;
+      return isMatch({ rowId, emp: {} as FlatEmployee });
     },
     [isMatch],
   );
@@ -607,8 +784,8 @@ export function ConsolidatedSalaryPage() {
     },
   ], [totals, loading, monthLabel, year]);
 
-  /* ── Role badge for employee ── */
-  const RoleBadge = ({ emp }: { emp: MergedEmployee }) => {
+  /* ── Role badge ── */
+  const RoleBadge = ({ emp }: { emp: FlatEmployee }) => {
     if (emp.isSupervisor) {
       return (
         <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20 text-[9px] gap-0.5 px-1 py-0">
@@ -639,7 +816,7 @@ export function ConsolidatedSalaryPage() {
             <p className="text-emerald-400 font-medium text-sm">{monthLabel} {year}</p>
           </div>
           <p className="text-slate-400 mt-1">
-            Aggregated salary overview with threshold split &bull; Direct rate formula
+            All employees in a single flat list with per-site breakdown &bull; Direct rate formula
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -650,11 +827,7 @@ export function ConsolidatedSalaryPage() {
             </SelectTrigger>
             <SelectContent className="dropdown-upward bg-slate-800 border-slate-700">
               {MONTHS.map((m) => (
-                <SelectItem
-                  key={m.value}
-                  value={m.value}
-                  className="text-slate-200 focus:bg-slate-700 focus:text-white"
-                >
+                <SelectItem key={m.value} value={m.value} className="text-slate-200 focus:bg-slate-700 focus:text-white">
                   {m.label}
                 </SelectItem>
               ))}
@@ -666,26 +839,14 @@ export function ConsolidatedSalaryPage() {
             </SelectTrigger>
             <SelectContent className="dropdown-upward bg-slate-800 border-slate-700">
               {yearOptions.map((y) => (
-                <SelectItem
-                  key={y}
-                  value={y}
-                  className="text-slate-200 focus:bg-slate-700 focus:text-white"
-                >
+                <SelectItem key={y} value={y} className="text-slate-200 focus:bg-slate-700 focus:text-white">
                   {y}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button
-            onClick={handleExportExcel}
-            disabled={exporting || loading || !hasData}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
+          <Button onClick={handleExportExcel} disabled={exporting || loading || !hasData} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {exporting ? 'Exporting...' : 'Export Excel'}
           </Button>
         </div>
@@ -704,18 +865,13 @@ export function ConsolidatedSalaryPage() {
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <AlertCircle className="h-12 w-12 text-slate-600 mb-3" />
             <p className="text-slate-400 text-lg font-medium">No salary data for this month</p>
-            <p className="text-slate-500 text-sm mt-1">
-              Generate salary records from the Accounts page first.
-            </p>
+            <p className="text-slate-500 text-sm mt-1">Generate salary records from the Accounts page first.</p>
           </CardContent>
         </Card>
       )}
 
-      {/* Search bar rendered into the global app header via React portal.
-          The header is already sticky, so the search bar stays visible while
-          scrolling the table — same UX as Google Sheets' find bar. Only
-          renders when there's data to search. */}
-      {!loading && hasData && siteSummaries.length > 0 && typeof document !== 'undefined' && (() => {
+      {/* Search bar rendered into the global app header via React portal */}
+      {!loading && hasData && flatEmployees.length > 0 && typeof document !== 'undefined' && (() => {
         const slot = document.getElementById('header-controls-slot');
         if (!slot) return null;
         return createPortal(
@@ -737,36 +893,14 @@ export function ConsolidatedSalaryPage() {
               {searchQuery && matchCount === 0 && (
                 <span className="text-[10px] text-amber-400 mr-1 whitespace-nowrap">0 results</span>
               )}
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                disabled={matchCount === 0}
-                onClick={goToPrev}
-                title="Previous match (Shift+Enter)"
-                className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-              >
+              <Button variant="ghost" size="icon" type="button" disabled={matchCount === 0} onClick={goToPrev} title="Previous match (Shift+Enter)" className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">
                 <ChevronUp className="h-3.5 w-3.5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                disabled={matchCount === 0}
-                onClick={goToNext}
-                title="Next match (Enter)"
-                className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-              >
+              <Button variant="ghost" size="icon" type="button" disabled={matchCount === 0} onClick={goToNext} title="Next match (Enter)" className="h-7 w-7 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
               {searchQuery && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-slate-500 hover:text-white"
-                  onClick={() => setSearchQuery('')}
-                  title="Clear search"
-                >
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-500 hover:text-white" onClick={() => setSearchQuery('')} title="Clear search">
                   <X className="h-3.5 w-3.5" />
                 </Button>
               )}
@@ -776,18 +910,15 @@ export function ConsolidatedSalaryPage() {
         );
       })()}
 
-      {/* Main Table */}
-      {!loading && hasData && siteSummaries.length > 0 && (
+      {/* Main Flat Table — all employees in a single list */}
+      {!loading && hasData && flatEmployees.length > 0 && (
         <Card className="bg-slate-800/50 border-slate-700/50 py-4">
           <CardHeader className="px-4 flex flex-row items-center justify-between">
             <CardTitle className="text-base text-white flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-slate-400" />
-              Site-wise Salary Summary
+              <Users className="h-4 w-4 text-slate-400" />
+              All Employees ({flatEmployees.length})
             </CardTitle>
-            <button
-              onClick={refreshData}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-            >
+            <button onClick={refreshData} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
               Refresh from DB
             </button>
           </CardHeader>
@@ -796,324 +927,146 @@ export function ConsolidatedSalaryPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="border-slate-700 hover:bg-transparent">
-                    <TableHead className="text-slate-400 font-semibold w-8"></TableHead>
-                    <TableHead className="text-slate-400 font-semibold">Site Name</TableHead>
-                    <TableHead className="text-slate-400 font-semibold">Client</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-center">Employees</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right bg-cyan-900/10">Below Threshold Hrs</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right bg-amber-900/10">Above Threshold Hrs</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right">Total Hours</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right bg-emerald-900/10">Gross Salary</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right">Deductions</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right">Advances</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-right">Net Balance</TableHead>
-                    <TableHead className="text-slate-400 font-semibold text-center">Paid</TableHead>
+                    <TableHead className="text-slate-400 font-semibold w-8">#</TableHead>
+                    <TableHead className="text-slate-400 font-semibold min-w-[100px]">Emp Code</TableHead>
+                    <TableHead className="text-slate-400 font-semibold min-w-[160px]">Name</TableHead>
+                    <TableHead className="text-slate-400 font-semibold min-w-[90px]">Trade</TableHead>
+                    <TableHead className="text-slate-400 font-semibold min-w-[200px]">Sites (breakdown)</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right bg-cyan-900/10 min-w-[80px]">Below Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right bg-amber-900/10 min-w-[80px]">Above Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right min-w-[70px]">Total Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right bg-emerald-900/10 min-w-[110px]">Gross Salary</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right min-w-[80px]">Deduction</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right min-w-[80px]">Advance</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right min-w-[100px]">Net Balance</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-center min-w-[90px]">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {siteSummaries.map((site) => {
-                    const isExpanded = expandedSites.has(site.siteId);
+                  {flatEmployees.map((emp, idx) => {
+                    const rowId = `${emp.empId}::${idx}`;
+                    const isCurrentRow = isRowCurrent(emp.empId, idx);
+                    const isMatchedRow = !isCurrentRow && isRowMatched(emp.empId, idx);
                     return (
-                      <React.Fragment key={site.siteId}>
-                        {/* Site Summary Row */}
-                        <TableRow
-                          className={cn(
-                            'border-slate-700/50 cursor-pointer transition-colors',
-                            isExpanded
-                              ? 'bg-slate-700/30 hover:bg-slate-700/40'
-                              : 'hover:bg-slate-700/20'
-                          )}
-                          onClick={() => toggleSiteExpand(site.siteId)}
-                        >
-                          <TableCell className="w-8 px-2">
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4 text-slate-400" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 text-slate-400" />
-                            )}
-                          </TableCell>
-                          <TableCell className="text-slate-200 font-medium">
-                            <div className="flex items-center gap-2">
-                              <Building2 className="h-4 w-4 text-slate-500" />
-                              {site.siteName}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-slate-400">
-                            {site.clientName || '\u2014'}
-                          </TableCell>
-                          <TableCell className="text-slate-200 text-center font-semibold">
-                            {site.employeeCount}
-                          </TableCell>
-                          <TableCell className="text-cyan-400 text-right font-medium bg-cyan-900/5">
-                            {formatHours(site.totalBelowThresholdHours)}
-                          </TableCell>
-                          <TableCell className="text-amber-400 text-right font-medium bg-amber-900/5">
-                            {formatHours(site.totalAboveThresholdHours)}
-                          </TableCell>
-                          <TableCell className="text-slate-200 text-right">
-                            {formatHours(site.totalHours)}
-                          </TableCell>
-                          <TableCell className="text-emerald-400 text-right font-medium bg-emerald-900/5">
-                            {formatCurrency(site.totalGrossSalary)}
-                          </TableCell>
-                          <TableCell className="text-red-400 text-right">
-                            {formatCurrency(site.totalDeductions)}
-                          </TableCell>
-                          <TableCell className="text-amber-400 text-right">
-                            {formatCurrency(site.totalAdvances)}
-                          </TableCell>
-                          <TableCell className={cn(
-                            'text-right font-semibold',
-                            site.netBalance >= 0 ? 'text-purple-400' : 'text-red-400'
-                          )}>
-                            {formatCurrency(site.netBalance)}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <span className="text-emerald-400 font-semibold">{site.paidCount}</span>
-                              <span className="text-slate-500">/</span>
-                              <span className="text-slate-300">{site.employeeCount}</span>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-
-                        {/* Expanded Employee Details */}
-                        {isExpanded && (
-                          <TableRow className="border-slate-700/30 bg-slate-900/50 hover:bg-transparent">
-                            <TableCell colSpan={12} className="p-0">
-                              <div className="px-8 py-3">
-                                <div className="overflow-x-auto rounded-lg border border-slate-700/30">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow className="border-slate-700/30 hover:bg-transparent">
-                                        <TableHead className="text-slate-500 font-medium text-xs">#</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs">Emp Code</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs">Name</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs">Trade</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Total Hrs</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right bg-cyan-900/10">Rate 2.5/3.0</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right bg-amber-900/10">Rate 5.0/5.5</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right bg-emerald-900/10">Salary (DHS)</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Advance</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Deduction</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-right">Total Salary</TableHead>
-                                        <TableHead className="text-slate-500 font-medium text-xs text-center">Status</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {(mergedEmployeesBySite[site.siteId] || []).map((emp, idx) => {
-                                        const rowId = `${site.siteId}::${emp.empId}::${idx}`;
-                                        const isCurrentRow = isRowCurrent(site.siteId, emp.empId, idx);
-                                        const isMatchedRow = !isCurrentRow && isRowMatched(site.siteId, emp.empId, idx);
-                                        return (
-                                        <TableRow
-                                          key={rowId}
-                                          ref={(el) => registerRowRef(rowId, el)}
-                                          className={cn(
-                                            'border-slate-700/20',
-                                            // scroll-mt-20 (80px) tells scrollIntoView to leave
-                                            // 80px of space above the matched row when scrolling
-                                            // it into view. This clears the sticky app header
-                                            // (~56px) so the row is fully visible below it
-                                            // instead of being occluded. Only needed on the
-                                            // current match since that's the only row we
-                                            // scrollIntoView.
-                                            isCurrentRow && 'scroll-mt-20',
-                                            // Current match: strong yellow + ring.
-                                            isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
-                                            // Other matches: subtle yellow tint.
-                                            isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
-                                            // Non-match defaults (only when not highlighted).
-                                            !isCurrentRow && !isMatchedRow && 'hover:bg-slate-800/30',
-                                            !isCurrentRow && !isMatchedRow && emp.rateTier === 'split' && 'bg-amber-500/5',
-                                            !isCurrentRow && !isMatchedRow && emp.isPaid && emp.rateTier !== 'split' && 'bg-emerald-500/5',
-                                          )}
-                                        >
-                                          <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
-                                          <TableCell className="text-slate-400 text-xs font-mono">
-                                            {emp.employeeCode}
-                                          </TableCell>
-                                          <TableCell className={cn(
-                                            'text-sm font-medium',
-                                            isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-slate-300'
-                                          )}>
-                                            <div className="flex items-center gap-1.5">
-                                              {emp.empName}
-                                              <RoleBadge emp={emp} />
-                                              {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
-                                                <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0">
-                                                  CR
-                                                </Badge>
-                                              )}
-                                            </div>
-                                          </TableCell>
-                                          <TableCell className="text-slate-400 text-xs">
-                                            {emp.trade}
-                                          </TableCell>
-                                          <TableCell className="text-slate-300 text-xs text-right font-medium">
-                                            {formatHours(emp.totalHours)}
-                                          </TableCell>
-                                          <TableCell className="text-cyan-400/80 text-xs text-right bg-cyan-900/5">
-                                            {formatHours(emp.belowThresholdHours)}
-                                          </TableCell>
-                                          <TableCell className="text-amber-400/80 text-xs text-right bg-amber-900/5">
-                                            {formatHours(emp.aboveThresholdHours)}
-                                          </TableCell>
-                                          <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5">
-                                            <div className="flex flex-col items-end gap-0.5">
-                                              <span className="text-[9px] text-slate-500 font-mono">
-                                                {emp.customHourlyRate !== null && emp.customHourlyRate > 0 ? (
-                                                  `${formatHours(emp.totalHours)} × ${emp.customHourlyRate}`
-                                                ) : emp.rateTier === 'split' ? (
-                                                  <>
-                                                    <span className="text-emerald-500">{formatHours(emp.belowThresholdHours)} × {(emp.isTeamLeader || emp.isSupervisor) ? '3.0' : '2.5'}</span>
-                                                    {' + '}
-                                                    <span className="text-amber-500">{formatHours(emp.aboveThresholdHours)} × {(emp.isTeamLeader || emp.isSupervisor) ? '5.5' : '5.0'}</span>
-                                                  </>
-                                                ) : emp.rateTier === 'premium' ? (
-                                                  `${formatHours(emp.aboveThresholdHours)} × ${(emp.isTeamLeader || emp.isSupervisor) ? '5.5' : '5.0'}`
-                                                ) : (
-                                                  `${formatHours(emp.belowThresholdHours)} × ${(emp.isTeamLeader || emp.isSupervisor) ? '3.0' : '2.5'}`
-                                                )}
-                                              </span>
-                                              <span className="font-mono">
-                                                = {formatCurrency(emp.grossSalary)}
-                                              </span>
-                                            </div>
-                                          </TableCell>
-                                          <TableCell className="text-amber-400/80 text-xs text-right">
-                                            {formatCurrency(emp.advance)}
-                                          </TableCell>
-                                          <TableCell className="text-red-400/80 text-xs text-right">
-                                            {formatCurrency(emp.deduction)}
-                                          </TableCell>
-                                          <TableCell className={cn(
-                                            'text-xs text-right font-medium',
-                                            emp.balanceSalary >= 0 ? 'text-slate-200' : 'text-red-400'
-                                          )}>
-                                            {formatCurrency(emp.balanceSalary)}
-                                          </TableCell>
-                                          <TableCell className="text-center">
-                                            {emp.isPaid ? (
-                                              <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 text-[10px] gap-1">
-                                                <CheckCircle2 className="h-3 w-3" />
-                                                Paid
-                                              </Badge>
-                                            ) : (
-                                              <Badge className="bg-slate-600/20 text-slate-400 border-slate-600/30 hover:bg-slate-600/30 text-[10px] gap-1">
-                                                <XCircle className="h-3 w-3" />
-                                                Unpaid
-                                              </Badge>
-                                            )}
-                                          </TableCell>
-                                        </TableRow>
-                                        );
-                                      })}
-
-                                      {/* Site employee totals */}
-                                      {(mergedEmployeesBySite[site.siteId] || []).length > 0 && (
-                                        <TableRow className="border-slate-600/50 bg-slate-800/40 hover:bg-slate-800/40">
-                                          <TableCell colSpan={4} className="text-slate-300 text-xs font-bold text-right pr-4">
-                                            Site Employee Total
-                                          </TableCell>
-                                          <TableCell className="text-slate-200 text-xs text-right font-bold">
-                                            {formatHours(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.totalHours, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-cyan-400 text-xs text-right font-bold bg-cyan-900/5">
-                                            {formatHours(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.belowThresholdHours, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-amber-400 text-xs text-right font-bold bg-amber-900/5">
-                                            {formatHours(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.aboveThresholdHours, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-emerald-400 text-xs text-right font-bold bg-emerald-900/5">
-                                            {formatCurrency(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.grossSalary, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-amber-400 text-xs text-right font-bold">
-                                            {formatCurrency(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.advance, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-red-400 text-xs text-right font-bold">
-                                            {formatCurrency(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.deduction, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell className={cn(
-                                            'text-xs text-right font-bold',
-                                            (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.balanceSalary, 0) >= 0
-                                              ? 'text-purple-400'
-                                              : 'text-red-400'
-                                          )}>
-                                            {formatCurrency(
-                                              (mergedEmployeesBySite[site.siteId] || []).reduce((s, e) => s + e.balanceSalary, 0)
-                                            )}
-                                          </TableCell>
-                                          <TableCell></TableCell>
-                                        </TableRow>
-                                      )}
-                                    </TableBody>
-                                  </Table>
-                                </div>
-
-                                {/* Direct rate formula reference */}
-                                <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-slate-500">
-                                  <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
-                                    Standard: below_hrs × 2.5 + above_hrs × 5.0
-                                  </span>
-                                  <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
-                                    TL/Supervisor: below_hrs × 3.0 + above_hrs × 5.5
-                                  </span>
-                                  <span className="bg-violet-900/20 px-2 py-1 rounded border border-violet-700/30 text-violet-400">
-                                    CR = Custom Rate override
-                                  </span>
-                                </div>
-                              </div>
-                            </TableCell>
-                          </TableRow>
+                      <TableRow
+                        key={rowId}
+                        ref={(el) => registerRowRef(rowId, el)}
+                        className={cn(
+                          'border-slate-700/20',
+                          isCurrentRow && 'scroll-mt-20',
+                          isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
+                          isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
+                          !isCurrentRow && !isMatchedRow && 'hover:bg-slate-800/30',
+                          !isCurrentRow && !isMatchedRow && emp.isPaid && 'bg-emerald-500/5',
                         )}
-                      </React.Fragment>
+                      >
+                        <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
+                        <TableCell className="text-slate-400 text-xs font-mono">{emp.employeeCode}</TableCell>
+                        <TableCell className={cn(
+                          'text-sm font-medium',
+                          isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-slate-300'
+                        )}>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {emp.empName}
+                            <RoleBadge emp={emp} />
+                            {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
+                              <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0">CR</Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-slate-400 text-xs">{emp.trade}</TableCell>
+                        <TableCell className="text-xs">
+                          {/* Sites column: show each site name + hours + salary.
+                              For single-site employees, just show the name.
+                              For multi-site, show each on its own line with breakdown. */}
+                          <div className="flex flex-col gap-1">
+                            {emp.sites.map((site, sIdx) => (
+                              <div key={sIdx} className="flex items-center gap-1.5 text-[10px]">
+                                <Building2 className="h-3 w-3 text-slate-500 shrink-0" />
+                                <span className="text-slate-300 font-medium">{site.siteName}</span>
+                                <span className="text-slate-500">·</span>
+                                <span className="text-slate-400 font-mono">{formatHours(site.totalHours)}h</span>
+                                <span className="text-slate-500">·</span>
+                                <span className="text-emerald-400/70 font-mono">{formatCurrency(site.grossSalary)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-cyan-400/80 text-xs text-right bg-cyan-900/5 font-mono">
+                          {formatHours(emp.totalBelowThresholdHours)}
+                        </TableCell>
+                        <TableCell className="text-amber-400/80 text-xs text-right bg-amber-900/5 font-mono">
+                          {formatHours(emp.totalAboveThresholdHours)}
+                        </TableCell>
+                        <TableCell className="text-slate-300 text-xs text-right font-medium font-mono">
+                          {formatHours(emp.totalHours)}
+                        </TableCell>
+                        <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5 font-mono">
+                          {formatCurrency(emp.grossSalary)}
+                        </TableCell>
+                        <TableCell className="text-red-400/80 text-xs text-right font-mono">
+                          {formatCurrency(emp.deduction)}
+                        </TableCell>
+                        <TableCell className="text-amber-400/80 text-xs text-right font-mono">
+                          {formatCurrency(emp.advance)}
+                        </TableCell>
+                        <TableCell className={cn(
+                          'text-xs text-right font-medium font-mono',
+                          emp.balanceSalary >= 0 ? 'text-slate-200' : 'text-red-400'
+                        )}>
+                          {formatCurrency(emp.balanceSalary)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {/* Clickable Paid/Unpaid badge — toggles via /api/accounts/salary/toggle-paid */}
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePaid(emp.empId, emp.isPaid)}
+                            className="focus:outline-none"
+                            title={emp.isPaid ? 'Click to mark as unpaid' : 'Click to mark as paid'}
+                          >
+                            {emp.isPaid ? (
+                              <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25 text-[10px] px-2 py-0.5 cursor-pointer transition-colors">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Paid
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/25 text-[10px] px-2 py-0.5 cursor-pointer transition-colors">
+                                <XCircle className="h-3 w-3" />
+                                Unpaid
+                              </Badge>
+                            )}
+                          </button>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
 
                   {/* Grand Total Row */}
                   {totals && (
                     <TableRow className="border-slate-600/50 bg-slate-800/60 hover:bg-slate-800/60">
-                      <TableCell className="w-8 px-2"></TableCell>
-                      <TableCell className="text-white font-bold">
-                        Grand Total
+                      <TableCell colSpan={5} className="text-white font-bold text-right pr-4">
+                        Grand Total ({flatEmployees.length} employees)
                       </TableCell>
-                      <TableCell></TableCell>
-                      <TableCell className="text-white text-center font-bold">
-                        {totals.totalEmployees}
-                      </TableCell>
-                      <TableCell className="text-cyan-400 text-right font-bold bg-cyan-900/5">
+                      <TableCell className="text-cyan-400 text-right font-bold bg-cyan-900/5 font-mono">
                         {formatHours(totals.totalBelowThresholdHours)}
                       </TableCell>
-                      <TableCell className="text-amber-400 text-right font-bold bg-amber-900/5">
+                      <TableCell className="text-amber-400 text-right font-bold bg-amber-900/5 font-mono">
                         {formatHours(totals.totalAboveThresholdHours)}
                       </TableCell>
-                      <TableCell className="text-white text-right font-bold">
+                      <TableCell className="text-white text-right font-bold font-mono">
                         {formatHours(totals.totalHours)}
                       </TableCell>
-                      <TableCell className="text-emerald-400 text-right font-bold bg-emerald-900/5">
+                      <TableCell className="text-emerald-400 text-right font-bold bg-emerald-900/5 font-mono">
                         {formatCurrency(totals.totalGrossSalary)}
                       </TableCell>
-                      <TableCell className="text-red-400 text-right font-bold">
+                      <TableCell className="text-red-400 text-right font-bold font-mono">
                         {formatCurrency(totals.totalDeductions)}
                       </TableCell>
-                      <TableCell className="text-amber-400 text-right font-bold">
+                      <TableCell className="text-amber-400 text-right font-bold font-mono">
                         {formatCurrency(totals.totalAdvances)}
                       </TableCell>
                       <TableCell className={cn(
-                        'text-right font-bold',
+                        'text-right font-bold font-mono',
                         totals.netBalance >= 0 ? 'text-purple-400' : 'text-red-400'
                       )}>
                         {formatCurrency(totals.netBalance)}
@@ -1130,6 +1083,85 @@ export function ConsolidatedSalaryPage() {
                 </TableBody>
               </Table>
             </div>
+
+            {/* Direct rate formula reference */}
+            <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-slate-500">
+              <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
+                Standard: below_hrs × 2.5 + above_hrs × 5.0
+              </span>
+              <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
+                TL/Supervisor: below_hrs × 3.0 + above_hrs × 5.5
+              </span>
+              <span className="bg-violet-900/20 px-2 py-1 rounded border border-violet-700/30 text-violet-400">
+                CR = Custom Rate override
+              </span>
+              <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
+                Click Paid/Unpaid badge to toggle (syncs with Accounts page)
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Per-Site Salary Breakdown Summary */}
+      {!loading && hasData && siteSummaries.length > 0 && (
+        <Card className="bg-slate-800/50 border-slate-700/50 py-4">
+          <CardHeader className="px-4">
+            <CardTitle className="text-base text-white flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-slate-400" />
+              Per-Site Salary Breakdown
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4">
+            <div className="overflow-x-auto rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-slate-700 hover:bg-transparent">
+                    <TableHead className="text-slate-400 font-semibold">Site Name</TableHead>
+                    <TableHead className="text-slate-400 font-semibold">Client</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-center">Employees</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right bg-cyan-900/10">Below Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right bg-amber-900/10">Above Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right">Total Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right bg-emerald-900/10">Gross Salary</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right">Deductions</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right">Advances</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right">Net Balance</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-center">Paid</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {siteSummaries.map((site) => (
+                    <TableRow key={site.siteId} className="border-slate-700/50 hover:bg-slate-700/20">
+                      <TableCell className="text-slate-200 font-medium">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-slate-500" />
+                          {site.siteName}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-slate-400">{site.clientName || '\u2014'}</TableCell>
+                      <TableCell className="text-slate-200 text-center font-semibold">{site.employeeCount}</TableCell>
+                      <TableCell className="text-cyan-400 text-right font-medium bg-cyan-900/5 font-mono">{formatHours(site.totalBelowThresholdHours)}</TableCell>
+                      <TableCell className="text-amber-400 text-right font-medium bg-amber-900/5 font-mono">{formatHours(site.totalAboveThresholdHours)}</TableCell>
+                      <TableCell className="text-slate-200 text-right font-mono">{formatHours(site.totalHours)}</TableCell>
+                      <TableCell className="text-emerald-400 text-right font-medium bg-emerald-900/5 font-mono">{formatCurrency(site.totalGrossSalary)}</TableCell>
+                      <TableCell className="text-red-400 text-right font-mono">{formatCurrency(site.totalDeductions)}</TableCell>
+                      <TableCell className="text-amber-400 text-right font-mono">{formatCurrency(site.totalAdvances)}</TableCell>
+                      <TableCell className={cn('text-right font-semibold font-mono', site.netBalance >= 0 ? 'text-purple-400' : 'text-red-400')}>
+                        {formatCurrency(site.netBalance)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="text-emerald-400 font-semibold">{site.paidCount}</span>
+                          <span className="text-slate-500">/</span>
+                          <span className="text-slate-300">{site.employeeCount}</span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1139,8 +1171,8 @@ export function ConsolidatedSalaryPage() {
         <Card className="bg-slate-800/50 border-slate-700/50 py-4">
           <CardHeader className="px-4">
             <CardTitle className="text-base text-white flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-slate-400" />
-              Site-wise Salary Summary
+              <Users className="h-4 w-4 text-slate-400" />
+              All Employees
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4">
