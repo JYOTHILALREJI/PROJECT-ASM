@@ -911,6 +911,14 @@ export function ConsolidatedSalaryPage() {
                                           ref={(el) => registerRowRef(rowId, el)}
                                           className={cn(
                                             'border-slate-700/20',
+                                            // scroll-mt-20 (80px) tells scrollIntoView to leave
+                                            // 80px of space above the matched row when scrolling
+                                            // it into view. This clears the sticky app header
+                                            // (~56px) so the row is fully visible below it
+                                            // instead of being occluded. Only needed on the
+                                            // current match since that's the only row we
+                                            // scrollIntoView.
+                                            isCurrentRow && 'scroll-mt-20',
                                             // Current match: strong yellow + ring.
                                             isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
                                             // Other matches: subtle yellow tint.

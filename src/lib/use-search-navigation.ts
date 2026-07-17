@@ -137,19 +137,27 @@ export function useSearchNavigation<T>(
   }, [currentMatchId]);
 
   // Scroll the current match into view whenever it changes.
-  // Use block: 'nearest' so we only scroll the minimum amount needed to bring
-  // the row into view — matches Google Sheets behaviour, where pressing
-  // next/prev only nudges the viewport enough to reveal the next match rather
-  // than aggressively centering it.
+  //
+  // We use block: 'start' (not 'nearest') so the match ALWAYS scrolls to the
+  // top of the viewport. With 'nearest', if the first match was already
+  // partially visible at the bottom of the viewport, the browser wouldn't
+  // scroll at all and the user would perceive it as "the first match is the
+  // last row in the page". 'start' guarantees the match is prominently
+  // positioned at the top — same UX as Google Sheets' find bar.
+  //
+  // The matched row carries a `scroll-mt-20` (80px) CSS class set by the
+  // page, which tells scrollIntoView to leave 80px of space above the row.
+  // This clears the sticky app header (~56px) so the row is fully visible
+  // below it instead of being occluded.
   //
   // We use a double-rAF + short timeout instead of a single rAF because the
   // page's onCurrentMatchChange callback may auto-expand a collapsed
   // branch/site, which triggers a React re-render + DOM layout that takes
   // more than one frame to settle. Scrolling too early (while the row is
-  // still hidden inside a collapsed section) is a no-op and the user sees
-  // no scroll at all; scrolling during layout gives a wrong target position
-  // and causes visual "jumping". The 150ms timeout is a safety net for the
-  // worst case (slow device + large table).
+  // still hidden inside a collapsed section) is a no-op; scrolling during
+  // layout gives a wrong target position and causes visual "jumping". The
+  // 150ms timeout is a safety net for the worst case (slow device + large
+  // table).
   useEffect(() => {
     if (!currentMatchId) return;
 
@@ -160,7 +168,7 @@ export function useSearchNavigation<T>(
     const doScroll = () => {
       const el = rowRefs.current.get(currentMatchId);
       if (!el) return;
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     // Double rAF: first frame lets React commit any pending state changes

@@ -789,15 +789,70 @@ export function AccountsPage() {
     }
   }, [sites, siteEmployees, monthStr, selectedYear, fetchData]);
 
+  const tradeDisplay = (emp: MergedEmployeeRow) => {
+    let trade = emp.trade;
+    if (emp.isCustomRate) trade = `${trade}/CR`;
+    if (emp.isSupervisor) trade = `${trade}/SUPV`;
+    if (emp.isTeamLeader) trade = `${trade}/TL`;
+    return trade;
+  };
+
+  // ── Grand totals ──
+  const grandTotals = useMemo(() => {
+    let totalHours = 0;
+    let totalSalary = 0;
+    let totalDeductions = 0;
+    let totalAdvances = 0;
+    let totalBalance = 0;
+    let totalEmployees = 0;
+    let paidCount = 0;
+    let unpaidCount = 0;
+
+    for (const site of sites) {
+      const employees = siteEmployees[site.id] || [];
+      totalHours += employees.reduce((s, e) => s + e.totalHours, 0);
+      totalSalary += employees.reduce((s, e) => s + e.totalSalary, 0);
+      totalDeductions += employees.reduce((s, e) => s + e.deduction, 0);
+      totalAdvances += employees.reduce((s, e) => s + e.advance, 0);
+      totalBalance += employees.reduce((s, e) => s + e.balanceSalary, 0);
+      totalEmployees += employees.length;
+      paidCount += employees.filter((e) => e.isPaid).length;
+      unpaidCount += employees.filter((e) => !e.isPaid).length;
+    }
+
+    return { totalHours, totalSalary, totalDeductions, totalAdvances, totalBalance, totalEmployees, paidCount, unpaidCount };
+  }, [sites, siteEmployees]);
+
+  // Group sites by branch
+  const groupedByBranch = useMemo(() => {
+    const branchMap = new Map<string, { branchId: string; branchName: string; branchCode: string | null; sites: SiteData[] }>();
+    const unassignedKey = '__unassigned_branch__';
+
+    for (const site of sites) {
+      const bKey = site.branchId || unassignedKey;
+      const bName = site.branch?.name || 'Unassigned Branch';
+      const bCode = site.branch?.code || null;
+
+      if (!branchMap.has(bKey)) {
+        branchMap.set(bKey, { branchId: bKey, branchName: bName, branchCode: bCode, sites: [] });
+      }
+      branchMap.get(bKey)!.sites.push(site);
+    }
+
+    return Array.from(branchMap.values())
+      .sort((a, b) => {
+        if (a.branchId === unassignedKey) return 1;
+        if (b.branchId === unassignedKey) return -1;
+        return a.branchName.localeCompare(b.branchName);
+      });
+  }, [sites]);
+
   // ── Search highlight + jump-to-match logic ──
   //
-  // Build a flat list of (site, branch, employee, rowId) tuples in the same
-  // order they appear in the DOM, so the shared useSearchNavigation hook can
-  // compute matches, track the current one, and scrollIntoView it.
-  //
-  // rowId is globally unique: `${site.id}::${indexWithinSite}`. We use this
-  // same string as the React key on <tr> and as the ref-registration key, so
-  // the hook's rowRefs map lines up with the actual DOM rows.
+  // MUST come after groupedByBranch is defined (we iterate it to build the
+  // flat list in DOM order). rowId is globally unique: `${site.id}::${index}`.
+  // We use this same string as the React key on <tr> and as the ref-registration
+  // key, so the hook's rowRefs map lines up with the actual DOM rows.
   interface SearchableEmployee {
     rowId: string;
     siteId: string;
@@ -806,20 +861,28 @@ export function AccountsPage() {
   }
 
   const allSearchableEmployees = useMemo<SearchableEmployee[]>(() => {
+    // CRITICAL: iterate in the SAME order the DOM renders rows, otherwise the
+    // hook's 'first match' would correspond to a row near the bottom of the
+    // page instead of the top. The DOM renders groupedByBranch → sites within
+    // each branch → employees within each site. So we must iterate in that
+    // exact order here, NOT the raw `sites` array (which is in API order and
+    // ignores the branch grouping/sorting done in groupedByBranch).
     const out: SearchableEmployee[] = [];
-    for (const site of sites) {
-      const emps = siteEmployees[site.id] || [];
-      for (let i = 0; i < emps.length; i++) {
-        out.push({
-          rowId: `${site.id}::${i}`,
-          siteId: site.id,
-          branchId: site.branchId || null,
-          emp: emps[i],
-        });
+    for (const branchGroup of groupedByBranch) {
+      for (const site of branchGroup.sites) {
+        const emps = siteEmployees[site.id] || [];
+        for (let i = 0; i < emps.length; i++) {
+          out.push({
+            rowId: `${site.id}::${i}`,
+            siteId: site.id,
+            branchId: site.branchId || null,
+            emp: emps[i],
+          });
+        }
       }
     }
     return out;
-  }, [sites, siteEmployees]);
+  }, [groupedByBranch, siteEmployees]);
 
   // When the current match changes, auto-expand any collapsed branch / site
   // that contains the matching row. Without this, the row would stay hidden
@@ -879,64 +942,6 @@ export function AccountsPage() {
     },
     [isMatch],
   );
-
-  const tradeDisplay = (emp: MergedEmployeeRow) => {
-    let trade = emp.trade;
-    if (emp.isCustomRate) trade = `${trade}/CR`;
-    if (emp.isSupervisor) trade = `${trade}/SUPV`;
-    if (emp.isTeamLeader) trade = `${trade}/TL`;
-    return trade;
-  };
-
-  // ── Grand totals ──
-  const grandTotals = useMemo(() => {
-    let totalHours = 0;
-    let totalSalary = 0;
-    let totalDeductions = 0;
-    let totalAdvances = 0;
-    let totalBalance = 0;
-    let totalEmployees = 0;
-    let paidCount = 0;
-    let unpaidCount = 0;
-
-    for (const site of sites) {
-      const employees = siteEmployees[site.id] || [];
-      totalHours += employees.reduce((s, e) => s + e.totalHours, 0);
-      totalSalary += employees.reduce((s, e) => s + e.totalSalary, 0);
-      totalDeductions += employees.reduce((s, e) => s + e.deduction, 0);
-      totalAdvances += employees.reduce((s, e) => s + e.advance, 0);
-      totalBalance += employees.reduce((s, e) => s + e.balanceSalary, 0);
-      totalEmployees += employees.length;
-      paidCount += employees.filter((e) => e.isPaid).length;
-      unpaidCount += employees.filter((e) => !e.isPaid).length;
-    }
-
-    return { totalHours, totalSalary, totalDeductions, totalAdvances, totalBalance, totalEmployees, paidCount, unpaidCount };
-  }, [sites, siteEmployees]);
-
-  // Group sites by branch
-  const groupedByBranch = useMemo(() => {
-    const branchMap = new Map<string, { branchId: string; branchName: string; branchCode: string | null; sites: SiteData[] }>();
-    const unassignedKey = '__unassigned_branch__';
-
-    for (const site of sites) {
-      const bKey = site.branchId || unassignedKey;
-      const bName = site.branch?.name || 'Unassigned Branch';
-      const bCode = site.branch?.code || null;
-
-      if (!branchMap.has(bKey)) {
-        branchMap.set(bKey, { branchId: bKey, branchName: bName, branchCode: bCode, sites: [] });
-      }
-      branchMap.get(bKey)!.sites.push(site);
-    }
-
-    return Array.from(branchMap.values())
-      .sort((a, b) => {
-        if (a.branchId === unassignedKey) return 1;
-        if (b.branchId === unassignedKey) return -1;
-        return a.branchName.localeCompare(b.branchName);
-      });
-  }, [sites]);
 
   const toggleBranchCollapse = useCallback((branchId: string) => {
     setCollapsedBranches((prev) => {
@@ -1416,6 +1421,14 @@ export function AccountsPage() {
                                 ref={(el) => registerRowRef(rowId, el)}
                                 className={cn(
                                   'border-b border-slate-700/30 transition-colors',
+                                  // scroll-mt-20 (80px) tells scrollIntoView to leave
+                                  // 80px of space above the matched row when scrolling
+                                  // it into view. This clears the sticky app header
+                                  // (~56px) so the row is fully visible below it
+                                  // instead of being occluded. Only needed on the
+                                  // current match since that's the only row we
+                                  // scrollIntoView.
+                                  isCurrentRow && 'scroll-mt-20',
                                   // Current match: strong yellow background + ring.
                                   isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
                                   // Other matches (not current): subtle yellow tint.
