@@ -300,6 +300,80 @@ function mergeApiEntries(
   return merged;
 }
 
+/* ───────── EditableCell (module-scope component) ───────── */
+//
+// IMPORTANT: This component MUST be defined at module scope, NOT inside
+// the AccountsPage function body. If it were defined inside AccountsPage,
+// every keystroke would trigger a re-render of AccountsPage, which would
+// create a NEW EditableCell function reference. React's reconciler would
+// then see <EditableCell /> as a different component type on each render
+// and unmount+remount the <Input> — causing the input to lose focus after
+// every single keystroke. The user would have to click the field again
+// to type each digit.
+//
+// By defining it at module scope, the function reference is stable across
+// re-renders, React reuses the same <Input> DOM node, and focus is
+// preserved while typing.
+//
+// Props:
+//   - editMode: when false, renders a read-only <span>; when true, renders
+//     an <Input>. The parent decides this.
+//   - value, onChange, className, type: standard input props.
+//
+// The number onChange handler preserves the raw string value when the
+// input is empty (so the user can clear the field and type a new number
+// without it snapping to 0 mid-edit).
+interface EditableCellProps {
+  value: number | string;
+  onChange: (val: number | string) => void;
+  className?: string;
+  type?: 'number' | 'text';
+  editMode: boolean;
+}
+
+const EditableCell = React.memo(function EditableCell({
+  value,
+  onChange,
+  className,
+  type = 'number',
+  editMode,
+}: EditableCellProps) {
+  if (!editMode) {
+    return (
+      <span className={className}>
+        {typeof value === 'number'
+          ? value === 0
+            ? '-'
+            : formatNumber(value)
+          : value || '-'}
+      </span>
+    );
+  }
+  return (
+    <Input
+      type={type}
+      min="0"
+      step={type === 'number' ? '0.01' : undefined}
+      value={value}
+      onChange={(e) => {
+        if (type === 'number') {
+          const raw = e.target.value;
+          if (raw === '') {
+            // Allow clearing the field temporarily — don't force 0 mid-edit
+            onChange(0);
+          } else {
+            const v = parseFloat(raw);
+            onChange(isNaN(v) ? 0 : v);
+          }
+        } else {
+          onChange(e.target.value);
+        }
+      }}
+      className="h-6 text-[11px] bg-slate-900/80 border-slate-600/50 text-white w-full py-0 px-1.5 font-mono"
+    />
+  );
+});
+
 /* ───────── Main Component ───────── */
 
 export function AccountsPage() {
@@ -961,39 +1035,6 @@ export function AccountsPage() {
   const lowRateHeader = 'Rate 2.5/3.0';
   const highRateHeader = 'Rate 5.0/5.5';
 
-  // ── Editable cell component ──
-  const EditableCell = ({ value, onChange, className, type = 'number' }: {
-    value: number | string;
-    onChange: (val: number | string) => void;
-    className?: string;
-    type?: 'number' | 'text';
-  }) => {
-    if (!editMode) {
-      return (
-        <span className={className}>
-          {typeof value === 'number' ? (value === 0 ? '-' : formatNumber(value)) : (value || '-')}
-        </span>
-      );
-    }
-    return (
-      <Input
-        type={type}
-        min="0"
-        step={type === 'number' ? '0.01' : undefined}
-        value={value}
-        onChange={(e) => {
-          if (type === 'number') {
-            const v = parseFloat(e.target.value);
-            onChange(isNaN(v) ? 0 : v);
-          } else {
-            onChange(e.target.value);
-          }
-        }}
-        className="h-6 text-[11px] bg-slate-900/80 border-slate-600/50 text-white w-full py-0 px-1.5 font-mono"
-      />
-    );
-  };
-
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -1016,59 +1057,72 @@ export function AccountsPage() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Advance button — opens the Advance management page */}
-          <Button
-            onClick={() => setCurrentView('advance')}
-            className="bg-amber-600 hover:bg-amber-700 text-white gap-2 shadow-lg shadow-amber-600/20"
-            title="Manage employee cash advances"
-          >
-            <Wallet className="h-4 w-4" />
-            Advance
-            {totalPendingAdvances > 0 && (
-              <Badge variant="secondary" className="ml-1 bg-amber-300 text-amber-900 text-[10px] px-1.5 py-0 h-4 min-w-[20px] flex items-center justify-center">
-                {totalPendingAdvances > 999 ? '999+' : Math.round(totalPendingAdvances)}
-              </Badge>
-            )}
-          </Button>
-
-          {/* Edit / Save / Cancel buttons */}
-          {sites.length > 0 && (
-            <>
-              {editMode ? (
-                <>
-                  <Button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-lg shadow-emerald-600/20"
-                  >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Save All
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setSiteEmployees(JSON.parse(JSON.stringify(originalSiteEmployees)));
-                      setEditMode(false);
-                    }}
-                    className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
-                  >
-                    <X className="h-4 w-4" />
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  onClick={() => setEditMode(true)}
-                  className="bg-slate-700 hover:bg-slate-600 text-slate-200 gap-2"
-                >
-                  <Pencil className="h-4 w-4" />
-                  Edit
-                </Button>
-              )}
-            </>
-          )}
-        </div>
       </div>
+
+      {/* Action buttons rendered into the global app header via React portal.
+          They appear in the header's right section (after the search bar,
+          before the notification bell) so they're always visible while
+          scrolling — same sticky-header pattern as the search bar.
+          Only the Accounts page populates this slot. */}
+      {typeof document !== 'undefined' && (() => {
+        const slot = document.getElementById('header-actions-slot');
+        if (!slot) return null;
+        return createPortal(
+          <div className="flex items-center gap-2">
+            {/* Advance button — opens the Advance management page */}
+            <Button
+              onClick={() => setCurrentView('advance')}
+              className="bg-amber-600 hover:bg-amber-700 text-white gap-2 shadow-lg shadow-amber-600/20"
+              title="Manage employee cash advances"
+            >
+              <Wallet className="h-4 w-4" />
+              <span className="hidden sm:inline">Advance</span>
+              {totalPendingAdvances > 0 && (
+                <Badge variant="secondary" className="ml-1 bg-amber-300 text-amber-900 text-[10px] px-1.5 py-0 h-4 min-w-[20px] flex items-center justify-center">
+                  {totalPendingAdvances > 999 ? '999+' : Math.round(totalPendingAdvances)}
+                </Badge>
+              )}
+            </Button>
+
+            {/* Edit / Save / Cancel buttons (only when there's data) */}
+            {sites.length > 0 && (
+              <>
+                {editMode ? (
+                  <>
+                    <Button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-lg shadow-emerald-600/20"
+                    >
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      <span className="hidden sm:inline">{saving ? 'Saving...' : 'Save All'}</span>
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setSiteEmployees(JSON.parse(JSON.stringify(originalSiteEmployees)));
+                        setEditMode(false);
+                      }}
+                      className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+                    >
+                      <X className="h-4 w-4" />
+                      <span className="hidden sm:inline">Cancel</span>
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    onClick={() => setEditMode(true)}
+                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 gap-2"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    <span className="hidden sm:inline">Edit</span>
+                  </Button>
+                )}
+              </>
+            )}
+          </div>,
+          slot,
+        );
+      })()}
 
       {/* Year Selector, Month Buttons, and Search */}
       <Card className="bg-slate-800/50 border-slate-700/50">
@@ -1510,6 +1564,7 @@ export function AccountsPage() {
                                     value={emp.totalHours}
                                     onChange={(v) => handleCellChange(site.id, index, 'totalHours', v as number)}
                                     className="text-[11px] text-slate-200 font-mono"
+                                    editMode={editMode}
                                   />
                                 </td>
 
@@ -1527,6 +1582,7 @@ export function AccountsPage() {
                                         'text-[11px] font-mono',
                                         emp.lowRateHours > 0 ? 'text-cyan-300' : 'text-slate-600'
                                       )}
+                                      editMode={editMode}
                                     />
                                   )}
                                 </td>
@@ -1543,6 +1599,7 @@ export function AccountsPage() {
                                         'text-[11px] font-mono',
                                         emp.highRateHours > 0 ? 'text-amber-300' : 'text-slate-600'
                                       )}
+                                      editMode={editMode}
                                     />
                                   )}
                                 </td>
@@ -1577,6 +1634,7 @@ export function AccountsPage() {
                                     value={emp.advance}
                                     onChange={(v) => handleCellChange(site.id, index, 'advance', v as number)}
                                     className="text-[11px] text-slate-300 font-mono"
+                                    editMode={editMode}
                                   />
                                 </td>
 
@@ -1586,6 +1644,7 @@ export function AccountsPage() {
                                     value={emp.deduction}
                                     onChange={(v) => handleCellChange(site.id, index, 'deduction', v as number)}
                                     className="text-[11px] text-slate-300 font-mono"
+                                    editMode={editMode}
                                   />
                                 </td>
 

@@ -108,6 +108,11 @@ export function AppHeader() {
 
         {/* Right Section */}
         <div className="flex items-center gap-2">
+          {/* Portal slot for page-specific action buttons (e.g. Accounts page
+              Advance/Edit/Save/Cancel). Pages render into this slot via
+              createPortal(..., 'header-actions-slot'). Empty by default. */}
+          <div id="header-actions-slot" className="flex items-center gap-2" />
+
           {/* Notification Bell */}
           <Button
             variant="ghost"
