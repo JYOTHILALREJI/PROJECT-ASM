@@ -320,6 +320,84 @@ function StatusDropdown({
   );
 }
 
+/* ───────── Stealth Keyboard Indicator ───────── */
+// A small floating badge shown when stealth keyboard mode is active.
+// It appears near the currently-active cell and shows the employee name +
+// current status + a hint. It has pointer-events-none so it doesn't block
+// clicks. The actual key handling is done by the document-level listener
+// in SiteListView.
+//
+// This is NOT the full StatusDropdown — it's just a visual indicator so
+// the user knows which cell is active and what keys to press.
+interface StealthKeyboardIndicatorProps {
+  employeeId: string;
+  date: string;
+  employees: Employee[];
+  attendanceMap: Map<string, AttendanceRecord>;
+  onExit: () => void;
+}
+
+function StealthKeyboardIndicator({
+  employeeId,
+  date,
+  employees,
+  attendanceMap,
+}: StealthKeyboardIndicatorProps) {
+  const emp = employees.find((e) => e.id === employeeId);
+  const record = attendanceMap.get(`${employeeId}-${date}`);
+  const status = record?.status || 'not_marked';
+  const cfg = STATUS_CONFIG[status];
+
+  // Find the active cell's position in the DOM so we can position the
+  // indicator near it. We query by data-emp-id + data-date.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    const btn = document.querySelector(
+      `button[data-emp-id="${employeeId}"][data-date="${date}"]`,
+    ) as HTMLElement | null;
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      setPos({ top: rect.top, left: rect.left });
+    }
+  }, [employeeId, date, emp]); // re-position when employee changes
+
+  if (!emp) return null;
+
+  return (
+    <div
+      className="fixed z-[100] pointer-events-none"
+      style={{
+        top: pos ? Math.max(8, pos.top - 56) : 100,
+        left: pos ? Math.min(pos.left, window.innerWidth - 240) : 100,
+      }}
+    >
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/95 border border-blue-500/50 shadow-xl shadow-black/40 backdrop-blur-sm">
+        {/* Employee name + current status dot */}
+        <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', cfg.dotColor)} />
+        <div className="flex flex-col">
+          <span className="text-xs font-medium text-white truncate max-w-[140px]">
+            {emp.fullName}
+          </span>
+          <span className="text-[9px] text-slate-400">
+            {cfg.label} · {date}
+          </span>
+        </div>
+        <div className="h-6 w-px bg-slate-700" />
+        {/* Key hints */}
+        <div className="flex items-center gap-1.5">
+          <kbd className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold border border-emerald-500/30">P</kbd>
+          <span className="text-[9px] text-slate-500">present</span>
+          <kbd className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 text-[9px] font-mono font-bold border border-red-500/30">A</kbd>
+          <span className="text-[9px] text-slate-500">absent</span>
+          <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[9px] font-mono font-bold border border-slate-600">↵</kbd>
+          <span className="text-[9px] text-slate-500">skip</span>
+          <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[9px] font-mono font-bold border border-slate-600">Esc</kbd>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ───────── Site List View (per-site collapsible table) ───────── */
 interface SiteListViewProps {
   site: SiteOption;
@@ -368,6 +446,29 @@ function SiteListView({
     position: { top: number; left: number };
   } | null>(null);
 
+  // ── Stealth keyboard mode ──
+  // After the user confirms a status via Enter in the dropdown, we auto-
+  // advance to the next employee's same-day cell. Instead of opening the
+  // full dropdown again (which is visually noisy when rapid-fire marking),
+  // we enter "stealth keyboard mode": the dropdown stays hidden, and a
+  // document-level key listener captures P/A/Enter/Escape directly.
+  //
+  // The user sees a small floating indicator (not the full dropdown) showing
+  // which cell is currently active. They type P+Enter or A+Enter to mark
+  // and auto-advance through the roster without the dropdown popping up.
+  //
+  // Stealth mode ends when:
+  //   - The user presses Escape
+  //   - The user clicks anywhere (mousedown outside the indicator)
+  //   - There's no next employee to advance to
+  //
+  // `keyboardMode` holds the current employee+date being marked. When null,
+  // stealth mode is off.
+  const [keyboardMode, setKeyboardMode] = useState<{
+    employeeId: string;
+    date: string;
+  } | null>(null);
+
   // ── Bulk-mark state ──
   // Defaults to today's date (in YYYY-MM-DD) so the admin can mark "today"
   // with one click. The date input is constrained to the current month
@@ -399,6 +500,117 @@ function SiteListView({
       return (a.fullName || '').localeCompare(b.fullName || '');
     });
   }, [employees]);
+
+  // ── Advance-to-next-employee helper ──
+  // Given the current employeeId + date, find the NEXT in-range employee
+  // in sortedEmployees (scanning forward, skipping moved-away/out-of-range).
+  // Returns the next Employee or null if there's no next employee.
+  // Used by both the dropdown's onAdvance and the stealth keyboard mode.
+  const findNextEmployee = useCallback((currentEmpId: string, date: string): Employee | null => {
+    const currentIdx = sortedEmployees.findIndex((e) => e.id === currentEmpId);
+    if (currentIdx === -1) return null;
+    for (let i = currentIdx + 1; i < sortedEmployees.length; i++) {
+      const cand = sortedEmployees[i];
+      if (cand.activeFrom && date < cand.activeFrom) continue;
+      if (cand.activeUntil && date > cand.activeUntil) continue;
+      return cand;
+    }
+    return null;
+  }, [sortedEmployees]);
+
+  // ── Scroll a cell into view and return its button element ──
+  // Finds the cell button for (empId, date) in the DOM, scrolls it into
+  // view, and returns it. Returns null if not found. An employee can appear
+  // at multiple sites, so we pick the first visible (non-zero rect) match.
+  const findAndScrollToCell = useCallback((empId: string, date: string): HTMLElement | null => {
+    const candidates = document.querySelectorAll(
+      `button[data-emp-id="${empId}"][data-date="${date}"]`,
+    );
+    for (let i = 0; i < candidates.length; i++) {
+      const btn = candidates[i] as HTMLElement;
+      const rect = btn.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return btn;
+      }
+    }
+    return null;
+  }, []);
+
+  // ── Stealth keyboard mode: advance + mark ──
+  // Called when the user confirms a status in stealth mode (P+Enter or
+  // A+Enter). Marks the current employee, finds the next in-range employee,
+  // scrolls their cell into view, and updates keyboardMode to point at them.
+  // If there's no next employee, exits stealth mode.
+  const advanceAndMark = useCallback((currentEmpId: string, date: string, status: 'present' | 'absent') => {
+    // Mark the current employee
+    onStatusChange(currentEmpId, date, status);
+    // Find + scroll to the next employee
+    const next = findNextEmployee(currentEmpId, date);
+    if (!next) {
+      // No more employees — exit stealth mode
+      setKeyboardMode(null);
+      return;
+    }
+    findAndScrollToCell(next.id, date);
+    setKeyboardMode({ employeeId: next.id, date });
+  }, [onStatusChange, findNextEmployee, findAndScrollToCell]);
+
+  // ── Stealth keyboard mode: document-level key listener ──
+  // When keyboardMode is active, capture P/A/Enter/Escape at the document
+  // level. The dropdown is NOT shown — the user just types and the marking
+  // happens silently with a small floating indicator.
+  useEffect(() => {
+    if (!keyboardMode) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ignore if focus is inside an <input>/<textarea>
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        // Mark as present + advance immediately (no Enter needed in stealth
+        // mode — single keystroke marks and moves to next, for maximum speed)
+        advanceAndMark(keyboardMode!.employeeId, keyboardMode!.date, 'present');
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        advanceAndMark(keyboardMode!.employeeId, keyboardMode!.date, 'absent');
+      } else if (e.key === 'Enter') {
+        // Enter in stealth mode: if no P/A was pressed, just advance without
+        // marking (skip this employee). Useful for quickly skipping someone
+        // whose status you don't want to change.
+        e.preventDefault();
+        const next = findNextEmployee(keyboardMode!.employeeId, keyboardMode!.date);
+        if (next) {
+          findAndScrollToCell(next.id, keyboardMode!.date);
+          setKeyboardMode({ employeeId: next.id, date: keyboardMode!.date });
+        } else {
+          setKeyboardMode(null);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setKeyboardMode(null);
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [keyboardMode, advanceAndMark, findNextEmployee, findAndScrollToCell]);
+
+  // ── Stealth keyboard mode: exit on outside click ──
+  // If the user clicks anywhere while in stealth mode, exit it (they're
+  // switching to mouse mode).
+  useEffect(() => {
+    if (!keyboardMode) return;
+    function handleMouseDown(e: MouseEvent) {
+      // Don't exit if clicking on the stealth indicator itself (it has
+      // pointer-events-none, so this shouldn't fire, but just in case)
+      setKeyboardMode(null);
+    }
+    // Use mousedown (not click) so we exit before any cell click handler
+    // fires — the click will then open the normal dropdown.
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [keyboardMode]);
 
   // For current month: today on the left, all previous dates to the right
   const displayDays = useMemo(() => {
@@ -876,6 +1088,10 @@ function SiteListView({
                                 data-emp-id={emp.id}
                                 data-date={dateStr}
                                 onClick={(e) => {
+                                  // Clear stealth keyboard mode if active —
+                                  // clicking a cell always opens the normal
+                                  // dropdown (user is switching to mouse mode).
+                                  setKeyboardMode(null);
                                   const rect = e.currentTarget.getBoundingClientRect();
                                   setDropdown({
                                     employeeId: emp.id,
@@ -941,8 +1157,11 @@ function SiteListView({
         </div>
       )}
 
-      {/* Status Dropdown */}
-      {dropdown && (
+      {/* Status Dropdown — only shown when NOT in stealth keyboard mode.
+          In stealth mode, the dropdown is hidden and a small floating
+          indicator shows the active cell instead. The user types P/A/Enter
+          directly (captured by the document-level key listener above). */}
+      {dropdown && !keyboardMode && (
         <StatusDropdown
           employeeId={dropdown.employeeId}
           date={dropdown.date}
@@ -952,81 +1171,36 @@ function SiteListView({
           onClose={() => setDropdown(null)}
           position={dropdown.position}
           onAdvance={() => {
-            // ── Auto-advance to the next employee's same-day cell ──
-            // Find the current employee's index in sortedEmployees, then
-            // scan forward for the next employee who is IN RANGE for this
-            // date (skipping moved-away/out-of-range employees). If found,
-            // query the DOM for their cell button (via data-emp-id +
-            // data-date), scroll it into view, and open a new dropdown
-            // there. If no next employee, just close.
-            const currentDate = dropdown.date;
-            const currentIdx = sortedEmployees.findIndex(
-              (e) => e.id === dropdown.employeeId,
-            );
-            if (currentIdx === -1) {
-              setDropdown(null);
-              return;
+            // ── Enter stealth keyboard mode ──
+            // After confirming a status via Enter in the dropdown, we close
+            // the dropdown and enter stealth mode at the NEXT employee's
+            // same-day cell. The dropdown stays hidden — the user just
+            // types P (present) or A (absent) to mark and auto-advance,
+            // without the dropdown popping up on every cell.
+            //
+            // This makes rapid-fire keyboard marking much smoother: click
+            // the first cell → P+Enter → then just P/P/P/A/P... to fly
+            // through the whole roster.
+            const next = findNextEmployee(dropdown.employeeId, dropdown.date);
+            setDropdown(null); // close the dropdown
+            if (next) {
+              findAndScrollToCell(next.id, dropdown.date);
+              setKeyboardMode({ employeeId: next.id, date: dropdown.date });
             }
-
-            // Scan forward for the next in-range employee
-            let nextEmp: Employee | null = null;
-            for (let i = currentIdx + 1; i < sortedEmployees.length; i++) {
-              const cand = sortedEmployees[i];
-              // Check date-range eligibility
-              if (cand.activeFrom && currentDate < cand.activeFrom) continue;
-              if (cand.activeUntil && currentDate > cand.activeUntil) continue;
-              nextEmp = cand;
-              break;
-            }
-
-            if (!nextEmp) {
-              // No more employees — just close
-              setDropdown(null);
-              return;
-            }
-
-            // Find the next employee's cell button in the DOM. We use
-            // data-emp-id + data-date attributes (added to each in-range
-            // cell button above). An employee can appear at multiple sites
-            // (old + new), so we query all matching cells and pick the
-            // first visible one (non-zero bounding rect) — that's the one
-            // in the currently-visible site grid.
-            const candidates = document.querySelectorAll(
-              `button[data-emp-id="${nextEmp.id}"][data-date="${currentDate}"]`,
-            );
-            let targetBtn: HTMLElement | null = null;
-            for (let i = 0; i < candidates.length; i++) {
-              const btn = candidates[i] as HTMLElement;
-              const rect = btn.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                targetBtn = btn;
-                break;
-              }
-            }
-
-            if (!targetBtn) {
-              setDropdown(null);
-              return;
-            }
-
-            // Scroll the target cell into view, then open a new dropdown
-            // at its position. Use 'center' so the cell is clearly visible
-            // and the dropdown (which opens above the cell) is also on-screen.
-            targetBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Defer the dropdown open by one frame so scrollIntoView has
-            // time to update the layout before we read getBoundingClientRect.
-            requestAnimationFrame(() => {
-              const rect = targetBtn!.getBoundingClientRect();
-              const record = attendanceMap.get(`${nextEmp!.id}-${currentDate}`);
-              setDropdown({
-                employeeId: nextEmp!.id,
-                date: currentDate,
-                status: record?.status || 'not_marked',
-                overtimeHours: record?.overtimeHours || null,
-                position: { top: rect.top, left: rect.left },
-              });
-            });
           }}
+        />
+      )}
+
+      {/* Stealth keyboard mode indicator — a small floating badge showing
+          which cell is currently active. NOT the full dropdown. The user
+          types P/A/Enter/Escape (captured by the document-level listener). */}
+      {keyboardMode && (
+        <StealthKeyboardIndicator
+          employeeId={keyboardMode.employeeId}
+          date={keyboardMode.date}
+          employees={sortedEmployees}
+          attendanceMap={attendanceMap}
+          onExit={() => setKeyboardMode(null)}
         />
       )}
     </Card>
