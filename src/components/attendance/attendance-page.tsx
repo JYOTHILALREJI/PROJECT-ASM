@@ -70,6 +70,16 @@ interface Employee {
   // True if the employee has been moved away from this site (removedDate
   // is set). Used to fade the row and sort it to the bottom.
   movedAway?: boolean;
+  // ── Previous-site info (for the faded out-of-range cells) ──
+  // When an employee moved TO this site mid-month (activeFrom > monthStart),
+  // previousSite is the name of the site they were at before. Used to show
+  // "← SiteName (Nd)" in the faded region of the row so the admin knows
+  // where the employee was before. Null if the employee was at this site
+  // for the whole month (no faded region to label).
+  previousSite?: string | null;
+  // Number of days the employee was at the previous site during this month
+  // (for display alongside previousSite). 0 if no previous site.
+  previousSiteDays?: number;
 }
 
 interface SiteOption {
@@ -360,24 +370,34 @@ function SiteListView({
     [isCurrentMonthView, month, year]
   );
 
-  // Site-level stats for the header
+  // Site-level stats for the header.
+  // Only counts employees who are IN RANGE for today (i.e. not moved-away
+  // employees whose active range doesn't include today). This keeps the
+  // "present/absent/unmarked" counts accurate for the current active roster.
   const siteStats = useMemo(() => {
     let present = 0;
     let absent = 0;
     let unmarked = 0;
+    let activeCount = 0;
     const today = new Date();
     const todayStr = isCurrentMonthView
       ? formatDate(today.getDate(), monthStr, yearStr)
       : null;
     if (todayStr) {
       for (const emp of employees) {
+        // Skip employees who are out of range today (moved away before today
+        // or haven't started yet). They shouldn't count toward the site's
+        // present/absent/unmarked stats.
+        if (emp.activeFrom && todayStr < emp.activeFrom) continue;
+        if (emp.activeUntil && todayStr > emp.activeUntil) continue;
+        activeCount++;
         const rec = attendanceMap.get(`${emp.id}-${todayStr}`);
         if (!rec || rec.status === 'not_marked') unmarked++;
         else if (rec.status === 'present' || rec.status === 'overtime') present++;
         else absent++;
       }
     }
-    return { present, absent, unmarked, total: employees.length };
+    return { present, absent, unmarked, total: activeCount };
   }, [employees, attendanceMap, isCurrentMonthView, monthStr, yearStr]);
 
   // Handle bulk mark for this site.
@@ -671,7 +691,7 @@ function SiteListView({
                         </span>
                       </div>
                       <div className="flex-1 flex">
-                        {displayDays.map((day) => {
+                        {displayDays.map((day, dayIdx) => {
                           const dateStr = formatDate(day, monthStr, yearStr);
                           const record = attendanceMap.get(`${emp.id}-${dateStr}`);
                           const status = record?.status || 'not_marked';
@@ -703,17 +723,62 @@ function SiteListView({
                           // attendance status shown (the attendance record
                           // belongs to a different site for this date).
                           if (!isInRange) {
+                            // Determine if this is the FIRST faded cell of a
+                            // contiguous faded region. We show the previous-site
+                            // label on the first faded cell so the admin can see
+                            // where the employee was before (or after) this site.
+                            //
+                            // "First faded cell" = either the very first cell
+                            // (dayIdx === 0) OR the previous cell was in-range.
+                            // We compute prevDateStr for the previous displayDay.
+                            let isFirstFaded = dayIdx === 0;
+                            if (dayIdx > 0) {
+                              const prevDay = displayDays[dayIdx - 1];
+                              const prevDateStr = formatDate(prevDay, monthStr, yearStr);
+                              let prevInRange = true;
+                              if (emp.activeFrom && prevDateStr < emp.activeFrom) prevInRange = false;
+                              if (emp.activeUntil && prevDateStr > emp.activeUntil) prevInRange = false;
+                              if (prevInRange) isFirstFaded = true;
+                            }
+
+                            // Build the tooltip text: shows where the employee
+                            // was on this date (previous site or "not yet at
+                            // this site").
+                            const tooltipText = emp.previousSite
+                              ? `Was at ${emp.previousSite} (${emp.previousSiteDays ?? 0}d) — not at this site on this date`
+                              : 'Employee was not at this site on this date';
+
                             return (
                               <div
                                 key={day}
                                 className={cn(
-                                  'w-16 shrink-0 flex items-center justify-center py-1.5',
+                                  'w-16 shrink-0 flex items-center justify-center py-1.5 relative',
                                   isFri && 'bg-red-500/5',
                                 )}
                               >
+                                {/* Previous-site label — shown once at the start
+                                    of the faded region. Overlays the faded cells
+                                    with a small "← SiteName (Nd)" badge so the
+                                    admin knows where the employee was before. */}
+                                {isFirstFaded && emp.previousSite && (
+                                  <div
+                                    className="absolute left-1 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 px-1 py-0.5 rounded bg-slate-800/80 border border-slate-700/50 pointer-events-none whitespace-nowrap"
+                                    title={tooltipText}
+                                  >
+                                    <span className="text-[8px] text-slate-500">←</span>
+                                    <span className="text-[8px] text-slate-400 font-medium truncate max-w-[60px]">
+                                      {emp.previousSite}
+                                    </span>
+                                    {(emp.previousSiteDays ?? 0) > 0 && (
+                                      <span className="text-[8px] text-slate-500 font-mono">
+                                        {emp.previousSiteDays ?? 0}d
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                                 <span
                                   className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-800/40 text-slate-700 cursor-not-allowed"
-                                  title="Employee was not at this site on this date"
+                                  title={tooltipText}
                                 >
                                   ·
                                 </span>
@@ -1031,6 +1096,15 @@ export function AttendancePage() {
     // duplicate. An employee can appear at multiple sites (old + new).
     const added = new Set<string>();
 
+    // Helper: compute the number of days between two YYYY-MM-DD strings
+    // (inclusive of both endpoints). Returns 0 if either is empty.
+    const daysBetween = (startStr: string, endStr: string): number => {
+      if (!startStr || !endStr || endStr < startStr) return 0;
+      const start = new Date(startStr + 'T00:00:00');
+      const end = new Date(endStr + 'T00:00:00');
+      return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    };
+
     // 1. Add employees from site-assignments FIRST (so we can set date ranges).
     //    This includes both active and moved-away employees.
     //
@@ -1073,11 +1147,46 @@ export function AttendancePage() {
         // is active here (the removedDate is stale).
         const movedAway = !isCurrentSite && !!assignment.removedDate;
 
+        // ── Compute previousSite info ──
+        // If the employee moved TO this site mid-month (activeFrom > monthStart),
+        // there should be another site-assignment record for this employee at
+        // a DIFFERENT site where removedDate ≈ this site's activeFrom. That
+        // other site is the "previous site" — we show its name + days in the
+        // faded region of this row so the admin knows where the employee was.
+        //
+        // We look for any other assignment for this employee (same empId,
+        // different siteName) where removedDate is set and removedDate is on
+        // or before this assignment's createdDate (they left the old site
+        // before/when they started here). If found, that's the previous site.
+        let previousSite: string | null = null;
+        let previousSiteDays = 0;
+        if (activeFrom > monthStartStr) {
+          // Employee started here after month start — they were somewhere else
+          // before. Find the previous-site assignment.
+          for (const other of siteAssignments) {
+            if (other.empId !== assignment.empId) continue;
+            if (other.siteName === siteName) continue; // same site — skip
+            if (!other.removedDate) continue; // still there — not a "previous" site
+            const otherRemovedStr = clampToMonth(other.removedDate.split('T')[0]);
+            // The other site's removedDate should be on or after this site's
+            // activeFrom (they left the old site when/before starting here).
+            // Use a small window (±1 day) to handle same-day moves.
+            if (otherRemovedStr <= activeFrom) {
+              const otherCreatedStr = clampToMonth(other.createdDate.split('T')[0]);
+              previousSite = other.siteName;
+              previousSiteDays = daysBetween(otherCreatedStr, otherRemovedStr);
+              break; // take the first match (closest by createdDate)
+            }
+          }
+        }
+
         map.get(siteName)!.push({
           ...emp,
           activeFrom,
           activeUntil,
           movedAway,
+          previousSite,
+          previousSiteDays,
         });
       }
     }
