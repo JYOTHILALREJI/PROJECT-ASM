@@ -1033,6 +1033,16 @@ export function AttendancePage() {
 
     // 1. Add employees from site-assignments FIRST (so we can set date ranges).
     //    This includes both active and moved-away employees.
+    //
+    //    CRITICAL: an employee's currentSite (from the Employee record) is the
+    //    source of truth for "where are they RIGHT NOW". If a site-assignment
+    //    record has removedDate set BUT the employee's currentSite matches
+    //    that site, the removedDate is stale (e.g. the employee left and came
+    //    back, or the API didn't clear it). In that case we treat the employee
+    //    as ACTIVE at that site (movedAway=false, activeUntil=null) — NOT
+    //    moved-away. Without this, an employee who moved A→B would show as
+    //    inactive at BOTH sites (stale removedDate on B's record + real
+    //    removedDate on A's record), which is the bug we're fixing.
     for (const assignment of siteAssignments) {
       const emp = employees.find((e) => e.id === assignment.empId);
       if (!emp) continue; // employee not in active list — skip
@@ -1041,20 +1051,33 @@ export function AttendancePage() {
       if (!added.has(`${emp.id}::${siteName}`)) {
         added.add(`${emp.id}::${siteName}`);
         if (!map.has(siteName)) map.set(siteName, []);
+
+        // Is this site the employee's CURRENT site? If so, the employee is
+        // active here regardless of what removedDate says.
+        const isCurrentSite = emp.currentSite === siteName;
+
         // createdDate is when the EmpCountSitePerMonth record was created,
         // which could be a previous month if the employee was assigned
         // before this month. Clamp to month start.
         const activeFrom = clampToMonth(assignment.createdDate.split('T')[0]);
+
         // removedDate is when the employee left the site. Clamp to month end.
         // If null, the employee is still at the site (activeUntil = null).
-        const activeUntil = assignment.removedDate
+        // If this is the employee's current site, ignore removedDate (stale).
+        const activeUntil = !isCurrentSite && assignment.removedDate
           ? clampToMonth(assignment.removedDate.split('T')[0])
           : null;
+
+        // movedAway = true only if removedDate is set AND this is NOT the
+        // employee's current site. If it IS the current site, the employee
+        // is active here (the removedDate is stale).
+        const movedAway = !isCurrentSite && !!assignment.removedDate;
+
         map.get(siteName)!.push({
           ...emp,
           activeFrom,
           activeUntil,
-          movedAway: !!assignment.removedDate,
+          movedAway,
         });
       }
     }
