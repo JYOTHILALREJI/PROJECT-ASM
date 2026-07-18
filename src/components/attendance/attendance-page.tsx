@@ -23,6 +23,7 @@ import {
   Power,
   PowerOff,
   ExternalLink,
+  UserPlus,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -177,6 +178,10 @@ interface StatusDropdownProps {
   onClose: () => void;
   onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void;
   position: { top: number; left: number };
+  // Optional: called after confirming a status, signalling the parent to
+  // auto-advance the dropdown to the next employee's same-day cell. If not
+  // provided, the dropdown just closes after saving (original behaviour).
+  onAdvance?: () => void;
 }
 
 function StatusDropdown({
@@ -187,6 +192,7 @@ function StatusDropdown({
   onClose,
   onStatusChange,
   position,
+  onAdvance,
 }: StatusDropdownProps) {
   const [selectedStatus, setSelectedStatus] = useState<StatusOption>(currentStatus);
   const [overtimeHours, setOvertimeHours] = useState<string>(
@@ -204,11 +210,53 @@ function StatusDropdown({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  const handleConfirm = () => {
+  const handleConfirm = useCallback(() => {
     const hours = selectedStatus === 'overtime' ? parseFloat(overtimeHours) || 0 : null;
     onStatusChange(employeeId, date, selectedStatus, hours);
-    onClose();
-  };
+    if (onAdvance) {
+      // Auto-advance: tell the parent to open the dropdown on the next
+      // employee's same-day cell. The parent will close this dropdown and
+      // open a new one.
+      onAdvance();
+    } else {
+      onClose();
+    }
+  }, [selectedStatus, overtimeHours, employeeId, date, onStatusChange, onAdvance, onClose]);
+
+  // ── Keyboard shortcuts ──
+  // P / p → select Present (does NOT auto-confirm; user presses Enter to confirm)
+  // A / a → select Absent
+  // Enter → confirm current selection. If onAdvance is set, auto-advance to
+  //         the next employee's same-day cell. Otherwise just close.
+  // Escape → close without saving.
+  //
+  // Other statuses (overtime, no_site, not_marked) still require the mouse
+  // because they need additional input (overtime hours) or are rarely used
+  // in the fast keyboard flow. The user can still click them with the mouse.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ignore if the focus is inside an <input> (e.g. the overtime hours
+      // field) so typing numbers there doesn't trigger shortcuts.
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        setSelectedStatus('present');
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        setSelectedStatus('absent');
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleConfirm();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleConfirm, onClose]);
 
   return (
     <div
@@ -216,8 +264,13 @@ function StatusDropdown({
       className="fixed z-[100] w-52 rounded-xl border border-slate-600 bg-slate-800 p-2 shadow-xl shadow-black/40"
       style={{ top: Math.max(8, position.top - 240), left: Math.min(position.left, window.innerWidth - 220) }}
     >
-      <div className="mb-2 px-2 py-1.5 text-xs font-medium text-slate-400 border-b border-slate-700">
-        {date}
+      <div className="mb-2 px-2 py-1.5 text-xs font-medium text-slate-400 border-b border-slate-700 flex items-center justify-between">
+        <span>{date}</span>
+        {onAdvance && (
+          <span className="text-[9px] text-slate-500 normal-case font-normal">
+            P=present · A=absent · Enter=next
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-0.5">
         {STATUS_OPTIONS.map((status) => {
@@ -260,7 +313,7 @@ function StatusDropdown({
           size="sm"
           className="w-full h-8 bg-blue-500 hover:bg-blue-600 text-white text-xs"
         >
-          Save
+          {onAdvance ? 'Save & Next' : 'Save'}
         </Button>
       </div>
     </div>
@@ -284,6 +337,9 @@ interface SiteListViewProps {
   onBulkMark: (siteId: string, siteName: string, date: string, status: 'present' | 'absent', employeeIds: string[]) => Promise<void>;
   onShare: () => void;
   onAttendanceSheet: () => void;
+  // Called when the user wants to add an employee to this site. Opens the
+  // Add Employee dialog (handled by the parent AttendancePage).
+  onAddEmployee: (site: SiteOption) => void;
 }
 
 function SiteListView({
@@ -302,6 +358,7 @@ function SiteListView({
   onBulkMark,
   onShare,
   onAttendanceSheet,
+  onAddEmployee,
 }: SiteListViewProps) {
   const [dropdown, setDropdown] = useState<{
     employeeId: string;
@@ -499,6 +556,22 @@ function SiteListView({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {/* Add Employee button — opens the Add Employee dialog (handled by
+              the parent AttendancePage) to assign an existing employee to
+              this site. Only shown for the current month (can't add to a
+              past month's roster retroactively). */}
+          {isCurrentMonthView && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onAddEmployee(site)}
+              className="h-7 text-[11px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 gap-1"
+              title="Add an existing employee to this site"
+            >
+              <UserPlus className="h-3 w-3" />
+              <span className="hidden sm:inline">Add Employee</span>
+            </Button>
+          )}
           {/* Share button */}
           <Button
             variant="ghost"
@@ -786,7 +859,10 @@ function SiteListView({
                             );
                           }
 
-                          // In-range cell: normal interactive button
+                          // In-range cell: normal interactive button.
+                          // data-emp-id and data-date are used by the
+                          // auto-advance logic to find the next employee's
+                          // same-day cell after a keyboard confirm.
                           return (
                             <div
                               key={day}
@@ -797,6 +873,8 @@ function SiteListView({
                               )}
                             >
                               <button
+                                data-emp-id={emp.id}
+                                data-date={dateStr}
                                 onClick={(e) => {
                                   const rect = e.currentTarget.getBoundingClientRect();
                                   setDropdown({
@@ -873,6 +951,82 @@ function SiteListView({
           onStatusChange={onStatusChange}
           onClose={() => setDropdown(null)}
           position={dropdown.position}
+          onAdvance={() => {
+            // ── Auto-advance to the next employee's same-day cell ──
+            // Find the current employee's index in sortedEmployees, then
+            // scan forward for the next employee who is IN RANGE for this
+            // date (skipping moved-away/out-of-range employees). If found,
+            // query the DOM for their cell button (via data-emp-id +
+            // data-date), scroll it into view, and open a new dropdown
+            // there. If no next employee, just close.
+            const currentDate = dropdown.date;
+            const currentIdx = sortedEmployees.findIndex(
+              (e) => e.id === dropdown.employeeId,
+            );
+            if (currentIdx === -1) {
+              setDropdown(null);
+              return;
+            }
+
+            // Scan forward for the next in-range employee
+            let nextEmp: Employee | null = null;
+            for (let i = currentIdx + 1; i < sortedEmployees.length; i++) {
+              const cand = sortedEmployees[i];
+              // Check date-range eligibility
+              if (cand.activeFrom && currentDate < cand.activeFrom) continue;
+              if (cand.activeUntil && currentDate > cand.activeUntil) continue;
+              nextEmp = cand;
+              break;
+            }
+
+            if (!nextEmp) {
+              // No more employees — just close
+              setDropdown(null);
+              return;
+            }
+
+            // Find the next employee's cell button in the DOM. We use
+            // data-emp-id + data-date attributes (added to each in-range
+            // cell button above). An employee can appear at multiple sites
+            // (old + new), so we query all matching cells and pick the
+            // first visible one (non-zero bounding rect) — that's the one
+            // in the currently-visible site grid.
+            const candidates = document.querySelectorAll(
+              `button[data-emp-id="${nextEmp.id}"][data-date="${currentDate}"]`,
+            );
+            let targetBtn: HTMLElement | null = null;
+            for (let i = 0; i < candidates.length; i++) {
+              const btn = candidates[i] as HTMLElement;
+              const rect = btn.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                targetBtn = btn;
+                break;
+              }
+            }
+
+            if (!targetBtn) {
+              setDropdown(null);
+              return;
+            }
+
+            // Scroll the target cell into view, then open a new dropdown
+            // at its position. Use 'center' so the cell is clearly visible
+            // and the dropdown (which opens above the cell) is also on-screen.
+            targetBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Defer the dropdown open by one frame so scrollIntoView has
+            // time to update the layout before we read getBoundingClientRect.
+            requestAnimationFrame(() => {
+              const rect = targetBtn!.getBoundingClientRect();
+              const record = attendanceMap.get(`${nextEmp!.id}-${currentDate}`);
+              setDropdown({
+                employeeId: nextEmp!.id,
+                date: currentDate,
+                status: record?.status || 'not_marked',
+                overtimeHours: record?.overtimeHours || null,
+                position: { top: rect.top, left: rect.left },
+              });
+            });
+          }}
         />
       )}
     </Card>
@@ -913,6 +1067,30 @@ export function AttendancePage() {
   const [shareDate, setShareDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  // Add-Employee dialog state
+  // Lets the admin assign an existing employee to a site directly from the
+  // attendance page, without navigating to Employee Management. The dialog
+  // shows a searchable list of active employees who are NOT currently at
+  // the selected site. Selecting one + confirm calls PUT /api/employees/[id]
+  // with currentSite = site.name, then refreshes the employee list.
+  const [addEmpDialogSite, setAddEmpDialogSite] = useState<SiteOption | null>(null);
+  const [addEmpSearch, setAddEmpSearch] = useState('');
+  const [addEmpLoading, setAddEmpLoading] = useState(false);
+  // allEmployeesForAdd: full list of active employees (not filtered by site)
+  // fetched once when the dialog opens. We filter client-side for the search.
+  const [allEmployeesForAdd, setAllEmployeesForAdd] = useState<Array<{
+    id: string;
+    fullName: string;
+    employeeId: string;
+    currentSite: string | null;
+    trade: string | null;
+  }>>([]);
+
+  // Refresh key — bumped to force a re-fetch of employees + site assignments
+  // after adding an employee to a site (so the new employee appears in the
+  // grid without a full page reload).
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Attendance sheet (existing component) state
   const [attendanceSheetSite, setAttendanceSheetSite] = useState<SiteOption | null>(null);
@@ -1009,7 +1187,7 @@ export function AttendancePage() {
     };
     fetchEmployees();
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshKey]);
 
   // Fetch attendance
   useEffect(() => {
@@ -1060,7 +1238,7 @@ export function AttendancePage() {
     };
     fetchSiteAssignments();
     return () => { cancelled = true; };
-  }, [yearStr, monthStr]);
+  }, [yearStr, monthStr, refreshKey]);
 
   // Group employees by site name.
   //
@@ -1445,6 +1623,109 @@ export function AttendancePage() {
     setAttendanceSheetSite(null);
   }, []);
 
+  // ── Add-Employee handlers ──
+  // Opens the Add Employee dialog for a site. Fetches all active employees
+  // so the admin can search and pick one to assign to the site.
+  const openAddEmployeeDialog = useCallback(async (site: SiteOption) => {
+    setAddEmpDialogSite(site);
+    setAddEmpSearch('');
+    setAllEmployeesForAdd([]);
+    try {
+      const res = await fetch('/api/employees?limit=1000&status=active');
+      const data = await res.json();
+      if (data.success) {
+        setAllEmployeesForAdd(
+          (data.data.employees || []).map((e: Employee) => ({
+            id: e.id,
+            fullName: e.fullName,
+            employeeId: e.employeeId,
+            currentSite: e.currentSite,
+            trade: e.trade || null,
+          })),
+        );
+      }
+    } catch {
+      // silent — the dialog will just show an empty list
+    }
+  }, []);
+
+  const closeAddEmployeeDialog = useCallback(() => {
+    setAddEmpDialogSite(null);
+    setAddEmpSearch('');
+    setAllEmployeesForAdd([]);
+  }, []);
+
+  // Assigns the selected employee to the dialog's site by calling
+  // PUT /api/employees/[id] with currentSite = site.name. On success,
+  // refreshes the employee list (which triggers a re-render of the
+  // attendance grid with the new employee at this site).
+  const handleAddEmployee = useCallback(async (empId: string) => {
+    if (!addEmpDialogSite) return;
+    setAddEmpLoading(true);
+    try {
+      const res = await fetch(`/api/employees/${empId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentSite: addEmpDialogSite.name }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: 'Employee Added',
+          description: `${allEmployeesForAdd.find((e) => e.id === empId)?.fullName || 'Employee'} has been assigned to ${addEmpDialogSite.name}.`,
+        });
+        closeAddEmployeeDialog();
+        // Trigger a re-fetch of employees + site assignments so the new
+        // employee appears in the grid. The fetchEmployees effect runs
+        // once on mount, so we force a re-fetch by toggling a state that
+        // it depends on. The simplest way is to re-call the fetch logic.
+        // We use a small trick: setEmployees([]) then the next render
+        // will show loading. But that causes a flash. Instead, we just
+        // reload the page data by calling the same fetch paths.
+        //
+        // Actually, the fetchEmployees effect has [] deps (runs once), so
+        // we can't just toggle state to re-run it. The cleanest fix is
+        // to call the fetch function directly. But it's defined inside
+        // the effect. So we'll use a 'refreshKey' state to force re-fetch.
+        setRefreshKey((k) => k + 1);
+      } else {
+        toast({
+          title: 'Error',
+          description: json.error || 'Failed to assign employee to site',
+          variant: 'destructive',
+        });
+      }
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to assign employee to site',
+        variant: 'destructive',
+      });
+    } finally {
+      setAddEmpLoading(false);
+    }
+  }, [addEmpDialogSite, allEmployeesForAdd, closeAddEmployeeDialog]);
+
+  // Filtered list of employees for the Add-Employee dialog: active employees
+  // who are NOT currently at this site (and whose currentSite isn't already
+  // this site). Sorted by name. Filtered by the search box (name/ID/trade).
+  const addEmpFiltered = useMemo(() => {
+    if (!addEmpDialogSite) return [];
+    const siteName = addEmpDialogSite.name;
+    const q = addEmpSearch.toLowerCase().trim();
+    return allEmployeesForAdd
+      .filter((e) => e.currentSite !== siteName)
+      .filter((e) => {
+        if (!q) return true;
+        return (
+          e.fullName.toLowerCase().includes(q) ||
+          e.employeeId.toLowerCase().includes(q) ||
+          (e.trade || '').toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+  }, [allEmployeesForAdd, addEmpDialogSite, addEmpSearch]);
+
   // Employees for the currently-open attendance sheet site
   const attendanceSheetEmployees = useMemo(() => {
     if (!attendanceSheetSite) return [];
@@ -1604,6 +1885,7 @@ export function AttendancePage() {
                 onBulkMark={handleBulkMark}
                 onShare={() => openShareDialog(site)}
                 onAttendanceSheet={() => openAttendanceSheet(site)}
+                onAddEmployee={(s) => openAddEmployeeDialog(s)}
               />
             );
           })}
@@ -1697,6 +1979,79 @@ export function AttendancePage() {
                 Generate Link
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Employee Dialog — assign an existing employee to this site */}
+      <Dialog open={!!addEmpDialogSite} onOpenChange={(open) => { if (!open) closeAddEmployeeDialog(); }}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <UserPlus className="h-5 w-5 text-emerald-400" />
+              Add Employee to {addEmpDialogSite?.name}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Search and select an active employee to assign to this site. The employee will
+              appear in this site&apos;s attendance grid immediately.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {/* Search box */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <Input
+                placeholder="Search by name, ID, or trade..."
+                value={addEmpSearch}
+                onChange={(e) => setAddEmpSearch(e.target.value)}
+                className="pl-10 bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
+                autoFocus
+              />
+            </div>
+
+            {/* Employee list */}
+            <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-700/50 divide-y divide-slate-700/30">
+              {allEmployeesForAdd.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                  Loading employees...
+                </div>
+              ) : addEmpFiltered.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-500">
+                  No employees found. All active employees may already be at this site.
+                </div>
+              ) : (
+                addEmpFiltered.map((emp) => (
+                  <button
+                    key={emp.id}
+                    onClick={() => handleAddEmployee(emp.id)}
+                    disabled={addEmpLoading}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-700/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-slate-300 text-xs font-semibold shrink-0">
+                      {(emp.fullName || '?').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{emp.fullName}</div>
+                      <div className="text-xs text-slate-400 font-mono">{emp.employeeId}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">Current</div>
+                      <div className="text-xs text-slate-300 truncate max-w-[100px]">
+                        {emp.currentSite || 'Idle'}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeAddEmployeeDialog} className="text-slate-400 hover:text-white">
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
