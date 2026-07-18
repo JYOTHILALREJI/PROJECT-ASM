@@ -882,7 +882,8 @@ export function AccountsPage() {
     let totalSalary = 0;
     let totalDeductions = 0;
     let totalAdvances = 0;
-    let totalBalance = 0;
+    let totalBalance = 0; // sum of ALL employees' balanceSalary (paid + unpaid)
+    let balanceDue = 0;   // sum of balanceSalary for UNPAID employees only
     let totalEmployees = 0;
     let paidCount = 0;
     let unpaidCount = 0;
@@ -894,12 +895,18 @@ export function AccountsPage() {
       totalDeductions += employees.reduce((s, e) => s + e.deduction, 0);
       totalAdvances += employees.reduce((s, e) => s + e.advance, 0);
       totalBalance += employees.reduce((s, e) => s + e.balanceSalary, 0);
+      // Balance Due = amount still to be paid = sum of balanceSalary for
+      // UNPAID employees only. Paid employees have already received their
+      // balance, so they don't contribute to "what's still owed".
+      balanceDue += employees
+        .filter((e) => !e.isPaid)
+        .reduce((s, e) => s + e.balanceSalary, 0);
       totalEmployees += employees.length;
       paidCount += employees.filter((e) => e.isPaid).length;
       unpaidCount += employees.filter((e) => !e.isPaid).length;
     }
 
-    return { totalHours, totalSalary, totalDeductions, totalAdvances, totalBalance, totalEmployees, paidCount, unpaidCount };
+    return { totalHours, totalSalary, totalDeductions, totalAdvances, totalBalance, balanceDue, totalEmployees, paidCount, unpaidCount };
   }, [sites, siteEmployees]);
 
   // Group sites by branch
@@ -1219,8 +1226,8 @@ export function AccountsPage() {
               </div>
             </CardHeader>
             <CardContent className="px-4 pt-0">
-              <p className="text-xl font-bold text-white">{formatNumber(grandTotals.totalBalance)}</p>
-              <p className="text-xs text-slate-500 mt-0.5">DHS</p>
+              <p className="text-xl font-bold text-white">{formatNumber(grandTotals.balanceDue)}</p>
+              <p className="text-xs text-slate-500 mt-0.5">DHS (unpaid only)</p>
             </CardContent>
           </Card>
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
@@ -1784,7 +1791,7 @@ export function AccountsPage() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Balance Due</p>
-                    <p className="text-sm font-bold text-amber-300 font-mono">{formatNumber(grandTotals.totalBalance)}</p>
+                    <p className="text-sm font-bold text-amber-300 font-mono">{formatNumber(grandTotals.balanceDue)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Paid</p>
