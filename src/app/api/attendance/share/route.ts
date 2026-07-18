@@ -63,11 +63,35 @@ export async function POST(request: NextRequest) {
 
     // Check if there's already an open share for this site+date — if so,
     // return the existing one instead of creating a duplicate.
+    // BUT: if the existing share has expired (expiresAt < now), don't reuse
+    // it — create a new one instead. This handles the case where an admin
+    // generates a new link for the same site+date after the previous one
+    // expired without submission.
+    const now = new Date();
     const existing = await db.attendanceShare.findFirst({
       where: { siteId, date, status: 'open' },
       orderBy: { createdAt: 'desc' },
     });
-    if (existing) {
+
+    // If the existing share is expired by time, mark it as 'expired' in DB
+    // and don't reuse it (fall through to create a new one).
+    if (existing && existing.expiresAt && existing.expiresAt < now) {
+      await db.attendanceShare.update({
+        where: { id: existing.id },
+        data: { status: 'expired' },
+      });
+      // Fall through to create a new share
+    } else if (existing) {
+      // Existing share is still valid — reuse it. If it has no expiresAt
+      // (created before this feature shipped), backfill it now.
+      if (!existing.expiresAt) {
+        const [yr, mo, dy] = date.split('-').map(Number);
+        const endOfDay = new Date(yr, mo - 1, dy, 23, 59, 59, 999);
+        await db.attendanceShare.update({
+          where: { id: existing.id },
+          data: { expiresAt: endOfDay },
+        });
+      }
       return NextResponse.json({
         success: true,
         data: {
@@ -81,6 +105,7 @@ export async function POST(request: NextRequest) {
             date: existing.date,
             status: existing.status,
             createdAt: existing.createdAt.toISOString(),
+            expiresAt: (existing.expiresAt || new Date(existing.createdAt.getTime() + 86400000)).toISOString(),
           },
           reused: true,
         },
@@ -88,6 +113,21 @@ export async function POST(request: NextRequest) {
     }
 
     const token = generateToken();
+
+    // ── Set expiry: end of the share's date (23:59:59.999 local server
+    //    time) ──
+    // The share can only be edited on the SAME DAY it was created for.
+    // After midnight (start of the next day), the link auto-expires and
+    // becomes read-only. If the TL didn't submit by end of day, the link
+    // is dead and the admin must generate a new one.
+    //
+    // We parse the share's date (YYYY-MM-DD) as a local date and set
+    // expiresAt to 23:59:59.999 of that day. Using local time (not UTC)
+    // because the business operates in a single timezone and "same day"
+    // means the calendar day the admin/TL sees.
+    const [yr, mo, dy] = date.split('-').map(Number);
+    const endOfDay = new Date(yr, mo - 1, dy, 23, 59, 59, 999);
+
     const share = await db.attendanceShare.create({
       data: {
         token,
@@ -97,6 +137,7 @@ export async function POST(request: NextRequest) {
         projectName: site.projectName,
         date,
         status: 'open',
+        expiresAt: endOfDay,
       },
     });
 
@@ -113,6 +154,7 @@ export async function POST(request: NextRequest) {
           date: share.date,
           status: share.status,
           createdAt: share.createdAt.toISOString(),
+          expiresAt: share.expiresAt ? share.expiresAt.toISOString() : null,
         },
         reused: false,
       },

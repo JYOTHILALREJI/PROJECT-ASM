@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Check,
   X,
+  Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,6 +36,9 @@ interface ShareInfo {
   submittedByName: string | null;
   submittedAt: string;
   createdAt: string;
+  // When the link expires (end of the share's date, 23:59:59 local server
+  // time). After this, the link is read-only even if not submitted.
+  expiresAt?: string | null;
 }
 
 interface ShareEmployee {
@@ -340,8 +344,30 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
                     )}
                   </>
                 ) : (
-                  'This share link has been closed. Please request a new link from the admin.'
+                  'This share link has expired. Attendance can only be submitted on the same day the link was created for. Please request a new link from the admin.'
                 )}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Same-day expiry notice for OPEN shares — warns the TL that the
+            link dies at end of day if not submitted. */}
+        {!isReadOnly && share.expiresAt && (
+          <div className="no-print rounded-lg border border-blue-200 bg-blue-50 p-3 mb-4 flex items-start gap-2">
+            <Clock className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-blue-900">
+                <span className="font-semibold">Same-day link:</span> this
+                link expires at <span className="font-mono font-semibold">
+                  {new Date(share.expiresAt).toLocaleString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </span>. If you don&apos;t submit by then, the link becomes
+                read-only and the admin must generate a new one.
               </p>
             </div>
           </div>

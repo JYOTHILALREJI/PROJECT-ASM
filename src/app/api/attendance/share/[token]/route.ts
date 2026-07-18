@@ -38,6 +38,40 @@ export async function GET(
       );
     }
 
+    // ── Auto-expire: if the share is still 'open' but expiresAt has
+    //    passed, mark it as 'expired' in the DB so the share page shows
+    //    the expired banner and blocks submission. The link can only be
+    //    edited on the same calendar day it was created for.
+    //    (Also backfill expiresAt for old shares created before this
+    //    feature shipped — treat them as expired if the date is in the
+    //    past, or still open if the date is today.)
+    let effectiveStatus = share.status;
+    const now = new Date();
+    let needsBackfill = false;
+    if (!share.expiresAt) {
+      // Old share without expiresAt — compute it from the date.
+      const [yr, mo, dy] = share.date.split('-').map(Number);
+      share.expiresAt = new Date(yr, mo - 1, dy, 23, 59, 59, 999);
+      needsBackfill = true;
+    }
+    if (share.status === 'open' && share.expiresAt < now) {
+      // Time's up — auto-expire
+      effectiveStatus = 'expired';
+      await db.attendanceShare.update({
+        where: { id: share.id },
+        data: {
+          status: 'expired',
+          expiresAt: share.expiresAt,
+        },
+      });
+    } else if (needsBackfill) {
+      // Just backfill expiresAt without changing status
+      await db.attendanceShare.update({
+        where: { id: share.id },
+        data: { expiresAt: share.expiresAt },
+      });
+    }
+
     // Fetch employees currently at this site, sorted with TL/Supervisors first.
     const employees = await db.employee.findMany({
       where: {
@@ -99,10 +133,11 @@ export async function GET(
           clientName: share.clientName,
           projectName: share.projectName,
           date: share.date,
-          status: share.status,
+          status: effectiveStatus,
           submittedByName: share.submittedByName,
           submittedAt: share.updatedAt.toISOString(),
           createdAt: share.createdAt.toISOString(),
+          expiresAt: share.expiresAt ? share.expiresAt.toISOString() : null,
         },
         employees: sortedEmployees.map((e) => ({
           id: e.id,
@@ -180,6 +215,33 @@ export async function POST(
           success: false,
           error: 'Attendance has already been submitted via this link. The link cannot be reused.',
           alreadySubmitted: true,
+        },
+        { status: 410 },
+      );
+    }
+
+    // ── Time-based expiry check ──
+    // Even if the DB status is still 'open', the link may have expired
+    // because expiresAt has passed (end of the share's date). Block
+    // submission and mark as expired in the DB.
+    const now = new Date();
+    let expiresAt = share.expiresAt;
+    if (!expiresAt) {
+      // Backfill for old shares
+      const [yr, mo, dy] = share.date.split('-').map(Number);
+      expiresAt = new Date(yr, mo - 1, dy, 23, 59, 59, 999);
+    }
+    if (share.status === 'open' && expiresAt < now) {
+      // Auto-expire + reject
+      await db.attendanceShare.update({
+        where: { id: share.id },
+        data: { status: 'expired', expiresAt },
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'This share link has expired. Attendance can only be submitted on the same day the link was created for. Please request a new link from the admin.',
+          expired: true,
         },
         { status: 410 },
       );
