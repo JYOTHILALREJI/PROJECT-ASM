@@ -319,6 +319,28 @@ export async function PUT(
         }
       }
 
+      // If employee is moved from one site to ANOTHER (both non-null):
+      // set removedDate on the OLD site's active record so the attendance
+      // grid knows the employee left on this date. Without this, the old
+      // site would still show the employee as active for the whole month.
+      if (body.currentSite && existing.currentSite && body.currentSite !== existing.currentSite) {
+        const oldSite = await db.site.findFirst({
+          where: { name: existing.currentSite },
+          select: { id: true, name: true },
+        });
+        if (oldSite) {
+          await db.empCountSitePerMonth.updateMany({
+            where: {
+              empId: id,
+              siteId: oldSite.id,
+              removedDate: null,
+              deletedDate: null,
+            },
+            data: { removedDate: now },
+          });
+        }
+      }
+
       // If employee is assigned to a new site
       if (body.currentSite) {
         const newSite = await db.site.findFirst({

@@ -59,6 +59,17 @@ interface Employee {
   position: string | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
+  // ── Per-site-assignment fields (set when building employeesBySite) ──
+  // The date the employee started at this site (clamped to month start).
+  // Format: YYYY-MM-DD. Undefined for employees with no site-assignment
+  // record (treated as active for the whole month).
+  activeFrom?: string;
+  // The date the employee left this site (clamped to month end), or null
+  // if still at the site. Format: YYYY-MM-DD or null.
+  activeUntil?: string | null;
+  // True if the employee has been moved away from this site (removedDate
+  // is set). Used to fade the row and sort it to the bottom.
+  movedAway?: boolean;
 }
 
 interface SiteOption {
@@ -299,10 +310,22 @@ function SiteListView({
   const [bulkMarkStatus, setBulkMarkStatus] = useState<'present' | 'absent'>('present');
   const [bulkMarkLoading, setBulkMarkLoading] = useState(false);
 
-  // Sort: Team Leaders first, then Supervisors, then everyone else
-  // alphabetically by name within each group.
+  // Sort:
+  //   1. Active employees (movedAway !== true) first — Team Leaders, then
+  //      Supervisors, then everyone else, alphabetically by name.
+  //   2. Moved-away employees (movedAway === true) at the VERY BOTTOM,
+  //      alphabetically by name. These are employees who were at this site
+  //      during the month but have since been moved to another site. We
+  //      keep them visible (with a faded row) so the site's history is
+  //      preserved — you can still see who worked here and for how many
+  //      days — but they sink to the bottom so the active roster is at top.
   const sortedEmployees = useMemo(() => {
     return [...employees].sort((a, b) => {
+      // Moved-away employees always sort after active employees
+      const aMoved = a.movedAway ? 1 : 0;
+      const bMoved = b.movedAway ? 1 : 0;
+      if (aMoved !== bMoved) return aMoved - bMoved;
+      // Within the same moved/active group: TL first, then SUP, then others
       const aRank = a.isTeamLeader ? 0 : a.isSupervisor ? 1 : 2;
       const bRank = b.isTeamLeader ? 0 : b.isSupervisor ? 1 : 2;
       if (aRank !== bRank) return aRank - bRank;
@@ -357,16 +380,34 @@ function SiteListView({
     return { present, absent, unmarked, total: employees.length };
   }, [employees, attendanceMap, isCurrentMonthView, monthStr, yearStr]);
 
-  // Handle bulk mark for this site
+  // Handle bulk mark for this site.
+  // Only includes employees who were actually at this site on the selected
+  // date (i.e. the date falls within their activeFrom–activeUntil range).
+  // Moved-away employees whose range doesn't include the selected date are
+  // excluded — we can't mark attendance for a date they weren't at the site.
   const handleBulkMark = useCallback(async () => {
     if (employees.length === 0) return;
     if (!bulkMarkDate) {
       toast({ title: 'Date required', description: 'Please pick a date first.', variant: 'destructive' });
       return;
     }
+    // Filter to employees in range for the selected date
+    const eligibleEmps = employees.filter((emp) => {
+      if (emp.activeFrom && bulkMarkDate < emp.activeFrom) return false;
+      if (emp.activeUntil && bulkMarkDate > emp.activeUntil) return false;
+      return true;
+    });
+    if (eligibleEmps.length === 0) {
+      toast({
+        title: 'No eligible employees',
+        description: 'No employees were at this site on the selected date.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setBulkMarkLoading(true);
     try {
-      await onBulkMark(site.id, site.name, bulkMarkDate, bulkMarkStatus, employees.map((e) => e.id));
+      await onBulkMark(site.id, site.name, bulkMarkDate, bulkMarkStatus, eligibleEmps.map((e) => e.id));
     } finally {
       setBulkMarkLoading(false);
     }
@@ -578,18 +619,32 @@ function SiteListView({
                     .filter((r) => r.employeeId === emp.id && r.status === 'overtime')
                     .reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
 
+                  // Determine if this employee has been moved away from this
+                  // site (removedDate is set on their site-assignment record).
+                  // Moved-away employees get a faded row effect and sink to
+                  // the bottom of the list (handled by sortedEmployees above).
+                  const isMovedAway = !!emp.movedAway;
+
                   return (
                     <div
-                      key={emp.id}
+                      key={`${emp.id}-${emp.activeFrom || 'active'}`}
                       className={cn(
-                        'flex items-center hover:bg-slate-700/20 transition-colors',
-                        emp.isTeamLeader && 'bg-amber-500/5',
-                        emp.isSupervisor && !emp.isTeamLeader && 'bg-blue-500/5',
+                        'flex items-center transition-colors',
+                        // Faded effect for moved-away employees — the whole
+                        // row is dimmed so it's visually clear they're no
+                        // longer at this site, but still visible for history.
+                        isMovedAway && 'opacity-40',
+                        !isMovedAway && 'hover:bg-slate-700/20',
+                        emp.isTeamLeader && !isMovedAway && 'bg-amber-500/5',
+                        emp.isSupervisor && !emp.isTeamLeader && !isMovedAway && 'bg-blue-500/5',
                       )}
                     >
                       <div className="w-52 shrink-0 px-4 py-2.5">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm text-white font-medium truncate block">
+                          <span className={cn(
+                            'text-sm font-medium truncate block',
+                            isMovedAway ? 'text-slate-400' : 'text-white'
+                          )}>
                             {emp.fullName}
                           </span>
                           {emp.isTeamLeader && (
@@ -597,6 +652,11 @@ function SiteListView({
                           )}
                           {emp.isSupervisor && !emp.isTeamLeader && (
                             <ShieldCheck className="h-3 w-3 text-blue-400 shrink-0" />
+                          )}
+                          {isMovedAway && (
+                            <span className="text-[9px] text-slate-500 bg-slate-700/50 px-1 py-0.5 rounded shrink-0">
+                              moved
+                            </span>
                           )}
                         </div>
                       </div>
@@ -619,6 +679,49 @@ function SiteListView({
                           const isFri = isFriday(year, month, day);
                           const recent = isRecentDay(day);
 
+                          // ── Date-range check ──
+                          // If the employee has an activeFrom/activeUntil
+                          // range (from EmpCountSitePerMonth), check whether
+                          // this day falls within it. Days outside the range
+                          // are rendered as faded non-interactive cells —
+                          // the user can see the cell exists but can't mark
+                          // it, because the employee wasn't at this site on
+                          // that day.
+                          //
+                          // activeFrom is inclusive (employee started this day).
+                          // activeUntil is inclusive (employee's last day at site).
+                          // activeUntil === null means still at the site.
+                          let isInRange = true;
+                          if (emp.activeFrom && dateStr < emp.activeFrom) {
+                            isInRange = false;
+                          }
+                          if (emp.activeUntil && dateStr > emp.activeUntil) {
+                            isInRange = false;
+                          }
+
+                          // Out-of-range cell: faded, non-interactive, no
+                          // attendance status shown (the attendance record
+                          // belongs to a different site for this date).
+                          if (!isInRange) {
+                            return (
+                              <div
+                                key={day}
+                                className={cn(
+                                  'w-16 shrink-0 flex items-center justify-center py-1.5',
+                                  isFri && 'bg-red-500/5',
+                                )}
+                              >
+                                <span
+                                  className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-800/40 text-slate-700 cursor-not-allowed"
+                                  title="Employee was not at this site on this date"
+                                >
+                                  ·
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          // In-range cell: normal interactive button
                           return (
                             <div
                               key={day}
@@ -720,6 +823,18 @@ export function AttendancePage() {
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  // Site assignments (EmpCountSitePerMonth) for the viewed month. Each record
+  // tells us when an employee started (createdDate) and left (removedDate) a
+  // site, so we can show moved-away employees at their old site with faded
+  // out-of-range cells, and at their new site only from the move date.
+  const [siteAssignments, setSiteAssignments] = useState<Array<{
+    empId: string;
+    empName: string;
+    siteId: string;
+    siteName: string;
+    createdDate: string;
+    removedDate: string | null;
+  }>>([]);
   const [loadingSites, setLoadingSites] = useState(true);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [loadingAttendance, setLoadingAttendance] = useState(true);
@@ -854,17 +969,117 @@ export function AttendancePage() {
     return () => { cancelled = true; };
   }, [yearStr, monthStr]);
 
-  // Group employees by site name
+  // Fetch site assignments (EmpCountSitePerMonth) for the viewed month.
+  // This tells us which employees were at which site when, including
+  // employees who have since moved to another site (removedDate is set).
+  // Without this, moved-away employees would disappear from their old
+  // site's attendance grid entirely, losing the history of who worked
+  // where and for how many days.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSiteAssignments = async () => {
+      try {
+        const monthParam = `${yearStr}-${monthStr}`;
+        const res = await fetch(`/api/attendance/site-assignments?month=${monthParam}`, {
+          cache: 'no-store',
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.success) {
+          setSiteAssignments(data.data.assignments || []);
+        }
+      } catch {
+        // silent — site assignments are optional, the page still works
+        // without them (falls back to currentSite-only grouping)
+      }
+    };
+    fetchSiteAssignments();
+    return () => { cancelled = true; };
+  }, [yearStr, monthStr]);
+
+  // Group employees by site name.
+  //
+  // We merge TWO sources:
+  //   1. Current active employees grouped by their currentSite — these are
+  //      employees who are at the site RIGHT NOW (no removedDate).
+  //   2. Site assignments from EmpCountSitePerMonth — these include
+  //      employees who were at the site during the month but have since
+  //      moved away (removedDate is set). We add them to the site's list
+  //      with their date range (activeFrom/activeUntil) and movedAway=true.
+  //
+  // For employees who are at their current site AND have a site-assignment
+  // record, we use the record's createdDate/removedDate to set the date
+  // range (so the grid knows exactly which days they were active).
+  //
+  // Employees with movedAway=true are sorted to the bottom of the list by
+  // SiteListView's sortedEmployees, and their rows get a faded effect.
   const employeesBySite = useMemo(() => {
     const map = new Map<string, Employee[]>();
+    const monthPrefix = `${yearStr}-${monthStr}-`; // e.g. "2026-07-"
+    const daysInMonthNum = new Date(parseInt(yearStr), parseInt(monthStr), 0).getDate();
+    const monthStartStr = `${monthPrefix}01`;
+    const monthEndStr = `${monthPrefix}${String(daysInMonthNum).padStart(2, '0')}`;
+
+    // Helper: clamp a date string to [monthStart, monthEnd].
+    const clampToMonth = (dateStr: string): string => {
+      if (dateStr < monthStartStr) return monthStartStr;
+      if (dateStr > monthEndStr) return monthEndStr;
+      return dateStr;
+    };
+
+    // Track which (empId, siteName) pairs we've already added so we don't
+    // duplicate. An employee can appear at multiple sites (old + new).
+    const added = new Set<string>();
+
+    // 1. Add employees from site-assignments FIRST (so we can set date ranges).
+    //    This includes both active and moved-away employees.
+    for (const assignment of siteAssignments) {
+      const emp = employees.find((e) => e.id === assignment.empId);
+      if (!emp) continue; // employee not in active list — skip
+
+      const siteName = assignment.siteName;
+      if (!added.has(`${emp.id}::${siteName}`)) {
+        added.add(`${emp.id}::${siteName}`);
+        if (!map.has(siteName)) map.set(siteName, []);
+        // createdDate is when the EmpCountSitePerMonth record was created,
+        // which could be a previous month if the employee was assigned
+        // before this month. Clamp to month start.
+        const activeFrom = clampToMonth(assignment.createdDate.split('T')[0]);
+        // removedDate is when the employee left the site. Clamp to month end.
+        // If null, the employee is still at the site (activeUntil = null).
+        const activeUntil = assignment.removedDate
+          ? clampToMonth(assignment.removedDate.split('T')[0])
+          : null;
+        map.get(siteName)!.push({
+          ...emp,
+          activeFrom,
+          activeUntil,
+          movedAway: !!assignment.removedDate,
+        });
+      }
+    }
+
+    // 2. Add current employees at their currentSite IF not already added
+    //    via site-assignments (fallback for employees with no assignment
+    //    record — e.g. if the month's records haven't been created yet).
     for (const emp of employees) {
       const siteName = emp.currentSite || '';
-      if (!siteName) continue;
-      if (!map.has(siteName)) map.set(siteName, []);
-      map.get(siteName)!.push(emp);
+      if (!siteName || siteName === 'Idle') continue;
+      if (!added.has(`${emp.id}::${siteName}`)) {
+        added.add(`${emp.id}::${siteName}`);
+        if (!map.has(siteName)) map.set(siteName, []);
+        // No assignment record — treat as active for the whole month
+        map.get(siteName)!.push({
+          ...emp,
+          activeFrom: monthStartStr,
+          activeUntil: null,
+          movedAway: false,
+        });
+      }
     }
+
     return map;
-  }, [employees]);
+  }, [employees, siteAssignments, yearStr, monthStr]);
 
   // Apply search filter (matches employee name/ID/trade)
   const filteredEmployeesBySite = useMemo(() => {
