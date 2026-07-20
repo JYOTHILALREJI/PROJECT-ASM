@@ -107,9 +107,24 @@ export async function GET(
     }
 
     // 6. Compute cumulative before each month (from combined data)
+    // CRITICAL: seed the running total with the employee's
+    // currentTotalWorkingHours (manual starting balance). This way the
+    // manual hours are reflected in every month's cumulative column AND
+    // in the threshold progress bar. Without this, the manual hours only
+    // show up in the aggregate total but not in the per-month cumulative.
+    //
+    // However, we only seed if the manual value is HIGHER than the sum of
+    // all monthly hours (i.e. the manual value includes hours from before
+    // the system was set up). If the monthly hours already sum to more
+    // than the manual value, we don't seed (the monthly data is the
+    // source of truth).
+    const totalMonthlyHours = Array.from(combinedMonthHours.values()).reduce((s, h) => s + h, 0);
+    const manualTotalHours = employee.currentTotalWorkingHours || 0;
+    const seedHours = Math.max(0, manualTotalHours - totalMonthlyHours);
+
     const sortedMonthKeys = Array.from(combinedMonthHours.keys()).sort();
     const cumulativeMap = new Map<string, number>();
-    let runningTotal = 0;
+    let runningTotal = seedHours; // seed with manual starting balance
     for (const key of sortedMonthKeys) {
       cumulativeMap.set(key, runningTotal);
       runningTotal += combinedMonthHours.get(key)!;
@@ -282,10 +297,51 @@ export async function GET(
     });
 
     // 11. Combine and sort all entries chronologically
-    const allEntries = [...monthlyData, ...syntheticEntries].sort((a, b) => {
+    // If there are manual starting-balance hours (seedHours > 0), prepend a
+    // synthetic "Custom Hours" entry at the beginning of the list so the
+    // monthly breakdown shows where those hours came from. This entry has
+    // a special monthKey '__custom__' that the UI renders differently.
+    let allEntries = [...monthlyData, ...syntheticEntries].sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
       return a.month - b.month;
     });
+
+    if (seedHours > 0) {
+      const customEntry = {
+        logId: null,
+        employeeId: employee.id,
+        siteId: '',
+        siteName: 'Custom (Starting Balance)',
+        year: 0,
+        month: 0,
+        monthKey: '__custom__',
+        hoursWorked: seedHours,
+        allowances: 0,
+        deductions: 0,
+        cumulativeBefore: 0,
+        cumulativeAfter: seedHours,
+        lowRate,
+        highRate,
+        isCustom,
+        belowHours: seedHours,
+        aboveHours: 0,
+        belowSalary: 0,
+        aboveSalary: 0,
+        totalSalary: 0,
+        blendedRate: 0,
+        deduction: 0,
+        advance: 0,
+        balanceSalary: 0,
+        isPaid: false,
+        standardRecordId: null,
+        premiumRecordId: null,
+        createdAt: '',
+        updatedAt: '',
+        isSynthetic: true,
+        isCustomHours: true,
+      };
+      allEntries = [customEntry, ...allEntries];
+    }
 
     // 12. Aggregate total hours from ALL sources (work logs + salary record fallbacks)
     // Use the employee's currentTotalWorkingHours as a FLOOR — if the admin
@@ -293,7 +349,6 @@ export async function GET(
     // starting balance from before the system was set up), use the manual
     // value so the ledger reflects it.
     const computedTotalHours = runningTotal;
-    const manualTotalHours = employee.currentTotalWorkingHours || 0;
     const aggregateTotalHours = Math.max(computedTotalHours, manualTotalHours);
 
     return NextResponse.json({

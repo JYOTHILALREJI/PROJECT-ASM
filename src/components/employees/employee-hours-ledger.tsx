@@ -93,6 +93,7 @@ interface WorkLogEntry {
   createdAt: string;
   updatedAt: string;
   isSynthetic?: boolean;    // true if entry is from SalaryRecord fallback, not a real WorkLog
+  isCustomHours?: boolean;  // true if entry is the manual starting-balance adjustment
 }
 
 /** employeeInfo returned alongside workLogs */
@@ -307,8 +308,17 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   }, []);
 
   // ── Build a full 12-month grid for the selected year ──
+  // Also prepend a "Custom Hours" row if the API returned one (the manual
+  // starting-balance adjustment from currentTotalWorkingHours).
   const monthlyGrid = useMemo(() => {
     const grid: Array<WorkLogEntry & { hasData: boolean }> = [];
+
+    // Check for the custom hours entry (monthKey = '__custom__')
+    const customEntry = workLogs.find((w) => w.monthKey === '__custom__' && w.isCustomHours);
+    if (customEntry) {
+      grid.push({ ...customEntry, hasData: true });
+    }
+
     for (let m = 1; m <= 12; m++) {
       const monthKey = `${selectedYear}-${String(m).padStart(2, '0')}`;
       const existing = workLogs.find((w) => w.monthKey === monthKey);
@@ -386,6 +396,8 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   }, [milestoneProgress]);
 
   // ── Yearly totals ──
+  // Include the custom hours entry in the total hours (but not salary,
+  // since custom hours have no salary).
   const yearlyTotals = useMemo(() => {
     const totalHours = workLogs.reduce((sum, w) => sum + w.hoursWorked, 0);
     const totalSalary = workLogs.reduce((sum, w) => sum + w.totalSalary, 0);
@@ -1204,12 +1216,15 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                     const isCustomRate = row.isCustom;
                     const directRate = getDirectRate(row);
                     const rateColor = getRateColor(directRate, isCustomRate);
+                    const isCustomHoursRow = row.monthKey === '__custom__';
 
                     return (
                       <TableRow
                         key={row.monthKey}
                         className={`border-slate-700/30 ${
-                          isThresholdRow
+                          isCustomHoursRow
+                            ? 'bg-violet-500/10 hover:bg-violet-500/15'
+                            : isThresholdRow
                             ? 'bg-red-500/10 hover:bg-red-500/15'
                             : row.hasData && row.hoursWorked > 0
                             ? 'hover:bg-slate-700/30'
@@ -1218,7 +1233,16 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                       >
                         <TableCell className="font-medium text-white whitespace-nowrap border-r border-slate-700/20">
                           <div className="flex items-center gap-2">
-                            {formatMonthShort(row.monthKey)}
+                            {isCustomHoursRow ? (
+                              <>
+                                <Badge className="bg-violet-500/20 text-violet-300 border-violet-500/30 text-[10px] px-1.5 py-0 h-5">
+                                  Custom
+                                </Badge>
+                                <span className="text-slate-400 text-xs">Starting Balance</span>
+                              </>
+                            ) : (
+                              formatMonthShort(row.monthKey)
+                            )}
                             {isThresholdRow && (
                               <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[10px] px-1.5 py-0 h-5">
                                 <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
@@ -1245,7 +1269,9 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                           </span>
                         </TableCell>
                         <TableCell className="text-right border-r border-slate-700/20">
-                          {row.hoursWorked > 0 ? (
+                          {isCustomHoursRow ? (
+                            <span className="text-violet-400 font-mono text-xs">—</span>
+                          ) : row.hoursWorked > 0 ? (
                             <Badge className={`text-xs px-2 py-0.5 h-6 font-mono ${getRateBadgeClasses(rateColor)}`}>
                               {directRate.toFixed(1)}
                             </Badge>
@@ -1260,7 +1286,9 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                           {row.aboveHours > 0 ? row.aboveHours.toFixed(1) : '—'}
                         </TableCell>
                         <TableCell className="text-right font-mono text-slate-200">
-                          {row.totalSalary > 0 ? (
+                          {isCustomHoursRow ? (
+                            <span className="text-violet-400 text-xs">No salary (adjustment only)</span>
+                          ) : row.totalSalary > 0 ? (
                             <div className="flex flex-col items-end gap-0.5">
                               <span className="text-[9px] text-slate-500 font-mono">
                                 {row.isCustom ? (
