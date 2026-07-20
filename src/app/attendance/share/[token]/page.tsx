@@ -193,8 +193,50 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
     return Object.values(statuses).filter((s) => s === 'absent').length;
   }, [statuses]);
 
+  // ── Local-time expiry ──
+  // The server stores expiresAt as a UTC timestamp computed from the server's
+  // local timezone. But the TL views the page in THEIR local timezone. If the
+  // server is in UTC but the TL is in Asia/Calcutta (UTC+5:30), the server's
+  // 23:59:59 UTC shows as 5:29:59 AM the next day in the TL's timezone —
+  // confusing.
+  //
+  // Fix: compute the expiry in the CLIENT's local timezone based on the
+  // share's date string (YYYY-MM-DD, no timezone). The share expires at
+  // 23:59:59.999 on that calendar day in the TL's local timezone. This is
+  // what the TL's clock shows, so "expires at 11:59 PM tonight" is accurate.
+  //
+  // We also do a client-side expiry check: if the current local time is past
+  // the local end-of-day AND the share is still 'open', treat it as expired
+  // (override the server status). The server's check is a fallback.
+  //
+  // MUST be declared before handleSubmit (which uses isLocallyExpired).
+  const localExpiresAt = useMemo(() => {
+    if (!share?.date) return null;
+    const [yr, mo, dy] = share.date.split('-').map(Number);
+    // new Date(yr, mo-1, dy, 23, 59, 59, 999) is in the browser's local TZ
+    return new Date(yr, mo - 1, dy, 23, 59, 59, 999);
+  }, [share?.date]);
+
+  const isLocallyExpired = useMemo(() => {
+    if (!localExpiresAt) return false;
+    return new Date() > localExpiresAt;
+  }, [localExpiresAt]);
+
+  // Effective status: if the server says 'open' but the client's local time
+  // is past the local end-of-day, treat as expired.
+  const effectiveStatus = share
+    ? (share.status === 'open' && isLocallyExpired ? 'expired' : share.status)
+    : 'expired';
+
   const handleSubmit = useCallback(async () => {
     if (!share) return;
+    // Client-side expiry check: if the link has expired (local time past
+    // end-of-day), block submission immediately without hitting the server.
+    // The server also checks, but this gives instant feedback.
+    if (isLocallyExpired) {
+      alert('This share link has expired. Attendance can only be submitted on the same day the link was created for. Please request a new link from the admin.');
+      return;
+    }
     if (markedCount === 0) {
       alert('Please mark at least one employee as present or absent before submitting.');
       return;
@@ -236,7 +278,7 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
     } finally {
       setSubmitting(false);
     }
-  }, [share, employees, statuses, markedCount, token, submitterName, fetchShare]);
+  }, [share, employees, statuses, markedCount, token, submitterName, fetchShare, isLocallyExpired]);
 
   const handlePrint = useCallback(() => {
     window.print();
@@ -277,7 +319,7 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
     );
   }
 
-  const isReadOnly = share.status !== 'open' || submitted;
+  const isReadOnly = effectiveStatus !== 'open' || submitted;
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -317,21 +359,21 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
         {isReadOnly && (
           <div className={cn(
             'no-print rounded-lg border p-4 mb-4 flex items-start gap-3',
-            share.status === 'submitted'
+            effectiveStatus === 'submitted'
               ? 'bg-emerald-50 border-emerald-200'
               : 'bg-amber-50 border-amber-200',
           )}>
-            {share.status === 'submitted' ? (
+            {effectiveStatus === 'submitted' ? (
               <Lock className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
               <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
             )}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-gray-900">
-                {share.status === 'submitted' ? 'Attendance already submitted' : 'This link has expired'}
+                {effectiveStatus === 'submitted' ? 'Attendance already submitted' : 'This link has expired'}
               </p>
               <p className="text-xs text-gray-600 mt-0.5">
-                {share.status === 'submitted' ? (
+                {effectiveStatus === 'submitted' ? (
                   <>
                     Submitted{share.submittedByName ? ` by ${share.submittedByName}` : ''} on{' '}
                     {formatTimestamp(share.submittedAt)}. The link is now read-only — entries below
@@ -352,15 +394,17 @@ export default function AttendanceSharePage({ params }: { params: Promise<{ toke
         )}
 
         {/* Same-day expiry notice for OPEN shares — warns the TL that the
-            link dies at end of day if not submitted. */}
-        {!isReadOnly && share.expiresAt && (
+            link dies at end of day if not submitted. Uses the CLIENT's
+            local timezone (not the server's) so the shown time matches the
+            TL's clock. */}
+        {!isReadOnly && localExpiresAt && (
           <div className="no-print rounded-lg border border-blue-200 bg-blue-50 p-3 mb-4 flex items-start gap-2">
             <Clock className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
               <p className="text-xs text-blue-900">
                 <span className="font-semibold">Same-day link:</span> this
                 link expires at <span className="font-mono font-semibold">
-                  {new Date(share.expiresAt).toLocaleString('en-US', {
+                  {localExpiresAt.toLocaleString('en-US', {
                     hour: '2-digit',
                     minute: '2-digit',
                     month: 'short',
