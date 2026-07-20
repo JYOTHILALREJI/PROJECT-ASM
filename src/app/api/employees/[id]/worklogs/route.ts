@@ -42,6 +42,7 @@ export async function GET(
         hoursThreshold: true,
         nationality: true,
         trade: true,
+        currentTotalWorkingHours: true,
       },
     });
 
@@ -287,7 +288,13 @@ export async function GET(
     });
 
     // 12. Aggregate total hours from ALL sources (work logs + salary record fallbacks)
-    const aggregateTotalHours = runningTotal;
+    // Use the employee's currentTotalWorkingHours as a FLOOR — if the admin
+    // manually set it to a value higher than the computed aggregate (e.g. a
+    // starting balance from before the system was set up), use the manual
+    // value so the ledger reflects it.
+    const computedTotalHours = runningTotal;
+    const manualTotalHours = employee.currentTotalWorkingHours || 0;
+    const aggregateTotalHours = Math.max(computedTotalHours, manualTotalHours);
 
     return NextResponse.json({
       success: true,

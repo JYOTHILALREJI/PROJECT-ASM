@@ -427,13 +427,19 @@ export async function PUT(
       });
     }
 
-    // Trigger full recalculation if role, customHourlyRate, hoursThreshold, isTeamLeader, or isSupervisor changed
+    // Trigger full recalculation if role, customHourlyRate, hoursThreshold,
+    // isTeamLeader, isSupervisor, OR currentTotalWorkingHours changed.
+    // currentTotalWorkingHours is a manual override/starting balance — when it
+    // changes, the hours ledger and salary records must be recomputed so the
+    // new total is reflected everywhere.
     const needsRecalc =
       (body.role !== undefined && body.role !== existing.role) ||
       (body.customHourlyRate !== undefined && body.customHourlyRate !== existing.customHourlyRate) ||
       (body.hoursThreshold !== undefined && body.hoursThreshold !== existing.hoursThreshold) ||
       (body.isTeamLeader !== undefined && body.isTeamLeader !== existing.isTeamLeader) ||
-      (body.isSupervisor !== undefined && body.isSupervisor !== existing.isSupervisor);
+      (body.isSupervisor !== undefined && body.isSupervisor !== existing.isSupervisor) ||
+      (body.currentTotalWorkingHours !== undefined &&
+        parseFloat(body.currentTotalWorkingHours) !== existing.currentTotalWorkingHours);
 
     let recalcResult = null;
     if (needsRecalc) {

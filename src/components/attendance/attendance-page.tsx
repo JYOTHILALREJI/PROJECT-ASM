@@ -24,6 +24,7 @@ import {
   PowerOff,
   ExternalLink,
   UserPlus,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -575,6 +576,9 @@ function SiteListView({
   // ── Advance-to-next-employee helper ──
   // Given the current employeeId + date, find the NEXT in-range employee
   // in sortedEmployees (scanning forward, skipping moved-away/out-of-range).
+  // CRITICAL: skip employees with movedAway=true — they are no longer at this
+  // site and must NOT be markable via keyboard or mouse. Their cells are
+  // read-only (faded) for historical reference only.
   // Returns the next Employee or null if there's no next employee.
   // Used by both the dropdown's onAdvance and the stealth keyboard mode.
   const findNextEmployee = useCallback((currentEmpId: string, date: string): Employee | null => {
@@ -582,6 +586,7 @@ function SiteListView({
     if (currentIdx === -1) return null;
     for (let i = currentIdx + 1; i < sortedEmployees.length; i++) {
       const cand = sortedEmployees[i];
+      if (cand.movedAway) continue; // skip moved-away employees
       if (cand.activeFrom && date < cand.activeFrom) continue;
       if (cand.activeUntil && date > cand.activeUntil) continue;
       return cand;
@@ -590,13 +595,14 @@ function SiteListView({
   }, [sortedEmployees]);
 
   // ── Go-to-previous-employee helper ──
-  // Mirror of findNextEmployee but scans backward. Used by ArrowUp to move
-  // to the previous employee's same-day cell without marking.
+  // Mirror of findNextEmployee but scans backward. Also skips moved-away
+  // employees — they cannot be the target of keyboard navigation/marking.
   const findPrevEmployee = useCallback((currentEmpId: string, date: string): Employee | null => {
     const currentIdx = sortedEmployees.findIndex((e) => e.id === currentEmpId);
     if (currentIdx === -1) return null;
     for (let i = currentIdx - 1; i >= 0; i--) {
       const cand = sortedEmployees[i];
+      if (cand.movedAway) continue; // skip moved-away employees
       if (cand.activeFrom && date < cand.activeFrom) continue;
       if (cand.activeUntil && date > cand.activeUntil) continue;
       return cand;
@@ -1171,9 +1177,38 @@ function SiteListView({
                           }
 
                           // In-range cell: normal interactive button.
+                          // BUT: if the employee has moved away (movedAway=true),
+                          // render a non-interactive read-only span instead.
+                          // The historical attendance status is still visible,
+                          // but you can't click it to change it — the employee
+                          // is no longer at this site.
+                          //
                           // data-emp-id and data-date are used by the
                           // auto-advance logic to find the next employee's
                           // same-day cell after a keyboard confirm.
+                          if (emp.movedAway) {
+                            return (
+                              <div
+                                key={day}
+                                className={cn(
+                                  'w-16 shrink-0 flex items-center justify-center py-1.5',
+                                  isFri && 'bg-red-500/5',
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    'h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold cursor-not-allowed',
+                                    cfg.color,
+                                    'opacity-50',
+                                  )}
+                                  title={`${cfg.label} — employee has moved to another site (read-only)`}
+                                >
+                                  {cfg.short}
+                                </span>
+                              </div>
+                            );
+                          }
+
                           return (
                             <div
                               key={day}
@@ -1373,6 +1408,9 @@ export function AttendancePage() {
   // after adding an employee to a site (so the new employee appears in the
   // grid without a full page reload).
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Excel export state
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   // Attendance sheet (existing component) state
   const [attendanceSheetSite, setAttendanceSheetSite] = useState<SiteOption | null>(null);
@@ -1818,6 +1856,44 @@ export function AttendancePage() {
     setCollapsedSites(new Set());
   }, []);
 
+  // ── Excel export handler ──
+  // Downloads a single Excel file with ALL sites' attendance for the
+  // currently-viewed month. Each site gets its own sheet with:
+  //   - Header: site name, month/year
+  //   - Columns: SL#, Name, Code, Trade, Day 1-31, Total Hours, Present, Absent, Not Marked
+  //   - Cells: "10" for present, "A" (red bg) for absent, blank for not marked
+  const handleExportExcel = useCallback(async () => {
+    setExportingExcel(true);
+    try {
+      const monthParam = `${yearStr}-${monthStr}`;
+      const res = await fetch(`/api/attendance/export-excel?month=${monthParam}&year=${yearStr}`, {
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to export Excel');
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Attendance_${monthParam}_${yearStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('[Export Excel] failed:', err);
+      toast({
+        title: 'Export Failed',
+        description: err instanceof Error ? err.message : 'Failed to export Excel file',
+        variant: 'destructive',
+      });
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [yearStr, monthStr]);
+
   // ── Share handlers ──
   const openShareDialog = useCallback((site: SiteOption) => {
     setShareDialogSite(site);
@@ -2113,9 +2189,18 @@ export function AttendancePage() {
           )}
         </div>
 
-        {/* Expand/Collapse all */}
+        {/* Expand/Collapse all + Export Excel */}
         {sites.length > 0 && (
           <div className="flex items-center gap-2 shrink-0 ml-auto">
+            <Button
+              onClick={handleExportExcel}
+              disabled={exportingExcel}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs h-7"
+              title="Download all sites' attendance as an Excel file"
+            >
+              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              {exportingExcel ? 'Exporting...' : 'Export Excel'}
+            </Button>
             <Button variant="ghost" size="sm" onClick={expandAll} className="text-slate-400 hover:text-white text-xs h-7">
               Expand All
             </Button>
