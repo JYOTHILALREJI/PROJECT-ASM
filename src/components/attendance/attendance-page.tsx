@@ -25,6 +25,7 @@ import {
   ExternalLink,
   UserPlus,
   Download,
+  ArrowLeft,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -2482,38 +2483,63 @@ export function AttendancePage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Export Excel Preview Dialog ──
+      {/* ── Export Excel Preview (full-screen overlay) ──
           Shows the full monthly attendance for ALL sites as HTML tables.
           The user reviews the data, then clicks "Download Excel" to get
-          the .xlsx file. */}
-      <Dialog open={exportPreviewOpen} onOpenChange={(open) => { if (!open) setExportPreviewOpen(false); }}>
-        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-7xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-white">
-              <Download className="h-5 w-5 text-emerald-400" />
-              Attendance Preview — {exportPreviewData?.monthLabel || 'Loading...'}
-            </DialogTitle>
-            <DialogDescription className="text-slate-400">
-              Review the full monthly attendance below. Click &quot;Download Excel&quot; to save as a .xlsx file.
-            </DialogDescription>
-          </DialogHeader>
+          the .xlsx file. Uses a fixed full-screen overlay (not a modal
+          Dialog) so there's room for wide tables with 31 day columns.
+          A back button returns to the attendance page. */}
+      {exportPreviewOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col overflow-hidden">
+          {/* Top bar with back button + title + download */}
+          <div className="flex items-center justify-between gap-4 px-4 py-3 bg-slate-800 border-b border-slate-700 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setExportPreviewOpen(false)}
+                className="text-slate-300 hover:text-white hover:bg-slate-700 gap-1.5"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Attendance
+              </Button>
+              <div className="h-6 w-px bg-slate-700" />
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-white truncate flex items-center gap-2">
+                  <Download className="h-4 w-4 text-emerald-400" />
+                  Attendance Preview
+                </h2>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {exportPreviewData?.monthLabel || 'Loading...'}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleDownloadExcel}
+              disabled={downloadingExcel || !exportPreviewData || exportPreviewData.sites.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shrink-0"
+            >
+              {downloadingExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              <span className="hidden sm:inline">{downloadingExcel ? 'Downloading...' : 'Download Excel'}</span>
+            </Button>
+          </div>
 
           {/* Scrollable preview area */}
-          <div className="flex-1 overflow-auto min-h-0">
+          <div className="flex-1 overflow-auto p-4">
             {exportPreviewLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-8 w-8 animate-spin text-slate-500" />
                 <span className="ml-3 text-sm text-slate-400">Loading attendance data...</span>
               </div>
             ) : exportPreviewData ? (
-              <div className="space-y-6">
+              <div className="space-y-6 max-w-[2000px] mx-auto">
                 {exportPreviewData.sites.length === 0 ? (
                   <div className="text-center py-12 text-sm text-slate-500">
                     No attendance data found for this month.
                   </div>
                 ) : (
                   exportPreviewData.sites.map((site) => (
-                    <div key={site.siteId} className="border border-slate-700/50 rounded-lg overflow-hidden">
+                    <div key={site.siteId} className="border border-slate-700/50 rounded-lg overflow-hidden bg-slate-800/50">
                       {/* Site header */}
                       <div className="bg-slate-900/60 px-4 py-2 border-b border-slate-700/50">
                         <div className="flex items-center gap-2">
@@ -2583,23 +2609,8 @@ export function AttendancePage() {
               </div>
             ) : null}
           </div>
-
-          {/* Footer with Download button */}
-          <DialogFooter className="gap-2 shrink-0 border-t border-slate-700/50 pt-4">
-            <Button variant="ghost" onClick={() => setExportPreviewOpen(false)} className="text-slate-400 hover:text-white">
-              Close
-            </Button>
-            <Button
-              onClick={handleDownloadExcel}
-              disabled={downloadingExcel || !exportPreviewData || exportPreviewData.sites.length === 0}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
-            >
-              {downloadingExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {downloadingExcel ? 'Downloading...' : 'Download Excel'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
 
       {/* Attendance Sheet (full-screen overlay) */}
       {attendanceSheetSite && (
