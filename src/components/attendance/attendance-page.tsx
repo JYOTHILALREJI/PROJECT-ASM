@@ -1409,8 +1409,36 @@ export function AttendancePage() {
   // grid without a full page reload).
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Excel export state
-  const [exportingExcel, setExportingExcel] = useState(false);
+  // Excel export state — preview dialog
+  // When the user clicks "Export Excel", we fetch the attendance data as
+  // JSON and show a preview dialog. The user reviews the data, then clicks
+  // "Download Excel" inside the dialog to get the .xlsx file.
+  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [exportPreviewData, setExportPreviewData] = useState<{
+    month: string;
+    year: number;
+    monthLabel: string;
+    daysInMonth: number;
+    sites: Array<{
+      siteId: string;
+      siteName: string;
+      clientName: string | null;
+      employees: Array<{
+        empId: string;
+        fullName: string;
+        employeeCode: string;
+        trade: string;
+        movedAway: boolean;
+        days: Array<{ day: number; status: 'present' | 'absent' | 'not_marked' }>;
+        totalHours: number;
+        presentDays: number;
+        absentDays: number;
+        notMarkedDays: number;
+      }>;
+    }>;
+  } | null>(null);
+  const [exportPreviewLoading, setExportPreviewLoading] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
 
   // Attendance sheet (existing component) state
   const [attendanceSheetSite, setAttendanceSheetSite] = useState<SiteOption | null>(null);
@@ -1856,14 +1884,47 @@ export function AttendancePage() {
     setCollapsedSites(new Set());
   }, []);
 
-  // ── Excel export handler ──
-  // Downloads a single Excel file with ALL sites' attendance for the
-  // currently-viewed month. Each site gets its own sheet with:
-  //   - Header: site name, month/year
-  //   - Columns: SL#, Name, Code, Trade, Day 1-31, Total Hours, Present, Absent, Not Marked
-  //   - Cells: "10" for present, "A" (red bg) for absent, blank for not marked
-  const handleExportExcel = useCallback(async () => {
-    setExportingExcel(true);
+  // ── Excel export: open preview dialog ──
+  // Fetches the attendance data as JSON and shows a preview dialog. The
+  // user reviews the data, then clicks "Download Excel" inside the dialog
+  // to get the .xlsx file.
+  const handleOpenExportPreview = useCallback(async () => {
+    setExportPreviewLoading(true);
+    setExportPreviewOpen(true);
+    setExportPreviewData(null);
+    try {
+      const monthParam = `${yearStr}-${monthStr}`;
+      const res = await fetch(`/api/attendance/export-data?month=${monthParam}&year=${yearStr}`, {
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (json.success) {
+        setExportPreviewData(json.data);
+      } else {
+        toast({
+          title: 'Error',
+          description: json.error || 'Failed to load attendance data',
+          variant: 'destructive',
+        });
+        setExportPreviewOpen(false);
+      }
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to load attendance data for preview',
+        variant: 'destructive',
+      });
+      setExportPreviewOpen(false);
+    } finally {
+      setExportPreviewLoading(false);
+    }
+  }, [yearStr, monthStr]);
+
+  // ── Excel export: download the .xlsx file ──
+  // Called from inside the preview dialog. Downloads the actual Excel file
+  // from the export-excel endpoint.
+  const handleDownloadExcel = useCallback(async () => {
+    setDownloadingExcel(true);
     try {
       const monthParam = `${yearStr}-${monthStr}`;
       const res = await fetch(`/api/attendance/export-excel?month=${monthParam}&year=${yearStr}`, {
@@ -1883,14 +1944,13 @@ export function AttendancePage() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('[Export Excel] failed:', err);
       toast({
-        title: 'Export Failed',
-        description: err instanceof Error ? err.message : 'Failed to export Excel file',
+        title: 'Download Failed',
+        description: err instanceof Error ? err.message : 'Failed to download Excel file',
         variant: 'destructive',
       });
     } finally {
-      setExportingExcel(false);
+      setDownloadingExcel(false);
     }
   }, [yearStr, monthStr]);
 
@@ -2193,13 +2253,12 @@ export function AttendancePage() {
         {sites.length > 0 && (
           <div className="flex items-center gap-2 shrink-0 ml-auto">
             <Button
-              onClick={handleExportExcel}
-              disabled={exportingExcel}
+              onClick={handleOpenExportPreview}
               className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs h-7"
-              title="Download all sites' attendance as an Excel file"
+              title="Preview and download all sites' attendance as an Excel file"
             >
-              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              {exportingExcel ? 'Exporting...' : 'Export Excel'}
+              <Download className="h-3.5 w-3.5" />
+              Export Excel
             </Button>
             <Button variant="ghost" size="sm" onClick={expandAll} className="text-slate-400 hover:text-white text-xs h-7">
               Expand All
@@ -2418,6 +2477,125 @@ export function AttendancePage() {
           <DialogFooter>
             <Button variant="ghost" onClick={closeAddEmployeeDialog} className="text-slate-400 hover:text-white">
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Export Excel Preview Dialog ──
+          Shows the full monthly attendance for ALL sites as HTML tables.
+          The user reviews the data, then clicks "Download Excel" to get
+          the .xlsx file. */}
+      <Dialog open={exportPreviewOpen} onOpenChange={(open) => { if (!open) setExportPreviewOpen(false); }}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-7xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Download className="h-5 w-5 text-emerald-400" />
+              Attendance Preview — {exportPreviewData?.monthLabel || 'Loading...'}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Review the full monthly attendance below. Click &quot;Download Excel&quot; to save as a .xlsx file.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Scrollable preview area */}
+          <div className="flex-1 overflow-auto min-h-0">
+            {exportPreviewLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-slate-500" />
+                <span className="ml-3 text-sm text-slate-400">Loading attendance data...</span>
+              </div>
+            ) : exportPreviewData ? (
+              <div className="space-y-6">
+                {exportPreviewData.sites.length === 0 ? (
+                  <div className="text-center py-12 text-sm text-slate-500">
+                    No attendance data found for this month.
+                  </div>
+                ) : (
+                  exportPreviewData.sites.map((site) => (
+                    <div key={site.siteId} className="border border-slate-700/50 rounded-lg overflow-hidden">
+                      {/* Site header */}
+                      <div className="bg-slate-900/60 px-4 py-2 border-b border-slate-700/50">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-emerald-400" />
+                          <span className="text-sm font-bold text-white">{site.siteName}</span>
+                          {site.clientName && (
+                            <span className="text-xs text-slate-400">· {site.clientName}</span>
+                          )}
+                          <span className="text-xs text-slate-500 ml-auto">
+                            {site.employees.length} employee{site.employees.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Attendance table */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-700/50 text-slate-400">
+                              <th className="px-2 py-1.5 text-left font-medium border border-slate-700/30 sticky left-0 bg-slate-700/50 z-10">#</th>
+                              <th className="px-2 py-1.5 text-left font-medium border border-slate-700/30 sticky left-8 bg-slate-700/50 z-10 min-w-[120px]">Name</th>
+                              <th className="px-2 py-1.5 text-left font-medium border border-slate-700/30 min-w-[80px]">Code</th>
+                              {Array.from({ length: exportPreviewData.daysInMonth }, (_, i) => (
+                                <th key={i} className="px-1 py-1.5 text-center font-medium border border-slate-700/30 w-7">
+                                  {i + 1}
+                                </th>
+                              ))}
+                              <th className="px-2 py-1.5 text-center font-medium border border-slate-700/30 bg-emerald-900/20">Hrs</th>
+                              <th className="px-2 py-1.5 text-center font-medium border border-slate-700/30 bg-emerald-900/20">P</th>
+                              <th className="px-2 py-1.5 text-center font-medium border border-slate-700/30 bg-red-900/20">A</th>
+                              <th className="px-2 py-1.5 text-center font-medium border border-slate-700/30">NM</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {site.employees.map((emp, idx) => (
+                              <tr key={emp.empId} className={cn(emp.movedAway && 'opacity-50')}>
+                                <td className="px-2 py-1 text-slate-500 border border-slate-700/20 sticky left-0 bg-slate-800 z-10">{idx + 1}</td>
+                                <td className="px-2 py-1 text-slate-200 border border-slate-700/20 sticky left-8 bg-slate-800 z-10 whitespace-nowrap">
+                                  {emp.fullName}{emp.movedAway && <span className="text-slate-500 ml-1">(moved)</span>}
+                                </td>
+                                <td className="px-2 py-1 text-slate-400 font-mono border border-slate-700/20">{emp.employeeCode}</td>
+                                {emp.days.map((d) => (
+                                  <td key={d.day} className="px-0 py-0 text-center border border-slate-700/20">
+                                    {d.status === 'present' && (
+                                      <span className="block w-7 h-6 leading-6 text-emerald-400 font-bold">10</span>
+                                    )}
+                                    {d.status === 'absent' && (
+                                      <span className="block w-7 h-6 leading-6 bg-red-500/80 text-white font-bold">A</span>
+                                    )}
+                                    {d.status === 'not_marked' && (
+                                      <span className="block w-7 h-6 leading-6 text-slate-700">&nbsp;</span>
+                                    )}
+                                  </td>
+                                ))}
+                                <td className="px-2 py-1 text-center font-bold text-emerald-300 border border-slate-700/20 bg-emerald-900/10">{emp.totalHours}</td>
+                                <td className="px-2 py-1 text-center font-bold text-emerald-300 border border-slate-700/20 bg-emerald-900/10">{emp.presentDays}</td>
+                                <td className="px-2 py-1 text-center font-bold text-red-300 border border-slate-700/20 bg-red-900/10">{emp.absentDays}</td>
+                                <td className="px-2 py-1 text-center text-slate-400 border border-slate-700/20">{emp.notMarkedDays}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Footer with Download button */}
+          <DialogFooter className="gap-2 shrink-0 border-t border-slate-700/50 pt-4">
+            <Button variant="ghost" onClick={() => setExportPreviewOpen(false)} className="text-slate-400 hover:text-white">
+              Close
+            </Button>
+            <Button
+              onClick={handleDownloadExcel}
+              disabled={downloadingExcel || !exportPreviewData || exportPreviewData.sites.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+            >
+              {downloadingExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {downloadingExcel ? 'Downloading...' : 'Download Excel'}
             </Button>
           </DialogFooter>
         </DialogContent>
