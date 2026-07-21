@@ -28,6 +28,11 @@ import {
   EyeOff,
   CheckCircle2,
   XCircle,
+  DollarSign,
+  Calculator,
+  Clock,
+  History,
+  Link2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -155,16 +160,21 @@ const emptyForm: AdminFormData = {
 };
 
 // Sidebar menu definitions with icons - mirrors the sidebar exactly
+// Each entry corresponds to a permission toggle in the admin management page.
+// Items that share a permission slug (e.g. Employee Hours shares 'employees')
+// are listed as sub-items so the admin understands what's included.
 const SIDEBAR_MENUS = [
   { slug: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'general', alwaysVisible: true },
-  { slug: 'employees', label: 'Employees', icon: Users, group: 'workforce', alwaysVisible: false },
+  { slug: 'employees', label: 'Employees + Hours Ledger', icon: Users, group: 'workforce', alwaysVisible: false },
   { slug: 'sites', label: 'Sites', icon: Building2, group: 'workforce', alwaysVisible: false },
-  { slug: 'attendance', label: 'Attendance', icon: Calendar, group: 'workforce', alwaysVisible: false },
-  { slug: 'uniform_registry', label: 'Uniform Registry', icon: Shirt, group: 'workforce', alwaysVisible: true },
+  { slug: 'attendance', label: 'Attendance + Copy', icon: Calendar, group: 'workforce', alwaysVisible: false },
+  { slug: 'accounts', label: 'Accounts', icon: DollarSign, group: 'finance', alwaysVisible: false },
+  { slug: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, group: 'finance', alwaysVisible: false },
+  { slug: 'uniform_registry', label: 'Materials Registry', icon: Shirt, group: 'workforce', alwaysVisible: true },
   { slug: 'leave_requests', label: 'Leave Requests', icon: FileText, group: 'workforce', alwaysVisible: false },
   { slug: 'cancellation_requests', label: 'Cancellations', icon: Ban, group: 'workforce', alwaysVisible: false },
   { slug: 'notifications', label: 'Notifications', icon: Bell, group: 'general', alwaysVisible: false },
-  { slug: 'admins', label: 'Admin Management', icon: Shield, group: 'admin', alwaysVisible: false },
+  { slug: 'admins', label: 'Admin Management + All Logs', icon: Shield, group: 'admin', alwaysVisible: false },
 ] as const;
 
 interface PermissionItem {
@@ -180,6 +190,7 @@ interface PermissionItem {
 const GROUP_CONFIG: Record<string, { label: string; color: string; borderColor: string; bgClass: string }> = {
   general: { label: 'General', color: 'text-slate-400', borderColor: 'border-slate-600/50', bgClass: 'bg-slate-500/10' },
   workforce: { label: 'Workforce', color: 'text-emerald-400', borderColor: 'border-emerald-600/50', bgClass: 'bg-emerald-500/10' },
+  finance: { label: 'Finance', color: 'text-cyan-400', borderColor: 'border-cyan-600/50', bgClass: 'bg-cyan-500/10' },
   admin: { label: 'Administration', color: 'text-amber-400', borderColor: 'border-amber-600/50', bgClass: 'bg-amber-500/10' },
 };
 
