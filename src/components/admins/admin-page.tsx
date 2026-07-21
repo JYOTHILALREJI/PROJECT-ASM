@@ -1031,7 +1031,7 @@ export function AdminPage() {
                           ) : (
                             // Group permissions
                             <div className="space-y-3">
-                              {['general', 'workforce', 'admin'].map((group) => {
+                              {['general', 'workforce', 'finance', 'admin'].map((group) => {
                                 const groupPerms = perms.filter(p => p.group === group);
                                 if (groupPerms.length === 0) return null;
                                 const configurablePerms = groupPerms.filter(p => !p.isAlwaysVisible);
