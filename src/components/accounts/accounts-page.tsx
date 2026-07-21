@@ -22,6 +22,8 @@ import {
   Users,
   Wallet,
   GitBranch,
+  Wrench,
+  Plus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +32,14 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -387,6 +397,13 @@ export function AccountsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedSites, setCollapsedSites] = useState<Set<string>>(new Set());
   const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
+
+  // ── Trade Rates dialog state ──
+  const [tradeRatesOpen, setTradeRatesOpen] = useState(false);
+  const [tradeRates, setTradeRates] = useState<Array<{ id: string; trade: string; hourlyRate: number }>>([]);
+  const [tradeRatesLoading, setTradeRatesLoading] = useState(false);
+  const [newTradeName, setNewTradeName] = useState('');
+  const [newTradeRate, setNewTradeRate] = useState('');
 
   // Mutable merged employee rows per site (keyed by siteId)
   const [siteEmployees, setSiteEmployees] = useState<Record<string, MergedEmployeeRow[]>>({});
@@ -868,6 +885,70 @@ export function AccountsPage() {
     }
   }, [sites, siteEmployees, monthStr, selectedYear, fetchData]);
 
+  // ── Trade Rates handlers ──
+  const fetchTradeRates = useCallback(async () => {
+    setTradeRatesLoading(true);
+    try {
+      const res = await fetch('/api/trade-rates');
+      const json = await res.json();
+      if (json.success) {
+        setTradeRates(json.data.tradeRates || []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setTradeRatesLoading(false);
+    }
+  }, []);
+
+  const openTradeRates = useCallback(() => {
+    setTradeRatesOpen(true);
+    setNewTradeName('');
+    setNewTradeRate('');
+    fetchTradeRates();
+  }, [fetchTradeRates]);
+
+  const handleAddTradeRate = useCallback(async () => {
+    const trade = newTradeName.trim();
+    const rate = parseFloat(newTradeRate);
+    if (!trade) {
+      toast({ title: 'Error', description: 'Trade name is required', variant: 'destructive' });
+      return;
+    }
+    if (isNaN(rate) || rate <= 0) {
+      toast({ title: 'Error', description: 'Rate must be a positive number', variant: 'destructive' });
+      return;
+    }
+    try {
+      const res = await fetch('/api/trade-rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trade, hourlyRate: rate }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: 'Trade Rate Saved', description: `${trade}: ${rate} AED/hr` });
+        setNewTradeName('');
+        setNewTradeRate('');
+        fetchTradeRates();
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to save', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to save trade rate', variant: 'destructive' });
+    }
+  }, [newTradeName, newTradeRate, fetchTradeRates]);
+
+  const handleDeleteTradeRate = useCallback(async (trade: string) => {
+    try {
+      await fetch(`/api/trade-rates?trade=${encodeURIComponent(trade)}`, { method: 'DELETE' });
+      toast({ title: 'Deleted', description: `Trade rate for "${trade}" removed` });
+      fetchTradeRates();
+    } catch {
+      toast({ title: 'Error', description: 'Failed to delete', variant: 'destructive' });
+    }
+  }, [fetchTradeRates]);
+
   const tradeDisplay = (emp: MergedEmployeeRow) => {
     let trade = emp.trade;
     if (emp.isCustomRate) trade = `${trade}/CR`;
@@ -1076,6 +1157,15 @@ export function AccountsPage() {
         if (!slot) return null;
         return createPortal(
           <div className="flex items-center gap-2">
+            {/* Trade Rates button — manage per-trade hourly rates */}
+            <Button
+              onClick={openTradeRates}
+              className="bg-violet-600 hover:bg-violet-700 text-white gap-2"
+              title="Manage trade-specific hourly rates"
+            >
+              <Wrench className="h-4 w-4" />
+              <span className="hidden sm:inline">Trade Rates</span>
+            </Button>
             {/* Advance button — opens the Advance management page */}
             <Button
               onClick={() => setCurrentView('advance')}
@@ -1807,6 +1897,87 @@ export function AccountsPage() {
           )}
         </div>
       )}
+
+      {/* ── Trade Rates Dialog ── */}
+      <Dialog open={tradeRatesOpen} onOpenChange={setTradeRatesOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Wrench className="h-5 w-5 text-violet-400" />
+              Trade Rates
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Set custom hourly rates per trade. Employees with a matching trade
+              will automatically use this rate instead of the standard 2.5/5.0 rates.
+              Priority: Custom Employee Rate &gt; Trade Rate &gt; Standard Rate.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Add new trade rate */}
+          <div className="flex gap-2 py-2">
+            <Input
+              placeholder="Trade name (e.g. Hilti)"
+              value={newTradeName}
+              onChange={(e) => setNewTradeName(e.target.value)}
+              className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 flex-1"
+            />
+            <Input
+              type="number"
+              step="0.5"
+              placeholder="Rate"
+              value={newTradeRate}
+              onChange={(e) => setNewTradeRate(e.target.value)}
+              className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 w-24"
+            />
+            <Button
+              onClick={handleAddTradeRate}
+              className="bg-violet-600 hover:bg-violet-700 text-white gap-1 shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* List of trade rates */}
+          <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-700/50 divide-y divide-slate-700/30">
+            {tradeRatesLoading ? (
+              <div className="py-8 text-center">
+                <Loader2 className="h-5 w-5 animate-spin mx-auto text-slate-500" />
+              </div>
+            ) : tradeRates.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-500">
+                No trade rates set. Add one above.
+              </div>
+            ) : (
+              tradeRates.map((tr) => (
+                <div key={tr.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-slate-700/30">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-3.5 w-3.5 text-violet-400" />
+                    <span className="text-sm font-medium text-white">{tr.trade}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-violet-500/15 text-violet-300 border-violet-500/30 text-xs font-mono">
+                      {tr.hourlyRate} AED/hr
+                    </Badge>
+                    <button
+                      onClick={() => handleDeleteTradeRate(tr.trade)}
+                      className="text-slate-500 hover:text-red-400 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setTradeRatesOpen(false)} className="text-slate-400 hover:text-white">
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

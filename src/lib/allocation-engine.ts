@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { buildTradeRateMap } from '@/lib/recalculation';
 
 // ---------------------------------------------------------------------------
 // Cross-Site Monthly Hour Allocation Engine (Shared Module)
@@ -86,6 +87,11 @@ export async function allocateEmployeeHours(
   year: number,
 ): Promise<AllocationResult> {
   // ------------------------------------------------------------------
+  // 0. Build trade rate map (for trade-based custom rates)
+  // ------------------------------------------------------------------
+  const tradeRateMap = await buildTradeRateMap();
+
+  // ------------------------------------------------------------------
   // 1. Fetch all non-deleted salary records for the given month+year
   // ------------------------------------------------------------------
   const salaryRecords = await db.salaryRecord.findMany({
@@ -138,15 +144,23 @@ export async function allocateEmployeeHours(
     const employeeCustomRate = employee.customHourlyRate;
 
     // Direct hourly rates (PRD v2.0 — no divisors):
-    // Standard: 2.5 (below threshold) / 5.0 (above threshold)
-    // TL/Supervisor: 3.0 (below threshold) / 5.5 (above threshold)
-    // Custom: employee.customHourlyRate overrides both
-    const lowRate = employeeCustomRate !== null && employeeCustomRate !== undefined
-      ? employeeCustomRate
-      : (hasBonus ? 3.0 : 2.5);
-    const highRate = employeeCustomRate !== null && employeeCustomRate !== undefined
-      ? employeeCustomRate
-      : (hasBonus ? 5.5 : 5.0);
+    // Priority: 1) employee.customHourlyRate (per-employee override)
+    //           2) Trade rate (from TradeRate table, e.g. "Hilti" = 6)
+    //           3) Role-based (TL/Sup: 3.0/5.5, Standard: 2.5/5.0)
+    const tradeRate = employee.trade ? tradeRateMap.get(employee.trade) : undefined;
+    const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
+    const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
+
+    const lowRate = hasCustomRate
+      ? employeeCustomRate!
+      : hasTradeRate
+        ? tradeRate!
+        : (hasBonus ? 3.0 : 2.5);
+    const highRate = hasCustomRate
+      ? employeeCustomRate!
+      : hasTradeRate
+        ? tradeRate!
+        : (hasBonus ? 5.5 : 5.0);
 
     // ------------------------------------------------------------------
     // 3a2. Check if employee has a custom rate override
@@ -157,12 +171,14 @@ export async function allocateEmployeeHours(
     const currentMonthWhRecord = await db.totalEmployeeWorkingHours.findUnique({
       where: { empId_month: { empId, month } },
     });
-    const isCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined
+    const isCustomRate = hasCustomRate || hasTradeRate
       ? true
       : (currentMonthWhRecord?.isCustom ?? false);
-    const customRate = employeeCustomRate !== null && employeeCustomRate !== undefined
-      ? employeeCustomRate
-      : (currentMonthWhRecord?.rtPerHour ?? lowRate);
+    const customRate = hasCustomRate
+      ? employeeCustomRate!
+      : hasTradeRate
+        ? tradeRate!
+        : (currentMonthWhRecord?.rtPerHour ?? lowRate);
 
     // ------------------------------------------------------------------
     // 3b. Compute previous months' cumulative hours

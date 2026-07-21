@@ -18,14 +18,29 @@ import { db } from '@/lib/db';
 // ---------------------------------------------------------------------------
 
 /**
- * Get the direct hourly rates for an employee based on their role or custom rate.
+ * Get the direct hourly rates for an employee.
+ *
+ * Priority:
+ *   1. employee.customHourlyRate (per-employee override) — highest priority
+ *   2. TradeRate (per-trade rate from the TradeRate table) — if the
+ *      employee's trade has a custom rate, use it for both below and above
+ *   3. Role-based rates (TL/Supervisor: 3.0/5.5, Standard: 2.5/5.0)
+ *
+ * The tradeRateMap is an optional Map<string, number> mapping trade names
+ * to hourly rates. The caller should build this from the TradeRate table
+ * and pass it in. If not provided, trade rates are skipped.
  */
-export function getEmployeeRates(employee: {
-  customHourlyRate: number | null;
-  role: string;
-  isTeamLeader: boolean;
-  isSupervisor: boolean;
-}): { lowRate: number; highRate: number; isCustom: boolean } {
+export function getEmployeeRates(
+  employee: {
+    customHourlyRate: number | null;
+    role: string;
+    isTeamLeader: boolean;
+    isSupervisor: boolean;
+    trade?: string | null;
+  },
+  tradeRateMap?: Map<string, number> | null,
+): { lowRate: number; highRate: number; isCustom: boolean } {
+  // 1. Per-employee custom rate (highest priority)
   if (employee.customHourlyRate !== null && employee.customHourlyRate !== undefined) {
     return {
       lowRate: employee.customHourlyRate,
@@ -34,12 +49,43 @@ export function getEmployeeRates(employee: {
     };
   }
 
+  // 2. Trade-based rate (if a TradeRate exists for this employee's trade)
+  if (tradeRateMap && employee.trade) {
+    const tradeRate = tradeRateMap.get(employee.trade);
+    if (tradeRate !== undefined && tradeRate > 0) {
+      return {
+        lowRate: tradeRate,
+        highRate: tradeRate,
+        isCustom: true,
+      };
+    }
+  }
+
+  // 3. Role-based rates
   const isLeader = employee.isTeamLeader || employee.isSupervisor || employee.role === 'Team Leader' || employee.role === 'Supervisor';
   return {
     lowRate: isLeader ? 3.0 : 2.5,
     highRate: isLeader ? 5.5 : 5.0,
     isCustom: false,
   };
+}
+
+/**
+ * Build a trade rate map from the TradeRate table for use with
+ * getEmployeeRates. Returns a Map<tradeName, hourlyRate>.
+ */
+export async function buildTradeRateMap(): Promise<Map<string, number>> {
+  try {
+    const tradeRates = await db.tradeRate.findMany();
+    const map = new Map<string, number>();
+    for (const tr of tradeRates) {
+      map.set(tr.trade, tr.hourlyRate);
+    }
+    return map;
+  } catch {
+    // Table might not exist yet (before migration) — return empty map
+    return new Map();
+  }
 }
 
 /**
@@ -99,7 +145,8 @@ export async function recalcEmployeeFromMonth(
     throw new Error(`Employee not found: ${employeeId}`);
   }
 
-  const { lowRate, highRate, isCustom } = getEmployeeRates(employee);
+  const tradeRateMap = await buildTradeRateMap();
+  const { lowRate, highRate, isCustom } = getEmployeeRates(employee, tradeRateMap);
   const threshold = employee.hoursThreshold || 1000;
 
   // Fetch all non-deleted work logs for this employee, sorted chronologically

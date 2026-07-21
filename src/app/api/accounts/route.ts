@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { buildTradeRateMap } from '@/lib/recalculation';
 
 // GET /api/accounts
 // Mode 1: Per-site query (siteId + month required) → returns salary records for that site
@@ -10,6 +11,9 @@ export async function GET(request: NextRequest) {
     const siteId = searchParams.get('siteId');
     const month = searchParams.get('month'); // YYYY-MM
     const year = searchParams.get('year');
+
+    // Build trade rate map for trade-based custom rates
+    const tradeRateMap = await buildTradeRateMap();
 
     if (!month) {
       return NextResponse.json(
@@ -497,23 +501,34 @@ export async function GET(request: NextRequest) {
         const aggregateTotal = aggregateHoursMap.get(eId) || 0;
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
+        // Check trade rate (priority: custom rate > trade rate > role-based)
+        const tradeRate = emp?.trade ? tradeRateMap.get(emp.trade) : undefined;
+
         // Get working hours info
         const empWhRecords = whByEmp.get(eId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
         const isCustom = employeeCustomRate != null
           ? true
-          : (currentMonthWh?.isCustom ?? empWhRecords.some((wh) => wh.isCustom));
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? true
+            : (currentMonthWh?.isCustom ?? empWhRecords.some((wh) => wh.isCustom));
         const customRtPerHour = employeeCustomRate != null
           ? employeeCustomRate
-          : (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : 2.5));
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? tradeRate
+            : (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : 2.5));
 
         // Calculate rtPerHour based on aggregate total (direct rates — no divisors)
         const lowRate = employeeCustomRate !== null
           ? employeeCustomRate
-          : (hasBonus ? 3.0 : 2.5);
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? tradeRate
+            : (hasBonus ? 3.0 : 2.5);
         const highRate = employeeCustomRate !== null
           ? employeeCustomRate
-          : (hasBonus ? 5.5 : 5.0);
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? tradeRate
+            : (hasBonus ? 5.5 : 5.0);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold
@@ -569,21 +584,32 @@ export async function GET(request: NextRequest) {
         const aggregateTotal = aggregateHoursMap.get(stub.empId) || 0;
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
+        // Check trade rate
+        const tradeRate = emp?.trade ? tradeRateMap.get(emp.trade) : undefined;
+
         const empWhRecords = whByEmp.get(stub.empId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
         const isCustom = employeeCustomRate != null
           ? true
-          : (currentMonthWh?.isCustom ?? false);
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? true
+            : (currentMonthWh?.isCustom ?? false);
         const customRtPerHour = employeeCustomRate != null
           ? employeeCustomRate
-          : (currentMonthWh?.rtPerHour ?? 2.5);
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? tradeRate
+            : (currentMonthWh?.rtPerHour ?? 2.5);
 
         const lowRate = employeeCustomRate !== null
           ? employeeCustomRate
-          : (hasBonus ? 3.0 : 2.5);
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? tradeRate
+            : (hasBonus ? 3.0 : 2.5);
         const highRate = employeeCustomRate !== null
           ? employeeCustomRate
-          : (hasBonus ? 5.5 : 5.0);
+          : (tradeRate !== undefined && tradeRate > 0)
+            ? tradeRate
+            : (hasBonus ? 5.5 : 5.0);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold ? highRate : lowRate;

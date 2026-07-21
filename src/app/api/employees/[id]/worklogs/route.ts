@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { recalcEmployeeFromMonth, recalcEmployeeFull, getEmployeeRates, computeSalaryBreakdown } from '@/lib/recalculation';
+import { recalcEmployeeFromMonth, recalcEmployeeFull, getEmployeeRates, computeSalaryBreakdown, buildTradeRateMap } from '@/lib/recalculation';
 
 // GET /api/employees/[id]/worklogs
 // Get all WorkLog entries for an employee, with SalaryRecord fallback for months without WorkLog entries
@@ -53,7 +53,8 @@ export async function GET(
       );
     }
 
-    const { lowRate, highRate, isCustom } = getEmployeeRates(employee);
+    const tradeRateMap = await buildTradeRateMap();
+    const { lowRate, highRate, isCustom } = getEmployeeRates(employee, tradeRateMap);
     const threshold = employee.hoursThreshold || 1000;
 
     // 3. Fetch ALL work logs (no year filter) for cumulative calculation

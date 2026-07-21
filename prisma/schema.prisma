@@ -713,3 +713,23 @@ model ActivityLog {
   @@index([createdAt])
   @@index([entityType, entityId])
 }
+
+// ---------------------------------------------------------------------------
+// TradeRate — custom hourly rate per trade
+// ---------------------------------------------------------------------------
+// Allows setting a single hourly rate for all employees with a given trade.
+// For example, trade "Hilti" → rate 6.0 AED/hr. Every employee whose trade
+// is "Hilti" gets this rate, overriding the standard 2.5/5.0 tier rates.
+//
+// Priority: employee.customHourlyRate > TradeRate > role-based rates
+// ---------------------------------------------------------------------------
+
+model TradeRate {
+  id        String   @id @default(cuid())
+  trade     String   @unique // e.g. "Hilti", "Mason", "Electrician"
+  hourlyRate Float   // e.g. 6.0 — same rate for below and above threshold
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([trade])
+}
