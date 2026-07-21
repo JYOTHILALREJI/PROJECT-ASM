@@ -72,7 +72,7 @@ const navItems: NavItem[] = [
 ];
 
 // Menus always visible to all users (including admin)
-const ALWAYS_VISIBLE_SLUGS = ['dashboard', 'uniform_registry'];
+const ALWAYS_VISIBLE_SLUGS = ['dashboard'];
 
 interface SidebarContentProps {
   collapsed?: boolean;

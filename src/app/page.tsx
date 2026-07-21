@@ -60,7 +60,7 @@ function LoadingScreen() {
 }
 
 // Menus always visible to all authenticated users (including admin)
-const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'uniform_registry', 'profile'];
+const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
 const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];

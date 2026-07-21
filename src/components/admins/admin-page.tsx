@@ -172,7 +172,7 @@ const SIDEBAR_MENUS = [
   { slug: 'accounts', label: 'Accounts', icon: DollarSign, group: 'finance', alwaysVisible: false },
   { slug: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, group: 'finance', alwaysVisible: false },
   { slug: 'employee_hours', label: 'Employee Hours', icon: Clock, group: 'finance', alwaysVisible: false },
-  { slug: 'uniform_registry', label: 'Materials Registry', icon: Shirt, group: 'workforce', alwaysVisible: true },
+  { slug: 'uniform_registry', label: 'Materials Registry', icon: Shirt, group: 'workforce', alwaysVisible: false },
   { slug: 'leave_requests', label: 'Leave Requests', icon: FileText, group: 'workforce', alwaysVisible: false },
   { slug: 'cancellation_requests', label: 'Cancellations', icon: Ban, group: 'workforce', alwaysVisible: false },
   { slug: 'notifications', label: 'Notifications', icon: Bell, group: 'general', alwaysVisible: false },
@@ -1343,7 +1343,7 @@ export function AdminPage() {
                   <div>
                     <p className="font-medium">Menu Access Control</p>
                     <p className="text-blue-400/80 text-xs mt-1">
-                      This admin will see only Dashboard and Uniform Registry by default. After creation, expand the admin card to grant additional sidebar menus.
+                      This admin will see Dashboard and Materials Registry by default. After creation, expand the admin card to grant or revoke additional sidebar menus.
                     </p>
                   </div>
                 </div>

@@ -19,7 +19,7 @@ const PERMISSION_SEEDS = [
 ];
 
 // Menus always visible to all users (including admin)
-const ALWAYS_VISIBLE_SLUGS = ['dashboard', 'uniform_registry'];
+const ALWAYS_VISIBLE_SLUGS = ['dashboard'];
 
 const VALID_SLUGS = PERMISSION_SEEDS.map(s => s.slug);
 
@@ -34,6 +34,38 @@ async function ensurePermissionsSeeded() {
       update: { name: seed.name, group: seed.group },
       create: { name: seed.name, slug: seed.slug, group: seed.group },
     });
+  }
+
+  // ── Migrate: auto-grant 'uniform_registry' to existing admins who
+  //    don't have it yet ──
+  // Previously uniform_registry was always-visible (not in the DB as a
+  // grantable permission). Now it's revokable, so we need to grant it
+  // to all existing admin users so they don't lose access unexpectedly.
+  try {
+    const uniformPerm = await db.permission.findUnique({ where: { slug: 'uniform_registry' } });
+    if (uniformPerm) {
+      const allAdmins = await db.user.findMany({
+        where: { role: 'admin', deletedAt: null },
+        select: { id: true },
+      });
+      for (const admin of allAdmins) {
+        await db.adminPermission.upsert({
+          where: {
+            adminId_permissionId: {
+              adminId: admin.id,
+              permissionId: uniformPerm.id,
+            },
+          },
+          update: {},
+          create: {
+            adminId: admin.id,
+            permissionId: uniformPerm.id,
+          },
+        });
+      }
+    }
+  } catch {
+    // Migration failure should not block the API
   }
 
   // Clean up stale permissions that are no longer in the sidebar

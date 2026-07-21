@@ -125,6 +125,35 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Auto-grant default permissions for new admin accounts:
+    // - dashboard (always visible, but grant explicitly for consistency)
+    // - uniform_registry (on by default for normal admins, but revokable)
+    if (userRole === 'admin') {
+      try {
+        // Ensure permissions exist
+        const dashboardPerm = await db.permission.upsert({
+          where: { slug: 'dashboard' },
+          update: {},
+          create: { name: 'Dashboard', slug: 'dashboard', group: 'general' },
+        });
+        const uniformPerm = await db.permission.upsert({
+          where: { slug: 'uniform_registry' },
+          update: {},
+          create: { name: 'Materials Registry', slug: 'uniform_registry', group: 'workforce' },
+        });
+        // Grant both to the new admin
+        await db.adminPermission.createMany({
+          data: [
+            { adminId: user.id, permissionId: dashboardPerm.id },
+            { adminId: user.id, permissionId: uniformPerm.id },
+          ],
+          skipDuplicates: true,
+        });
+      } catch {
+        // Permission grant failure should not block admin creation
+      }
+    }
+
     return NextResponse.json(
       {
         success: true,
