@@ -31,14 +31,50 @@ export async function GET(request: NextRequest) {
         empId: true,
         totalHours: true,
         month: true,
+        siteId: true,
       },
     });
 
-    // Build a map of empId → cumulative hours
+    // Batch fetch all WorkLog entries (hours entered directly in the Hours
+    // Ledger). These must be included in the cumulative total so the
+    // directory progress bar updates when hours are added via the ledger.
+    const allWorkLogs = await db.workLog.findMany({
+      where: { deletedAt: null },
+      select: {
+        employeeId: true,
+        siteId: true,
+        year: true,
+        month: true,
+        hoursWorked: true,
+      },
+    });
+
+    // Build a map of empId → cumulative hours from BOTH sources:
+    //   1. WorkLog entries (directly entered hours)
+    //   2. SalaryRecord entries for (empId, siteId, month) combos NOT
+    //      already covered by a WorkLog (to avoid double-counting)
+    //
+    // This mirrors the logic in /api/employees/[id]/worklogs GET.
     const cumulativeHoursMap = new Map<string, number>();
+
+    // First, add all WorkLog hours
+    const workLogSiteMonthSet = new Set<string>(); // empId|siteId|year-month
+    for (const wl of allWorkLogs) {
+      const current = cumulativeHoursMap.get(wl.employeeId) || 0;
+      cumulativeHoursMap.set(wl.employeeId, current + wl.hoursWorked);
+      const key = `${wl.employeeId}|${wl.siteId}|${wl.year}-${String(wl.month).padStart(2, '0')}`;
+      workLogSiteMonthSet.add(key);
+    }
+
+    // Then, add SalaryRecord hours ONLY for combos not covered by WorkLog
     for (const sr of allSalaryRecords) {
-      const current = cumulativeHoursMap.get(sr.empId) || 0;
-      cumulativeHoursMap.set(sr.empId, current + sr.totalHours);
+      const srMonthNum = parseInt(sr.month.split('-')[1], 10);
+      const srYearNum = parseInt(sr.month.split('-')[0], 10);
+      const key = `${sr.empId}|${sr.siteId}|${srYearNum}-${String(srMonthNum).padStart(2, '0')}`;
+      if (!workLogSiteMonthSet.has(key)) {
+        const current = cumulativeHoursMap.get(sr.empId) || 0;
+        cumulativeHoursMap.set(sr.empId, current + sr.totalHours);
+      }
     }
 
     // Batch fetch latest EmpCountSitePerMonth for each employee to resolve currentSite
