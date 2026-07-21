@@ -165,11 +165,13 @@ const emptyForm: AdminFormData = {
 // are listed as sub-items so the admin understands what's included.
 const SIDEBAR_MENUS = [
   { slug: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'general', alwaysVisible: true },
-  { slug: 'employees', label: 'Employees + Hours Ledger', icon: Users, group: 'workforce', alwaysVisible: false },
+  { slug: 'employees', label: 'Employees', icon: Users, group: 'workforce', alwaysVisible: false },
   { slug: 'sites', label: 'Sites', icon: Building2, group: 'workforce', alwaysVisible: false },
-  { slug: 'attendance', label: 'Attendance + Copy', icon: Calendar, group: 'workforce', alwaysVisible: false },
+  { slug: 'attendance', label: 'Attendance', icon: Calendar, group: 'workforce', alwaysVisible: false },
+  { slug: 'attendance_copy', label: 'Attendance Copy', icon: Link2, group: 'workforce', alwaysVisible: false },
   { slug: 'accounts', label: 'Accounts', icon: DollarSign, group: 'finance', alwaysVisible: false },
   { slug: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, group: 'finance', alwaysVisible: false },
+  { slug: 'employee_hours', label: 'Employee Hours', icon: Clock, group: 'finance', alwaysVisible: false },
   { slug: 'uniform_registry', label: 'Materials Registry', icon: Shirt, group: 'workforce', alwaysVisible: true },
   { slug: 'leave_requests', label: 'Leave Requests', icon: FileText, group: 'workforce', alwaysVisible: false },
   { slug: 'cancellation_requests', label: 'Cancellations', icon: Ban, group: 'workforce', alwaysVisible: false },
