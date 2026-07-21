@@ -26,6 +26,7 @@ import {
   PowerOff,
   MoreHorizontal,
   CheckCircle2,
+  Check,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -142,6 +143,7 @@ interface AllEmployee {
   currentSite: string | null;
   status: string;
   trade: string | null;
+  photo?: string | null;
 }
 
 type SubView = 'list' | 'employees';
@@ -479,91 +481,155 @@ function SiteCardsGrid({
   );
 }
 
-/* ───────── Add Employee Combobox ───────── */
+/* ───────── Add Employee Dialog (multi-select with photos) ───────── */
 function AddEmployeeCombobox({
   allEmployees,
   currentSiteName,
   currentSiteEmployeeIds,
-  onAdd,
+  onAddMultiple,
   loading,
 }: {
   allEmployees: AllEmployee[];
   currentSiteName: string;
   currentSiteEmployeeIds: Set<string>;
-  onAdd: (employee: AllEmployee) => void;
+  onAddMultiple: (employees: AllEmployee[]) => void;
   loading: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
-    if (!filter) return allEmployees;
+    const available = allEmployees.filter((e) => !currentSiteEmployeeIds.has(e.id));
+    if (!filter) return available;
     const q = filter.toLowerCase();
-    return allEmployees.filter(
+    return available.filter(
       (e) =>
         e.fullName.toLowerCase().includes(q) ||
         e.employeeId.toLowerCase().includes(q) ||
         (e.position && e.position.toLowerCase().includes(q)) ||
         (e.trade && e.trade.toLowerCase().includes(q))
     );
-  }, [allEmployees, filter]);
+  }, [allEmployees, currentSiteEmployeeIds, filter]);
+
+  const toggleSelection = (empId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(empId)) {
+        next.delete(empId);
+      } else {
+        next.add(empId);
+      }
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    const selected = filtered.filter((e) => selectedIds.has(e.id));
+    if (selected.length > 0) {
+      onAddMultiple(selected);
+    }
+    setOpen(false);
+    setSelectedIds(new Set());
+    setFilter('');
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+    setSelectedIds(new Set());
+    setFilter('');
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          disabled={loading}
-          className="bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 gap-2 transition-all"
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <UserPlus className="h-4 w-4" />
-          )}
-          Add Employee
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-0 bg-slate-800 border-slate-600" align="start">
-        <Command className="bg-slate-800">
-          <CommandInput
-            placeholder="Search employees..."
-            value={filter}
-            onValueChange={setFilter}
-            className="text-white"
-          />
-          <CommandList className="max-h-64">
-            <CommandEmpty className="text-slate-400">No employees found.</CommandEmpty>
-            <CommandGroup>
-              {filtered.map((emp) => {
-                const isAlreadyInSite = currentSiteEmployeeIds.has(emp.id);
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}>
+      <Button
+        variant="outline"
+        disabled={loading}
+        onClick={() => setOpen(true)}
+        className="bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 gap-2 transition-all"
+      >
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <UserPlus className="h-4 w-4" />
+        )}
+        Add Employee
+      </Button>
+      <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-white">
+            <UserPlus className="h-5 w-5 text-emerald-400" />
+            Add Employees to {currentSiteName}
+          </DialogTitle>
+          <DialogDescription className="text-slate-400">
+            Select one or more employees to assign to this site.
+            {selectedIds.size > 0 && (
+              <span className="text-emerald-400 ml-1 font-medium">{selectedIds.size} selected</span>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          {/* Search box */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+            <Input
+              placeholder="Search by name, ID, or trade..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="pl-10 bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
+              autoFocus
+            />
+          </div>
+
+          {/* Employee list — multi-select with photos */}
+          <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-700/50 divide-y divide-slate-700/30">
+            {filtered.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-500">
+                No employees available. All active employees may already be at this site.
+              </div>
+            ) : (
+              filtered.map((emp) => {
+                const isSelected = selectedIds.has(emp.id);
                 const isFromAnotherSite = emp.currentSite && emp.currentSite !== currentSiteName;
                 const isIdle = !emp.currentSite;
-
                 return (
-                  <CommandItem
+                  <button
                     key={emp.id}
-                    value={`${emp.fullName} ${emp.employeeId}`}
-                    onSelect={() => {
-                      if (!isAlreadyInSite) {
-                        onAdd(emp);
-                        setOpen(false);
-                        setFilter('');
-                      }
-                    }}
+                    onClick={() => toggleSelection(emp.id)}
+                    disabled={loading}
                     className={cn(
-                      'text-slate-200 data-[selected=true]:bg-slate-700 data-[selected=true]:text-white py-2.5',
-                      isAlreadyInSite && 'opacity-50 cursor-not-allowed'
+                      'w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+                      isSelected ? 'bg-emerald-500/15 hover:bg-emerald-500/20' : 'hover:bg-slate-700/40',
                     )}
                   >
-                    <div className="flex flex-col flex-1 min-w-0">
+                    {/* Checkbox */}
+                    <div className={cn(
+                      'h-5 w-5 rounded border-2 shrink-0 flex items-center justify-center transition-colors',
+                      isSelected
+                        ? 'bg-emerald-500 border-emerald-500'
+                        : 'border-slate-600 bg-transparent',
+                    )}>
+                      {isSelected && <Check className="h-3 w-3 text-white" />}
+                    </div>
+
+                    {/* Photo or initials */}
+                    {emp.photo ? (
+                      <img
+                        src={emp.photo}
+                        alt={emp.fullName}
+                        className="h-8 w-8 rounded-full object-cover shrink-0 border border-slate-600"
+                      />
+                    ) : (
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-slate-300 text-xs font-semibold shrink-0">
+                        {(emp.fullName || '?').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+
+                    {/* Name + ID */}
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm truncate">{emp.fullName}</span>
-                        {isAlreadyInSite && (
-                          <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0 shrink-0">
-                            Current
-                          </Badge>
-                        )}
+                        <span className="text-sm font-medium text-white truncate">{emp.fullName}</span>
                         {isFromAnotherSite && (
                           <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0 shrink-0 flex items-center gap-0.5">
                             <MapPin className="h-2.5 w-2.5" />
@@ -581,14 +647,28 @@ function AddEmployeeCombobox({
                         {emp.trade ? ` · ${emp.trade}` : emp.position ? ` · ${emp.position}` : ''}
                       </span>
                     </div>
-                  </CommandItem>
+                  </button>
                 );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+              })
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="ghost" onClick={handleClose} className="text-slate-400 hover:text-white">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirm}
+            disabled={loading || selectedIds.size === 0}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+            {loading ? 'Adding...' : `Add ${selectedIds.size > 0 ? `(${selectedIds.size})` : ''}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -907,6 +987,7 @@ export function SitesPage() {
             currentSite: e.currentSite,
             status: e.status,
             trade: e.trade,
+            photo: e.photo || null,
           }))
         );
       }
@@ -1109,33 +1190,43 @@ export function SitesPage() {
     }
   }, [selectedEmps, viewSite, siteEmployees, fetchSiteEmployees, fetchAllEmployees, fetchSites]);
 
-  /* ── Add employee to site ── */
-  const handleAddEmployee = useCallback(async (employee: AllEmployee) => {
-    if (!viewSite) return;
+  /* ── Add multiple employees to site ── */
+  const handleAddMultipleEmployees = useCallback(async (employees: AllEmployee[]) => {
+    if (!viewSite || employees.length === 0) return;
+    setAddingEmployee(true);
+    let successCount = 0;
+    let failCount = 0;
     try {
-      setAddingEmployee(true);
-      const res = await fetch(`/api/employees/${employee.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentSite: viewSite.name }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        const transferred = employee.currentSite && employee.currentSite !== viewSite.name;
+      for (const emp of employees) {
+        try {
+          const res = await fetch(`/api/employees/${emp.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentSite: viewSite.name }),
+          });
+          const json = await res.json();
+          if (json.success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch {
+          failCount++;
+        }
+      }
+      if (successCount > 0) {
         toast({
-          title: 'Employee Added',
-          description: transferred
-            ? `${employee.fullName} has been transferred from "${employee.currentSite}" to "${viewSite.name}"`
-            : `${employee.fullName} has been added to "${viewSite.name}"`,
+          title: 'Employees Added',
+          description: `${successCount} employee${successCount !== 1 ? 's' : ''} assigned to "${viewSite.name}".${failCount > 0 ? ` ${failCount} failed.` : ''}`,
         });
         fetchSiteEmployees(viewSite.name);
         fetchAllEmployees();
         fetchSites();
       } else {
-        toast({ title: 'Error', description: json.error || 'Failed to add employee', variant: 'destructive' });
+        toast({ title: 'Error', description: 'Failed to add employees', variant: 'destructive' });
       }
     } catch {
-      toast({ title: 'Error', description: 'Failed to add employee', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to add employees', variant: 'destructive' });
     } finally {
       setAddingEmployee(false);
     }
@@ -1572,7 +1663,7 @@ export function SitesPage() {
                 allEmployees={allEmployees}
                 currentSiteName={viewSite.name}
                 currentSiteEmployeeIds={currentSiteEmployeeIds}
-                onAdd={handleAddEmployee}
+                onAddMultiple={handleAddMultipleEmployees}
                 loading={addingEmployee || loadingAllEmployees}
               />
               {selectedEmps.size > 0 && (
