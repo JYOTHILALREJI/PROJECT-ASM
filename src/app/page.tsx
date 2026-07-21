@@ -115,11 +115,12 @@ function MainLayout() {
     return () => clearInterval(interval);
   }, [user]);
 
-  // Map sub-views to their parent permission slug
+  // Map sub-views to their permission slug.
+  // Most views use their own slug directly (e.g. 'accounts' → 'accounts').
+  // These mappings are for views whose ID differs from their permission slug.
   const VIEW_PERMISSION_MAP: Record<string, string> = {
-    employee_hours_ledger: 'employees', // Uses employees permission
+    employee_hours_ledger: 'employee_hours', // View ID ≠ permission slug
     advance: 'accounts', // Advance is a sub-feature of Accounts
-    attendance_copy: 'attendance', // Attendance Copy is a sub-feature of Attendance
     all_logs: 'admins', // All Logs is a sub-feature of Admin Management
   };
 
