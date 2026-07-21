@@ -516,8 +516,10 @@ export function AdminPage() {
   }
 
   // Toggle a single permission for an admin (inline)
+  // Uses optimistic update — the UI flips instantly without re-fetching.
+  // No fetchAdmins() call → prevents the page from jumping to top.
   async function togglePermission(adminId: string, permissionSlug: string, granted: boolean) {
-    // Optimistic update
+    // Optimistic update — UI flips instantly
     setAdminPermissionsMap(prev => ({
       ...prev,
       [adminId]: { ...prev[adminId], [permissionSlug]: granted },
@@ -530,7 +532,7 @@ export function AdminPage() {
       });
       const json = await res.json();
       if (!json.success) {
-        // Revert
+        // Revert optimistic update
         setAdminPermissionsMap(prev => ({
           ...prev,
           [adminId]: { ...prev[adminId], [permissionSlug]: !granted },
@@ -538,8 +540,10 @@ export function AdminPage() {
         swalError('Error', json.error || 'Failed to update permission');
         return;
       }
-      // Update the access map display
-      fetchAdmins();
+      // DO NOT call fetchAdmins() here — it causes the page to jump to top.
+      // The optimistic update above already reflects the change in the UI.
+      // The sidebar will pick up the change within 15 seconds via its own
+      // permission refresh interval.
       // SweetAlert2 toast for permission change
       const menuLabel = SIDEBAR_MENUS.find(m => m.slug === permissionSlug)?.label || permissionSlug;
       if (granted) {
@@ -558,6 +562,7 @@ export function AdminPage() {
         });
       }
     } catch {
+      // Revert optimistic update on network error
       setAdminPermissionsMap(prev => ({
         ...prev,
         [adminId]: { ...prev[adminId], [permissionSlug]: !granted },
@@ -589,7 +594,7 @@ export function AdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminId, permissionSlugs: slugs }),
       });
-      fetchAdmins();
+      // No fetchAdmins() — prevents page jump. Optimistic update already done above.
       if (grant) {
         swalSuccess('All Access Granted', 'All sidebar menus are now visible to this admin.');
       } else {
@@ -635,7 +640,7 @@ export function AdminPage() {
           })
         )
       );
-      fetchAdmins();
+      // No fetchAdmins() — prevents page jump. Optimistic update already done above.
       const gc = GROUP_CONFIG[group] || GROUP_CONFIG.general;
       if (grant) {
         swalSuccess(`${gc.label} Access Granted`, `All ${gc.label.toLowerCase()} menus are now visible.`);
