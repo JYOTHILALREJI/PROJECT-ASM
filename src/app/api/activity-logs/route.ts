@@ -36,6 +36,11 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: [{ createdAt: 'desc' }],
       take: limit,
+      include: {
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+      },
     });
 
     if (groupByUser) {
@@ -43,6 +48,7 @@ export async function GET(request: NextRequest) {
       const groupedMap = new Map<string, {
         userId: string | null;
         displayName: string;
+        userEmail: string | null;
         actorType: string;
         logCount: number;
         lastActivityAt: string;
@@ -65,6 +71,7 @@ export async function GET(request: NextRequest) {
           groupedMap.set(key, {
             userId: log.userId,
             displayName: log.displayName,
+            userEmail: log.user?.email || null,
             actorType: log.actorType,
             logCount: 0,
             lastActivityAt: log.createdAt.toISOString(),
@@ -109,6 +116,7 @@ export async function GET(request: NextRequest) {
           id: l.id,
           userId: l.userId,
           displayName: l.displayName,
+          userEmail: l.user?.email || null,
           actorType: l.actorType,
           action: l.action,
           entityType: l.entityType,

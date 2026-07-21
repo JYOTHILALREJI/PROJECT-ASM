@@ -58,6 +58,7 @@ interface LogEntry {
 interface UserLogGroup {
   userId: string | null;
   displayName: string;
+  userEmail: string | null;
   actorType: string;
   logCount: number;
   lastActivityAt: string;
@@ -182,6 +183,7 @@ export function AllLogsPage() {
             l.description.toLowerCase().includes(q) ||
             (l.entityName || '').toLowerCase().includes(q) ||
             g.displayName.toLowerCase().includes(q) ||
+            (g.userEmail || '').toLowerCase().includes(q) ||
             l.action.toLowerCase().includes(q) ||
             l.entityType.toLowerCase().includes(q)
         ),
@@ -253,11 +255,12 @@ export function AllLogsPage() {
 
   const handleExportCsv = useCallback(() => {
     // Export the filtered logs as CSV
-    const rows: string[] = ['User,Action,Entity Type,Entity Name,Description,IP Address,Timestamp'];
+    const rows: string[] = ['User,Email,Action,Entity Type,Entity Name,Description,IP Address,Timestamp'];
     for (const g of filteredGroups) {
       for (const l of g.logs) {
         const cells = [
           `"${g.displayName.replace(/"/g, '""')}"`,
+          `"${(g.userEmail || '').replace(/"/g, '""')}"`,
           l.action,
           l.entityType,
           `"${(l.entityName || '').replace(/"/g, '""')}"`,
@@ -492,11 +495,20 @@ export function AllLogsPage() {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {group.logCount} action{group.logCount !== 1 ? 's' : ''}
-                        <span className="mx-1.5">·</span>
-                        Last: {formatTimestamp(group.lastActivityAt)}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {group.userEmail && !isSystem && (
+                          <span className="text-[11px] text-slate-500 truncate">
+                            {group.userEmail}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-slate-500">
+                          {group.logCount} action{group.logCount !== 1 ? 's' : ''}
+                        </span>
+                        <span className="text-[11px] text-slate-500">·</span>
+                        <span className="text-[11px] text-slate-500">
+                          Last: {formatTimestamp(group.lastActivityAt)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
