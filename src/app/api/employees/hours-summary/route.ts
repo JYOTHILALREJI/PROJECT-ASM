@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
         customHourlyRate: true,
         hoursThreshold: true,
         currentSite: true,
+        currentTotalWorkingHours: true,
       },
       orderBy: { fullName: 'asc' },
     });
@@ -71,7 +72,13 @@ export async function GET(request: NextRequest) {
 
     // Build result
     const data = employees.map((emp) => {
-      const cumulativeHours = cumulativeHoursMap.get(emp.id) || 0;
+      // Use the employee's currentTotalWorkingHours as a FLOOR — if the admin
+      // manually set it to a value higher than the computed cumulative (from
+      // salary records), use the manual value so the progress bar and
+      // threshold status reflect it.
+      const computedHours = cumulativeHoursMap.get(emp.id) || 0;
+      const manualHours = emp.currentTotalWorkingHours || 0;
+      const cumulativeHours = Math.max(computedHours, manualHours);
       const hasBonus = emp.isTeamLeader || emp.isSupervisor;
       const threshold = emp.hoursThreshold || 1000;
 
