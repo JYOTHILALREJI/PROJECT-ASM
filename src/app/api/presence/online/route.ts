@@ -5,15 +5,18 @@ import { db } from '@/lib/db';
 // GET /api/presence/online
 // ---------------------------------------------------------------------------
 // Returns the list of user IDs that are currently online (lastSeenAt within
-// the last 90 seconds). Used by the Admin Management page to show a green
+// the last 35 seconds). Used by the Admin Management page to show a green
 // dot next to online admins.
 //
-// The 90s window gives some slack — the client heartbeats every 30s, so a
-// healthy user's lastSeenAt is always <60s old. 90s allows for one missed
-// heartbeat.
+// The 35s window gives a small buffer — the client heartbeats every 30s,
+// so a healthy user's lastSeenAt is always <35s old. If the user closes
+// their tab, the heartbeat sends a 'goingOffline' signal that sets
+// lastSeenAt to 1 hour ago, so they appear offline immediately.
+// Even without the goingOffline signal, the 35s threshold ensures they
+// appear offline within 35 seconds of closing the tab.
 // ---------------------------------------------------------------------------
 
-const ONLINE_THRESHOLD_MS = 90 * 1000;
+const ONLINE_THRESHOLD_MS = 35 * 1000;
 
 export async function GET(_request: NextRequest) {
   try {
