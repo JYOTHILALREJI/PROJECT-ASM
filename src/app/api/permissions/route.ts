@@ -36,41 +36,64 @@ async function ensurePermissionsSeeded() {
     });
   }
 
-  // ── Migrate: auto-grant 'uniform_registry' to existing admins who
-  //    don't have it yet ──
+  // ── One-time migration: auto-grant 'uniform_registry' to existing
+  //    admins who don't have it yet ──
   // Previously uniform_registry was always-visible (not in the DB as a
   // grantable permission). Now it's revokable, so we need to grant it
-  // to all existing admin users so they don't lose access unexpectedly.
+  // to all existing admin users ONCE so they don't lose access
+  // unexpectedly. After this one-time migration, the admin can revoke
+  // it normally.
+  //
+  // We use a separate Permission row with slug '__migration_uniform_v1__'
+  // as a flag to track whether the migration has already run. This avoids
+  // re-granting on every request (which would override revocations).
   try {
-    const uniformPerm = await db.permission.findUnique({ where: { slug: 'uniform_registry' } });
-    if (uniformPerm) {
-      const allAdmins = await db.user.findMany({
-        where: { role: 'admin', deletedAt: null },
-        select: { id: true },
-      });
-      for (const admin of allAdmins) {
-        await db.adminPermission.upsert({
-          where: {
-            adminId_permissionId: {
+    const migrationFlag = await db.permission.findUnique({
+      where: { slug: '__migration_uniform_v1__' },
+    });
+    if (!migrationFlag) {
+      // Migration hasn't run yet — grant uniform_registry to all admins
+      const uniformPerm = await db.permission.findUnique({ where: { slug: 'uniform_registry' } });
+      if (uniformPerm) {
+        const allAdmins = await db.user.findMany({
+          where: { role: 'admin', deletedAt: null },
+          select: { id: true },
+        });
+        for (const admin of allAdmins) {
+          await db.adminPermission.upsert({
+            where: {
+              adminId_permissionId: {
+                adminId: admin.id,
+                permissionId: uniformPerm.id,
+              },
+            },
+            update: {},
+            create: {
               adminId: admin.id,
               permissionId: uniformPerm.id,
             },
-          },
-          update: {},
-          create: {
-            adminId: admin.id,
-            permissionId: uniformPerm.id,
-          },
-        });
+          });
+        }
       }
+      // Create the migration flag so it never runs again
+      await db.permission.create({
+        data: {
+          name: 'Migration: uniform_registry v1',
+          slug: '__migration_uniform_v1__',
+          group: 'general',
+        },
+      });
     }
   } catch {
     // Migration failure should not block the API
   }
 
-  // Clean up stale permissions that are no longer in the sidebar
+  // Clean up stale permissions that are no longer in the sidebar.
+  // Skip migration flags (slug starts with '__migration_') — they're
+  // internal markers, not real permissions, and must NOT be deleted.
   const allPerms = await db.permission.findMany({ select: { id: true, slug: true } });
   for (const perm of allPerms) {
+    if (perm.slug.startsWith('__migration_')) continue;
     if (!VALID_SLUGS.includes(perm.slug)) {
       // Delete associated AdminPermission records first
       await db.adminPermission.deleteMany({ where: { permissionId: perm.id } });
@@ -89,7 +112,10 @@ export async function GET(request: NextRequest) {
     const group = request.nextUrl.searchParams.get('group') || '';
     const adminId = request.nextUrl.searchParams.get('adminId') || '';
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      // Exclude migration flags from the response
+      slug: { not: { startsWith: '__migration_' } },
+    };
     if (group) where.group = group;
 
     const permissions = await db.permission.findMany({
