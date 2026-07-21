@@ -1200,7 +1200,6 @@ function SiteListView({
                                   className={cn(
                                     'h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold cursor-not-allowed',
                                     cfg.color,
-                                    'opacity-50',
                                   )}
                                   title={`${cfg.label} — employee has moved to another site (read-only)`}
                                 >
@@ -1672,6 +1671,13 @@ export function AttendancePage() {
         // movedAway = true only if removedDate is set AND this is NOT the
         // employee's current site. If it IS the current site, the employee
         // is active here (the removedDate is stale).
+        //
+        // EXCEPTION: if the employee has NO attendance records at this site
+        // for this month, don't mark them as movedAway — instead, skip them
+        // entirely (don't add to the list). The user only wants moved-away
+        // employees to remain visible at their old site if they actually
+        // have attendance data there. If they were moved without ever
+        // marking attendance, they should disappear from the old site.
         const movedAway = !isCurrentSite && !!assignment.removedDate;
 
         // ── Compute previousSite info ──
@@ -1707,6 +1713,22 @@ export function AttendancePage() {
           }
         }
 
+        // If the employee moved away AND has NO attendance records for
+        // this month at this site, skip them entirely — don't add to the
+        // list. The user only wants moved-away employees to remain visible
+        // at their old site if they actually have attendance data there.
+        // If they were moved without ever marking attendance, they should
+        // disappear from the old site.
+        if (movedAway) {
+          const hasAttendance = attendanceRecords.some(
+            (r) => r.employeeId === emp.id && r.date.startsWith(monthPrefix),
+          );
+          if (!hasAttendance) {
+            // No attendance at this site — skip entirely
+            continue;
+          }
+        }
+
         map.get(siteName)!.push({
           ...emp,
           activeFrom,
@@ -1738,7 +1760,7 @@ export function AttendancePage() {
     }
 
     return map;
-  }, [employees, siteAssignments, yearStr, monthStr]);
+  }, [employees, siteAssignments, attendanceRecords, yearStr, monthStr]);
 
   // Apply search filter (matches employee name/ID/trade)
   const filteredEmployeesBySite = useMemo(() => {
