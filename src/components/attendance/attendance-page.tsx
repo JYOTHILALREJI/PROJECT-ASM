@@ -1396,13 +1396,17 @@ export function AttendancePage() {
   const [addEmpLoading, setAddEmpLoading] = useState(false);
   // allEmployeesForAdd: full list of active employees (not filtered by site)
   // fetched once when the dialog opens. We filter client-side for the search.
+  // Includes photo for display in the dropdown.
   const [allEmployeesForAdd, setAllEmployeesForAdd] = useState<Array<{
     id: string;
     fullName: string;
     employeeId: string;
     currentSite: string | null;
     trade: string | null;
+    photo: string | null;
   }>>([]);
+  // Multi-select: set of selected employee IDs in the Add Employee dialog
+  const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
 
   // Refresh key — bumped to force a re-fetch of employees + site assignments
   // after adding an employee to a site (so the new employee appears in the
@@ -2071,17 +2075,19 @@ export function AttendancePage() {
     setAddEmpDialogSite(site);
     setAddEmpSearch('');
     setAllEmployeesForAdd([]);
+    setSelectedEmpIds(new Set());
     try {
       const res = await fetch('/api/employees?limit=1000&status=active');
       const data = await res.json();
       if (data.success) {
         setAllEmployeesForAdd(
-          (data.data.employees || []).map((e: Employee) => ({
-            id: e.id,
-            fullName: e.fullName,
-            employeeId: e.employeeId,
-            currentSite: e.currentSite,
-            trade: e.trade || null,
+          (data.data.employees || []).map((e: Record<string, unknown>) => ({
+            id: e.id as string,
+            fullName: e.fullName as string,
+            employeeId: e.employeeId as string,
+            currentSite: (e.currentSite as string) || null,
+            trade: (e.trade as string) || null,
+            photo: (e.photo as string) || null,
           })),
         );
       }
@@ -2094,58 +2100,72 @@ export function AttendancePage() {
     setAddEmpDialogSite(null);
     setAddEmpSearch('');
     setAllEmployeesForAdd([]);
+    setSelectedEmpIds(new Set());
   }, []);
 
-  // Assigns the selected employee to the dialog's site by calling
-  // PUT /api/employees/[id] with currentSite = site.name. On success,
-  // refreshes the employee list (which triggers a re-render of the
-  // attendance grid with the new employee at this site).
-  const handleAddEmployee = useCallback(async (empId: string) => {
-    if (!addEmpDialogSite) return;
+  // Toggle selection of an employee in the multi-select dialog
+  const toggleEmpSelection = useCallback((empId: string) => {
+    setSelectedEmpIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(empId)) {
+        next.delete(empId);
+      } else {
+        next.add(empId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Assigns ALL selected employees to the dialog's site by calling
+  // PUT /api/employees/[id] with currentSite = site.name for each.
+  // On success, refreshes the employee list.
+  const handleAddSelectedEmployees = useCallback(async () => {
+    if (!addEmpDialogSite || selectedEmpIds.size === 0) return;
     setAddEmpLoading(true);
+    let successCount = 0;
+    let failCount = 0;
     try {
-      const res = await fetch(`/api/employees/${empId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentSite: addEmpDialogSite.name }),
-      });
-      const json = await res.json();
-      if (json.success) {
+      for (const empId of selectedEmpIds) {
+        try {
+          const res = await fetch(`/api/employees/${empId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentSite: addEmpDialogSite.name }),
+          });
+          const json = await res.json();
+          if (json.success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch {
+          failCount++;
+        }
+      }
+      if (successCount > 0) {
         toast({
-          title: 'Employee Added',
-          description: `${allEmployeesForAdd.find((e) => e.id === empId)?.fullName || 'Employee'} has been assigned to ${addEmpDialogSite.name}.`,
+          title: 'Employees Added',
+          description: `${successCount} employee${successCount !== 1 ? 's' : ''} assigned to ${addEmpDialogSite.name}.${failCount > 0 ? ` ${failCount} failed.` : ''}`,
         });
         closeAddEmployeeDialog();
-        // Trigger a re-fetch of employees + site assignments so the new
-        // employee appears in the grid. The fetchEmployees effect runs
-        // once on mount, so we force a re-fetch by toggling a state that
-        // it depends on. The simplest way is to re-call the fetch logic.
-        // We use a small trick: setEmployees([]) then the next render
-        // will show loading. But that causes a flash. Instead, we just
-        // reload the page data by calling the same fetch paths.
-        //
-        // Actually, the fetchEmployees effect has [] deps (runs once), so
-        // we can't just toggle state to re-run it. The cleanest fix is
-        // to call the fetch function directly. But it's defined inside
-        // the effect. So we'll use a 'refreshKey' state to force re-fetch.
         setRefreshKey((k) => k + 1);
       } else {
         toast({
           title: 'Error',
-          description: json.error || 'Failed to assign employee to site',
+          description: 'Failed to assign all employees to site',
           variant: 'destructive',
         });
       }
     } catch {
       toast({
         title: 'Error',
-        description: 'Failed to assign employee to site',
+        description: 'Failed to assign employees to site',
         variant: 'destructive',
       });
     } finally {
       setAddEmpLoading(false);
     }
-  }, [addEmpDialogSite, allEmployeesForAdd, closeAddEmployeeDialog]);
+  }, [addEmpDialogSite, selectedEmpIds, closeAddEmployeeDialog]);
 
   // Filtered list of employees for the Add-Employee dialog: active employees
   // who are NOT currently at this site (and whose currentSite isn't already
@@ -2432,17 +2452,19 @@ export function AttendancePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Employee Dialog — assign an existing employee to this site */}
+      {/* Add Employee Dialog — multi-select with photos */}
       <Dialog open={!!addEmpDialogSite} onOpenChange={(open) => { if (!open) closeAddEmployeeDialog(); }}>
         <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-white">
               <UserPlus className="h-5 w-5 text-emerald-400" />
-              Add Employee to {addEmpDialogSite?.name}
+              Add Employees to {addEmpDialogSite?.name}
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Search and select an active employee to assign to this site. The employee will
-              appear in this site&apos;s attendance grid immediately.
+              Search and select one or more employees to assign to this site.
+              {selectedEmpIds.size > 0 && (
+                <span className="text-emerald-400 ml-1 font-medium">{selectedEmpIds.size} selected</span>
+              )}
             </DialogDescription>
           </DialogHeader>
 
@@ -2459,7 +2481,7 @@ export function AttendancePage() {
               />
             </div>
 
-            {/* Employee list */}
+            {/* Employee list — multi-select with photos */}
             <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-700/50 divide-y divide-slate-700/30">
               {allEmployeesForAdd.length === 0 ? (
                 <div className="py-8 text-center text-sm text-slate-500">
@@ -2471,35 +2493,72 @@ export function AttendancePage() {
                   No employees found. All active employees may already be at this site.
                 </div>
               ) : (
-                addEmpFiltered.map((emp) => (
-                  <button
-                    key={emp.id}
-                    onClick={() => handleAddEmployee(emp.id)}
-                    disabled={addEmpLoading}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-700/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-slate-300 text-xs font-semibold shrink-0">
-                      {(emp.fullName || '?').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-white truncate">{emp.fullName}</div>
-                      <div className="text-xs text-slate-400 font-mono">{emp.employeeId}</div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">Current</div>
-                      <div className="text-xs text-slate-300 truncate max-w-[100px]">
-                        {emp.currentSite || 'Idle'}
+                addEmpFiltered.map((emp) => {
+                  const isSelected = selectedEmpIds.has(emp.id);
+                  return (
+                    <button
+                      key={emp.id}
+                      onClick={() => toggleEmpSelection(emp.id)}
+                      disabled={addEmpLoading}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+                        isSelected ? 'bg-emerald-500/15 hover:bg-emerald-500/20' : 'hover:bg-slate-700/40',
+                      )}
+                    >
+                      {/* Checkbox / selection indicator */}
+                      <div className={cn(
+                        'h-5 w-5 rounded border-2 shrink-0 flex items-center justify-center transition-colors',
+                        isSelected
+                          ? 'bg-emerald-500 border-emerald-500'
+                          : 'border-slate-600 bg-transparent',
+                      )}>
+                        {isSelected && <Check className="h-3 w-3 text-white" />}
                       </div>
-                    </div>
-                  </button>
-                ))
+
+                      {/* Employee photo or initials fallback */}
+                      {emp.photo ? (
+                        <img
+                          src={emp.photo}
+                          alt={emp.fullName}
+                          className="h-8 w-8 rounded-full object-cover shrink-0 border border-slate-600"
+                        />
+                      ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-slate-300 text-xs font-semibold shrink-0">
+                          {(emp.fullName || '?').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+
+                      {/* Name + ID */}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white truncate">{emp.fullName}</div>
+                        <div className="text-xs text-slate-400 font-mono">{emp.employeeId}</div>
+                      </div>
+
+                      {/* Current site */}
+                      <div className="text-right shrink-0">
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wide">Current</div>
+                        <div className="text-xs text-slate-300 truncate max-w-[100px]">
+                          {emp.currentSite || 'Idle'}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={closeAddEmployeeDialog} className="text-slate-400 hover:text-white">
               Cancel
+            </Button>
+            <Button
+              onClick={handleAddSelectedEmployees}
+              disabled={addEmpLoading || selectedEmpIds.size === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+            >
+              {addEmpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              {addEmpLoading ? 'Adding...' : `Add ${selectedEmpIds.size > 0 ? `(${selectedEmpIds.size})` : ''}`}
             </Button>
           </DialogFooter>
         </DialogContent>
