@@ -901,6 +901,11 @@ export function AccountsPage() {
     }
   }, []);
 
+  // Fetch trade rates on mount so the trade dropdown in edit mode is populated
+  useEffect(() => {
+    fetchTradeRates();
+  }, [fetchTradeRates]);
+
   const openTradeRates = useCallback(() => {
     setTradeRatesOpen(true);
     setNewTradeName('');
@@ -1640,16 +1645,44 @@ export function AccountsPage() {
                                 {/* Trade */}
                                 <td className="py-1.5 px-2">
                                   {editMode ? (
-                                    <Input
+                                    <select
                                       value={emp.trade}
-                                      onChange={(e) => handleCellChange(site.id, index, 'trade', e.target.value)}
-                                      className="h-6 text-[11px] bg-slate-900/80 border-slate-600/50 text-white w-full py-0 px-1.5"
-                                    />
+                                      onChange={(e) => {
+                                        const newTrade = e.target.value;
+                                        handleCellChange(site.id, index, 'trade', newTrade);
+                                        // Auto-update the rate if a trade rate exists
+                                        const tr = tradeRates.find(t => t.trade === newTrade);
+                                        if (tr) {
+                                          handleCellChange(site.id, index, 'lowRate', tr.hourlyRate);
+                                          handleCellChange(site.id, index, 'highRate', tr.hourlyRate);
+                                        } else {
+                                          // Reset to standard rates if no trade rate
+                                          const hasBonus = emp.isTeamLeader || emp.isSupervisor;
+                                          handleCellChange(site.id, index, 'lowRate', hasBonus ? 3.0 : 2.5);
+                                          handleCellChange(site.id, index, 'highRate', hasBonus ? 5.5 : 5.0);
+                                        }
+                                      }}
+                                      className="h-6 text-[11px] bg-slate-900/80 border-slate-600/50 text-white w-full py-0 px-1.5 rounded"
+                                    >
+                                      <option value="">— Select Trade —</option>
+                                      {tradeRates.map((tr) => (
+                                        <option key={tr.id} value={tr.trade}>
+                                          {tr.trade} ({tr.hourlyRate} AED/hr)
+                                        </option>
+                                      ))}
+                                      {/* Include the current trade if it's not in the tradeRates list */}
+                                      {emp.trade && !tradeRates.some(tr => tr.trade === emp.trade) && (
+                                        <option value={emp.trade}>{emp.trade} (no custom rate)</option>
+                                      )}
+                                    </select>
                                   ) : (
                                     <span className="text-[11px] text-slate-300">
                                       {tradeDisplay(emp)}
                                       {emp.isCustomRate && (
                                         <span className="ml-1 text-violet-400 text-[10px]">(custom)</span>
+                                      )}
+                                      {tradeRates.some(tr => tr.trade === emp.trade) && !emp.isCustomRate && (
+                                        <span className="ml-1 text-violet-400 text-[10px]">(trade rate)</span>
                                       )}
                                     </span>
                                   )}

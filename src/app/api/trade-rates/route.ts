@@ -28,6 +28,11 @@ export async function GET() {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
+    // If the TradeRate table doesn't exist, return an empty list instead of 500
+    // so the UI works. The user needs to run 'npx prisma db push' to create it.
+    if (message.includes('does not exist') || message.includes('relation') || message.includes('table')) {
+      return NextResponse.json({ success: true, data: { tradeRates: [] } });
+    }
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
@@ -68,6 +73,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
+    if (message.includes('does not exist') || message.includes('relation') || message.includes('table')) {
+      return NextResponse.json(
+        { success: false, error: 'TradeRate table does not exist. Run "npx prisma db push" to create it.' },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
@@ -89,6 +100,12 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: true, data: { deleted: true } });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
+    if (message.includes('does not exist') || message.includes('relation') || message.includes('table')) {
+      return NextResponse.json(
+        { success: false, error: 'TradeRate table does not exist. Run "npx prisma db push" to create it.' },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
