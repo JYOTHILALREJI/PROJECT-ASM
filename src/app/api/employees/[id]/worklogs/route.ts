@@ -54,7 +54,19 @@ export async function GET(
     }
 
     const tradeRateMap = await buildTradeRateMap();
-    const { lowRate, highRate, isCustom } = getEmployeeRates(employee, tradeRateMap);
+
+    // Fetch trade from SalaryRecords (NOT from Employee table).
+    // Employee.trade is only for ID purposes, NOT for salary calculation.
+    // Trade priority: SalaryRecord trade > "Helper" (default).
+    const salaryRecsForTrade = await db.salaryRecord.findMany({
+      where: { empId: id, isDeleted: false },
+      select: { trade: true },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    const effectiveTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || 'Helper';
+    const employeeWithTrade = { ...employee, trade: effectiveTrade };
+    const { lowRate, highRate, isCustom } = getEmployeeRates(employeeWithTrade, tradeRateMap);
     const threshold = employee.hoursThreshold || 1000;
 
     // 3. Fetch ALL work logs (no year filter) for cumulative calculation

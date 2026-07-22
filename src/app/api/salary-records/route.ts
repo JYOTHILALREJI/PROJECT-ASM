@@ -435,7 +435,7 @@ export async function POST(request: NextRequest) {
           month,
           year,
           nationality: emp.nationality || '',
-          trade: emp.trade || emp.position || '',
+          trade: 'Helper',
           employeeCode: emp.employeeId,
           slNo,
           totalHours,

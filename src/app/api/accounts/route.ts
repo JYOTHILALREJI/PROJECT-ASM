@@ -502,7 +502,11 @@ export async function GET(request: NextRequest) {
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
         // Check trade rate (priority: custom rate > trade rate > role-based)
-        const tradeRate = emp?.trade ? tradeRateMap.get(emp.trade) : undefined;
+        // Use the trade from the SALARY RECORD, not from the Employee table.
+        // The admin sets the trade per-month in the Accounts page; the
+        // Employee.trade field is only for ID purposes.
+        const salaryTrade = eRecords[0]?.trade || 'Helper';
+        const tradeRate = salaryTrade ? tradeRateMap.get(salaryTrade) : undefined;
 
         // Get working hours info
         const empWhRecords = whByEmp.get(eId) || [];
@@ -584,8 +588,8 @@ export async function GET(request: NextRequest) {
         const aggregateTotal = aggregateHoursMap.get(stub.empId) || 0;
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
-        // Check trade rate
-        const tradeRate = emp?.trade ? tradeRateMap.get(emp.trade) : undefined;
+        // Check trade rate — use 'Helper' as default for stub entries
+        const tradeRate = tradeRateMap.get('Helper');
 
         const empWhRecords = whByEmp.get(stub.empId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);

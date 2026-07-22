@@ -110,17 +110,33 @@ export async function GET(request: NextRequest) {
     // Build trade rate map for trade-based custom rates
     const tradeRateMap = await buildTradeRateMap();
 
+    // Fetch trade from SalaryRecords (NOT from Employee table).
+    // Employee.trade is only for ID purposes. The trade used for rate
+    // calculation comes from the SalaryRecord (set in Accounts or
+    // attendance sync). Build a map: empId → latest trade from salary records.
+    const allSalaryRecsForTrade = await db.salaryRecord.findMany({
+      where: { isDeleted: false },
+      select: { empId: true, trade: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const empTradeMap = new Map<string, string>();
+    for (const sr of allSalaryRecsForTrade) {
+      if (!empTradeMap.has(sr.empId) && sr.trade && sr.trade.trim()) {
+        empTradeMap.set(sr.empId, sr.trade);
+      }
+    }
+
     // Build result
     const data = employees.map((emp) => {
-      // Use the employee's currentTotalWorkingHours as a FLOOR
       const computedHours = cumulativeHoursMap.get(emp.id) || 0;
       const manualHours = emp.currentTotalWorkingHours || 0;
       const cumulativeHours = Math.max(computedHours, manualHours);
       const hasBonus = emp.isTeamLeader || emp.isSupervisor;
       const threshold = emp.hoursThreshold || 1000;
 
-      // Rate priority: 1) customHourlyRate 2) trade rate 3) role-based
-      const tradeRate = emp.trade ? tradeRateMap.get(emp.trade) : undefined;
+      // Trade from salary record (NOT employee table). Default: "Helper"
+      const effectiveTrade = empTradeMap.get(emp.id) || 'Helper';
+      const tradeRate = effectiveTrade ? tradeRateMap.get(effectiveTrade) : undefined;
       const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
       const lowRate = hasBonus ? 3.0 : 2.5;
       const highRate = hasBonus ? 5.5 : 5.0;
@@ -132,7 +148,7 @@ export async function GET(request: NextRequest) {
         rateLabel = 'Custom';
       } else if (hasTradeRate) {
         effectiveRate = tradeRate!;
-        rateLabel = `${emp.trade} (${tradeRate})`;
+        rateLabel = `${effectiveTrade} (${tradeRate})`;
       } else if (cumulativeHours >= threshold) {
         effectiveRate = highRate;
         rateLabel = String(highRate);

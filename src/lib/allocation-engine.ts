@@ -148,18 +148,15 @@ export async function allocateEmployeeHours(
     //           2) Trade rate (from TradeRate table, e.g. "Hilti" = 6)
     //           3) Role-based (TL/Sup: 3.0/5.5, Standard: 2.5/5.0)
     //
-    // CRITICAL: use the trade from the SALARY RECORD (not the Employee table)
-    // to look up the trade rate. The admin may have changed the trade in
-    // Accounts (e.g. from "Labor" to "Hilti"), and that change is saved to
-    // the SalaryRecord. The allocation engine must use the saved trade, not
-    // the employee's original trade.
+    // TRADE PRIORITY for rate lookup:
+    //   1. Trade from SalaryRecord (set by admin in Accounts page) — highest
+    //   2. Default to "Helper" if no trade set in SalaryRecord
     //
-    // We find the saved trade from any existing salary record for this
-    // employee+month+year. All records for the same employee should have the
-    // same trade (it's set per-employee, not per-tier).
+    // NEVER use Employee.trade for rate calculation — that field is only
+    // for ID/identification purposes, not for salary calculation.
     const savedTrade = records.length > 0
-      ? (records.find(r => r.trade)?.trade || employee.trade)
-      : employee.trade;
+      ? (records.find(r => r.trade && r.trade.trim() !== '')?.trade || 'Helper')
+      : 'Helper';
     const tradeRate = savedTrade ? tradeRateMap.get(savedTrade) : undefined;
     const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
     const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
@@ -370,9 +367,9 @@ export async function allocateEmployeeHours(
             // Preserve the trade from the existing salary record — don't
             // overwrite with employee.trade. The admin may have changed the
             // trade in Accounts (e.g. from "Labor" to "Hilti") and that
-            // change must survive the allocation engine. Only fall back to
-            // employee.trade if the salary record doesn't have one yet.
-            trade: siteData.existingStandard?.trade || employee.trade || '',
+            // change must survive the allocation engine. Fall back to
+            // 'Helper' if no trade is set.
+            trade: siteData.existingStandard?.trade || savedTrade,
             employeeCode: employee.employeeId || '',
             totalHours: alloc.lowRateHours,
             rtPerHour: effectiveLowRate,
@@ -391,7 +388,7 @@ export async function allocateEmployeeHours(
             month,
             year,
             nationality: employee.nationality || '',
-            trade: employee.trade || '',
+            trade: savedTrade,
             employeeCode: employee.employeeId || '',
             slNo: 0,
             totalHours: alloc.lowRateHours,
@@ -455,7 +452,7 @@ export async function allocateEmployeeHours(
             siteName: alloc.siteName,
             nationality: employee.nationality || '',
             // Preserve trade from existing record (see standard record comment above)
-            trade: siteData.existingPremium?.trade || employee.trade || '',
+            trade: siteData.existingPremium?.trade || savedTrade,
             employeeCode: employee.employeeId || '',
             totalHours: alloc.highRateHours,
             rtPerHour: effectiveHighRate,
@@ -474,7 +471,7 @@ export async function allocateEmployeeHours(
             month,
             year,
             nationality: employee.nationality || '',
-            trade: employee.trade || '',
+            trade: savedTrade,
             employeeCode: employee.employeeId || '',
             slNo: 0,
             totalHours: alloc.highRateHours,

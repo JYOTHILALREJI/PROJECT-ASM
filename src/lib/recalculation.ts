@@ -146,7 +146,21 @@ export async function recalcEmployeeFromMonth(
   }
 
   const tradeRateMap = await buildTradeRateMap();
-  const { lowRate, highRate, isCustom } = getEmployeeRates(employee, tradeRateMap);
+
+  // Fetch the trade from SalaryRecords (NOT from Employee table).
+  // Trade priority: SalaryRecord trade > "Helper" (default).
+  // Employee.trade is only for ID purposes, NOT for salary calculation.
+  const salaryRecsForTrade = await db.salaryRecord.findMany({
+    where: { empId: employeeId, isDeleted: false },
+    select: { trade: true },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+  });
+  const effectiveTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || 'Helper';
+
+  // Override employee.trade with the salary-record trade for rate lookup
+  const employeeWithTrade = { ...employee, trade: effectiveTrade };
+  const { lowRate, highRate, isCustom } = getEmployeeRates(employeeWithTrade, tradeRateMap);
   const threshold = employee.hoursThreshold || 1000;
 
   // Fetch all non-deleted work logs for this employee, sorted chronologically
@@ -352,7 +366,7 @@ export async function recalcEmployeeFromMonth(
             empName: employee.fullName,
             siteName: sh.siteName,
             nationality: employee.nationality || '',
-            trade: employee.trade || '',
+            trade: effectiveTrade,
             employeeCode: employee.employeeId || '',
             totalHours: sh.hours,
             rtPerHour: lowRate,
@@ -371,7 +385,7 @@ export async function recalcEmployeeFromMonth(
             month: md.monthKey,
             year: md.year,
             nationality: employee.nationality || '',
-            trade: employee.trade || '',
+            trade: effectiveTrade,
             employeeCode: employee.employeeId || '',
             slNo: 0,
             totalHours: sh.hours,
@@ -512,7 +526,7 @@ export async function recalcEmployeeFromMonth(
               empName: employee.fullName,
               siteName: split.siteName,
               nationality: employee.nationality || '',
-              trade: employee.trade || '',
+              trade: effectiveTrade,
               employeeCode: employee.employeeId || '',
               totalHours: parseFloat(split.siteBelow.toFixed(2)),
               rtPerHour: lowRate,
@@ -531,7 +545,7 @@ export async function recalcEmployeeFromMonth(
               month: md.monthKey,
               year: md.year,
               nationality: employee.nationality || '',
-              trade: employee.trade || '',
+              trade: effectiveTrade,
               employeeCode: employee.employeeId || '',
               slNo: 0,
               totalHours: parseFloat(split.siteBelow.toFixed(2)),
@@ -572,7 +586,7 @@ export async function recalcEmployeeFromMonth(
               empName: employee.fullName,
               siteName: split.siteName,
               nationality: employee.nationality || '',
-              trade: employee.trade || '',
+              trade: effectiveTrade,
               employeeCode: employee.employeeId || '',
               totalHours: parseFloat(split.siteAbove.toFixed(2)),
               rtPerHour: highRate,
@@ -591,7 +605,7 @@ export async function recalcEmployeeFromMonth(
               month: md.monthKey,
               year: md.year,
               nationality: employee.nationality || '',
-              trade: employee.trade || '',
+              trade: effectiveTrade,
               employeeCode: employee.employeeId || '',
               slNo: 0,
               totalHours: parseFloat(split.siteAbove.toFixed(2)),
