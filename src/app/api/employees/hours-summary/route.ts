@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
 // GET: Returns all active employees with their cumulative hours and effective rate
 export async function GET(request: NextRequest) {
@@ -107,22 +108,20 @@ export async function GET(request: NextRequest) {
     });
     const siteNameMap = new Map(sites.map(s => [s.id, s.name]));
 
-    // Build trade rate map for trade-based custom rates
+    // Build trade rate map + employee trade map
     const tradeRateMap = await buildTradeRateMap();
+    const employeeTradeMap = await buildEmployeeTradeMap();
 
-    // Fetch trade from SalaryRecords (NOT from Employee table).
-    // Employee.trade is only for ID purposes. The trade used for rate
-    // calculation comes from the SalaryRecord (set in Accounts or
-    // attendance sync). Build a map: empId → latest trade from salary records.
+    // Fetch trade from SalaryRecords for Accounts-edit priority
     const allSalaryRecsForTrade = await db.salaryRecord.findMany({
       where: { isDeleted: false },
       select: { empId: true, trade: true, createdAt: true },
       orderBy: { createdAt: 'desc' },
     });
-    const empTradeMap = new Map<string, string>();
+    const salaryTradeMap = new Map<string, string>();
     for (const sr of allSalaryRecsForTrade) {
-      if (!empTradeMap.has(sr.empId) && sr.trade && sr.trade.trim()) {
-        empTradeMap.set(sr.empId, sr.trade);
+      if (!salaryTradeMap.has(sr.empId) && sr.trade && sr.trade.trim()) {
+        salaryTradeMap.set(sr.empId, sr.trade);
       }
     }
 
@@ -134,9 +133,10 @@ export async function GET(request: NextRequest) {
       const hasBonus = emp.isTeamLeader || emp.isSupervisor;
       const threshold = emp.hoursThreshold || 1000;
 
-      // Trade from salary record (NOT employee table). Default: "Helper"
-      const effectiveTrade = empTradeMap.get(emp.id) || 'Helper';
-      const tradeRate = effectiveTrade ? tradeRateMap.get(effectiveTrade) : undefined;
+      // Trade priority: SalaryRecord > EmployeeTrade > "Helper"
+      const effectiveTrade = salaryTradeMap.get(emp.id) || employeeTradeMap.get(emp.id)?.trade || 'Helper';
+      const isHelper = effectiveTrade.toLowerCase() === 'helper';
+      const tradeRate = !isHelper ? tradeRateMap.get(effectiveTrade) : undefined;
       const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
       const lowRate = hasBonus ? 3.0 : 2.5;
       const highRate = hasBonus ? 5.5 : 5.0;
@@ -176,7 +176,7 @@ export async function GET(request: NextRequest) {
         fullName: emp.fullName,
         employeeId: emp.employeeId,
         currentSite,
-        trade: emp.trade || null,
+        trade: effectiveTrade,
         isTeamLeader: emp.isTeamLeader,
         isSupervisor: emp.isSupervisor,
         customHourlyRate: emp.customHourlyRate,
@@ -218,7 +218,8 @@ export async function GET(request: NextRequest) {
       filtered = filtered.filter((emp) =>
         emp.fullName.toLowerCase().includes(q) ||
         emp.employeeId.toLowerCase().includes(q) ||
-        (emp.trade && emp.trade.toLowerCase().includes(q)) ||
+        // Search by trade from the response data (effectiveTrade), not emp.trade
+        (data.find(d => d.id === emp.id)?.trade || '').toLowerCase().includes(q) ||
         (emp.currentSite && emp.currentSite.toLowerCase().includes(q))
       );
     }

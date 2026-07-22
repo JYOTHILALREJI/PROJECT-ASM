@@ -249,7 +249,9 @@ export async function syncEmployeeSalaryFromAttendance(
       empName: employee.fullName,
       siteName: site.name,
       nationality: employee.nationality || '',
-      trade: employee.trade || '',
+      // DO NOT overwrite trade — it's set by the admin in Accounts.
+      // Only set it if the existing record doesn't have one.
+      // The upsert will handle this via the create fallback below.
       employeeCode,
       slNo,
       totalHours,
@@ -269,7 +271,7 @@ export async function syncEmployeeSalaryFromAttendance(
       month,
       year,
       nationality: employee.nationality || '',
-      trade: employee.trade || '',
+      trade: 'Helper',
       employeeCode,
       slNo,
       totalHours,

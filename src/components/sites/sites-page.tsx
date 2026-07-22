@@ -27,6 +27,7 @@ import {
   MoreHorizontal,
   CheckCircle2,
   Check,
+  Wrench,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -481,7 +482,7 @@ function SiteCardsGrid({
   );
 }
 
-/* ───────── Add Employee Dialog (multi-select with photos) ───────── */
+/* ───────── Add Employee Dialog (multi-select with photos + trade) ───────── */
 function AddEmployeeCombobox({
   allEmployees,
   currentSiteName,
@@ -492,12 +493,14 @@ function AddEmployeeCombobox({
   allEmployees: AllEmployee[];
   currentSiteName: string;
   currentSiteEmployeeIds: Set<string>;
-  onAddMultiple: (employees: AllEmployee[]) => void;
+  onAddMultiple: (employees: AllEmployee[], tradeRateId?: string) => void;
   loading: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [tradeRates, setTradeRates] = useState<Array<{ id: string; trade: string; hourlyRate: number }>>([]);
+  const [selectedTradeRateId, setSelectedTradeRateId] = useState<string>('');
 
   const filtered = useMemo(() => {
     const available = allEmployees.filter((e) => !currentSiteEmployeeIds.has(e.id));
@@ -527,18 +530,34 @@ function AddEmployeeCombobox({
   const handleConfirm = () => {
     const selected = filtered.filter((e) => selectedIds.has(e.id));
     if (selected.length > 0) {
-      onAddMultiple(selected);
+      onAddMultiple(selected, selectedTradeRateId || undefined);
     }
     setOpen(false);
     setSelectedIds(new Set());
     setFilter('');
+    setSelectedTradeRateId('');
   };
 
   const handleClose = () => {
     setOpen(false);
     setSelectedIds(new Set());
     setFilter('');
+    setSelectedTradeRateId('');
   };
+
+  // Fetch trade rates when dialog opens
+  useEffect(() => {
+    if (open) {
+      fetch('/api/trade-rates')
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setTradeRates(data.data.tradeRates || []);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}>
@@ -653,6 +672,26 @@ function AddEmployeeCombobox({
             )}
           </div>
         </div>
+
+        {/* Trade assignment dropdown — assign a trade to all selected employees */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-2 py-2 border-t border-slate-700/50">
+            <Wrench className="h-4 w-4 text-violet-400 shrink-0" />
+            <Label className="text-xs text-slate-400 shrink-0">Assign Trade:</Label>
+            <select
+              value={selectedTradeRateId}
+              onChange={(e) => setSelectedTradeRateId(e.target.value)}
+              className="flex-1 h-8 text-sm bg-slate-900 border-slate-600 text-white rounded px-2"
+            >
+              <option value="">— No trade change —</option>
+              {tradeRates.map((tr) => (
+                <option key={tr.id} value={tr.id}>
+                  {tr.trade} ({tr.hourlyRate} AED/hr)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={handleClose} className="text-slate-400 hover:text-white">
@@ -1191,7 +1230,7 @@ export function SitesPage() {
   }, [selectedEmps, viewSite, siteEmployees, fetchSiteEmployees, fetchAllEmployees, fetchSites]);
 
   /* ── Add multiple employees to site ── */
-  const handleAddMultipleEmployees = useCallback(async (employees: AllEmployee[]) => {
+  const handleAddMultipleEmployees = useCallback(async (employees: AllEmployee[], tradeRateId?: string) => {
     if (!viewSite || employees.length === 0) return;
     setAddingEmployee(true);
     let successCount = 0;
@@ -1214,10 +1253,28 @@ export function SitesPage() {
           failCount++;
         }
       }
+
+      // If a trade was selected, assign it to all employees via EmployeeTrade
+      if (tradeRateId && successCount > 0) {
+        try {
+          await fetch('/api/employee-trades', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              employeeIds: employees.map(e => e.id),
+              tradeRateId,
+            }),
+          });
+        } catch {
+          // Trade assignment failure shouldn't block the add
+        }
+      }
+
       if (successCount > 0) {
+        const tradeMsg = tradeRateId ? ' Trade assigned.' : '';
         toast({
           title: 'Employees Added',
-          description: `${successCount} employee${successCount !== 1 ? 's' : ''} assigned to "${viewSite.name}".${failCount > 0 ? ` ${failCount} failed.` : ''}`,
+          description: `${successCount} employee${successCount !== 1 ? 's' : ''} assigned to "${viewSite.name}".${tradeMsg}${failCount > 0 ? ` ${failCount} failed.` : ''}`,
         });
         fetchSiteEmployees(viewSite.name);
         fetchAllEmployees();

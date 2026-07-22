@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
 // ---------------------------------------------------------------------------
 // Recalculation Engine — Direct Hourly Rates (PRD v2.0)
@@ -50,6 +51,9 @@ export function getEmployeeRates(
   }
 
   // 2. Trade-based rate (if a TradeRate exists for this employee's trade)
+  // NOTE: employee.trade here is the EFFECTIVE trade (overridden by the caller
+  // to be the SalaryRecord trade, NOT the Employee table trade). The caller
+  // is responsible for setting it correctly before calling this function.
   if (tradeRateMap && employee.trade) {
     const tradeRate = tradeRateMap.get(employee.trade);
     if (tradeRate !== undefined && tradeRate > 0) {
@@ -60,6 +64,10 @@ export function getEmployeeRates(
       };
     }
   }
+
+  // 2b. If no trade rate found and the trade is "Helper" (default), use
+  // the standard role-based rates below. If the trade is something else
+  // but has no rate in the TradeRate table, also fall through to role-based.
 
   // 3. Role-based rates
   const isLeader = employee.isTeamLeader || employee.isSupervisor || employee.role === 'Team Leader' || employee.role === 'Supervisor';
@@ -146,19 +154,20 @@ export async function recalcEmployeeFromMonth(
   }
 
   const tradeRateMap = await buildTradeRateMap();
+  const employeeTradeMap = await buildEmployeeTradeMap();
 
-  // Fetch the trade from SalaryRecords (NOT from Employee table).
-  // Trade priority: SalaryRecord trade > "Helper" (default).
-  // Employee.trade is only for ID purposes, NOT for salary calculation.
+  // Trade priority: SalaryRecord trade (Accounts edit) > EmployeeTrade > "Helper"
   const salaryRecsForTrade = await db.salaryRecord.findMany({
     where: { empId: employeeId, isDeleted: false },
     select: { trade: true },
     orderBy: { createdAt: 'desc' },
     take: 1,
   });
-  const effectiveTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || 'Helper';
+  const savedTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || null;
+  const empTradeInfo = employeeTradeMap.get(employeeId);
+  const effectiveTrade = savedTrade || empTradeInfo?.trade || 'Helper';
 
-  // Override employee.trade with the salary-record trade for rate lookup
+  // Override employee.trade with the effective trade for rate lookup
   const employeeWithTrade = { ...employee, trade: effectiveTrade };
   const { lowRate, highRate, isCustom } = getEmployeeRates(employeeWithTrade, tradeRateMap);
   const threshold = employee.hoursThreshold || 1000;

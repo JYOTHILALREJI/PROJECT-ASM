@@ -2203,14 +2203,7 @@ export function EmployeePage() {
               {/* Professional / Work Details Tab */}
               <TabsContent value="professional" className="space-y-4 pb-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-slate-300 text-sm">Trade</Label>
-                    <SearchableTradeSelect
-                      value={formData.trade}
-                      onChange={(val) => handleFormChange('trade', val)}
-                    />
-                  </div>
-
+                  {/* Trade is now assigned from the Sites page, not during employee creation */}
                   <div className="space-y-2">
                     <Label className="text-slate-300 text-sm">Join Date</Label>
                     <Input

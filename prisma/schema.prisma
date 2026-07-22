@@ -117,6 +117,7 @@ model Employee {
   workingHours         TotalEmployeeWorkingHours[]
   workLogs             WorkLog[]
   advances             Advance[]
+  employeeTrade        EmployeeTrade?
 
   @@index([trade])
   @@index([isTeamLeader])
@@ -725,11 +726,32 @@ model ActivityLog {
 // ---------------------------------------------------------------------------
 
 model TradeRate {
-  id        String   @id @default(cuid())
-  trade     String   @unique // e.g. "Hilti", "Mason", "Electrician"
+  id         String   @id @default(cuid())
+  trade      String   @unique // e.g. "Hilti", "Mason", "Electrician", "Helper"
   hourlyRate Float   // e.g. 6.0 — same rate for below and above threshold
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employeeTrades EmployeeTrade[]
 
   @@index([trade])
+}
+
+// Junction table: links Employee to TradeRate.
+// An employee can have ONE trade at a time (enforced by @@unique on employeeId).
+// The trade is assigned from the Sites page (multi-select + dropdown).
+// The rate comes from the linked TradeRate record.
+// "Helper" is the default — uses threshold-based rates (2.5/5.0 or 3.0/5.5).
+model EmployeeTrade {
+  id          String   @id @default(cuid())
+  employeeId  String   @unique // One trade per employee
+  tradeRateId String
+  assignedAt  DateTime @default(now())
+  assignedBy  String?  // Admin name who assigned it
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tradeRate TradeRate @relation(fields: [tradeRateId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([tradeRateId])
 }

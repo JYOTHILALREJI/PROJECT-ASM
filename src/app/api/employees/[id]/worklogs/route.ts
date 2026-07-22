@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { recalcEmployeeFromMonth, recalcEmployeeFull, getEmployeeRates, computeSalaryBreakdown, buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
 // GET /api/employees/[id]/worklogs
 // Get all WorkLog entries for an employee, with SalaryRecord fallback for months without WorkLog entries
@@ -54,17 +55,18 @@ export async function GET(
     }
 
     const tradeRateMap = await buildTradeRateMap();
+    const employeeTradeMap = await buildEmployeeTradeMap();
 
-    // Fetch trade from SalaryRecords (NOT from Employee table).
-    // Employee.trade is only for ID purposes, NOT for salary calculation.
-    // Trade priority: SalaryRecord trade > "Helper" (default).
+    // Trade priority: SalaryRecord (Accounts edit) > EmployeeTrade > "Helper"
     const salaryRecsForTrade = await db.salaryRecord.findMany({
       where: { empId: id, isDeleted: false },
       select: { trade: true },
       orderBy: { createdAt: 'desc' },
       take: 1,
     });
-    const effectiveTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || 'Helper';
+    const savedTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || null;
+    const empTradeInfo = employeeTradeMap.get(id);
+    const effectiveTrade = savedTrade || empTradeInfo?.trade || 'Helper';
     const employeeWithTrade = { ...employee, trade: effectiveTrade };
     const { lowRate, highRate, isCustom } = getEmployeeRates(employeeWithTrade, tradeRateMap);
     const threshold = employee.hoursThreshold || 1000;
@@ -378,7 +380,7 @@ export async function GET(
           customHourlyRate: employee.customHourlyRate,
           hoursThreshold: threshold,
           nationality: employee.nationality,
-          trade: employee.trade,
+          trade: effectiveTrade,
           lowRate,
           highRate,
           isCustom,

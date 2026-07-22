@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
 // ---------------------------------------------------------------------------
 // Cross-Site Monthly Hour Allocation Engine (Shared Module)
@@ -87,9 +88,10 @@ export async function allocateEmployeeHours(
   year: number,
 ): Promise<AllocationResult> {
   // ------------------------------------------------------------------
-  // 0. Build trade rate map (for trade-based custom rates)
+  // 0. Build trade rate map + employee trade map
   // ------------------------------------------------------------------
   const tradeRateMap = await buildTradeRateMap();
+  const employeeTradeMap = await buildEmployeeTradeMap();
 
   // ------------------------------------------------------------------
   // 1. Fetch all non-deleted salary records for the given month+year
@@ -143,21 +145,22 @@ export async function allocateEmployeeHours(
     const hasBonus = employee.isTeamLeader || employee.isSupervisor;
     const employeeCustomRate = employee.customHourlyRate;
 
-    // Direct hourly rates (PRD v2.0 — no divisors):
+    // Direct hourly rates:
     // Priority: 1) employee.customHourlyRate (per-employee override)
-    //           2) Trade rate (from TradeRate table, e.g. "Hilti" = 6)
-    //           3) Role-based (TL/Sup: 3.0/5.5, Standard: 2.5/5.0)
+    //           2) Trade from SalaryRecord (Accounts edit — HIGHEST trade priority)
+    //           3) Trade from EmployeeTrade (assigned from Sites page)
+    //           4) "Helper" (default) → threshold-based rates
     //
-    // TRADE PRIORITY for rate lookup:
-    //   1. Trade from SalaryRecord (set by admin in Accounts page) — highest
-    //   2. Default to "Helper" if no trade set in SalaryRecord
-    //
-    // NEVER use Employee.trade for rate calculation — that field is only
-    // for ID/identification purposes, not for salary calculation.
+    // NEVER use Employee.trade — that field is only for ID purposes.
+    // "Helper" uses threshold-based rates (2.5/5.0 or 3.0/5.5).
+    // All other trades use the TradeRate.hourlyRate for both tiers.
     const savedTrade = records.length > 0
-      ? (records.find(r => r.trade && r.trade.trim() !== '')?.trade || 'Helper')
-      : 'Helper';
-    const tradeRate = savedTrade ? tradeRateMap.get(savedTrade) : undefined;
+      ? (records.find(r => r.trade && r.trade.trim() !== '')?.trade || null)
+      : null;
+    const empTradeInfo = employeeTradeMap.get(empId);
+    const effectiveTradeName = savedTrade || empTradeInfo?.trade || 'Helper';
+    const isHelper = effectiveTradeName.toLowerCase() === 'helper';
+    const tradeRate = !isHelper ? tradeRateMap.get(effectiveTradeName) : undefined;
     const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
     const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
 
@@ -369,7 +372,7 @@ export async function allocateEmployeeHours(
             // trade in Accounts (e.g. from "Labor" to "Hilti") and that
             // change must survive the allocation engine. Fall back to
             // 'Helper' if no trade is set.
-            trade: siteData.existingStandard?.trade || savedTrade,
+            trade: siteData.existingStandard?.trade || effectiveTradeName,
             employeeCode: employee.employeeId || '',
             totalHours: alloc.lowRateHours,
             rtPerHour: effectiveLowRate,
@@ -388,7 +391,7 @@ export async function allocateEmployeeHours(
             month,
             year,
             nationality: employee.nationality || '',
-            trade: savedTrade,
+            trade: effectiveTradeName,
             employeeCode: employee.employeeId || '',
             slNo: 0,
             totalHours: alloc.lowRateHours,
@@ -452,7 +455,7 @@ export async function allocateEmployeeHours(
             siteName: alloc.siteName,
             nationality: employee.nationality || '',
             // Preserve trade from existing record (see standard record comment above)
-            trade: siteData.existingPremium?.trade || savedTrade,
+            trade: siteData.existingPremium?.trade || effectiveTradeName,
             employeeCode: employee.employeeId || '',
             totalHours: alloc.highRateHours,
             rtPerHour: effectiveHighRate,
@@ -471,7 +474,7 @@ export async function allocateEmployeeHours(
             month,
             year,
             nationality: employee.nationality || '',
-            trade: savedTrade,
+            trade: effectiveTradeName,
             employeeCode: employee.employeeId || '',
             slNo: 0,
             totalHours: alloc.highRateHours,
