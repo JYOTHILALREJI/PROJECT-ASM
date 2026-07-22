@@ -354,7 +354,12 @@ export async function allocateEmployeeHours(
             empName: employee.fullName,
             siteName: alloc.siteName,
             nationality: employee.nationality || '',
-            trade: employee.trade || '',
+            // Preserve the trade from the existing salary record — don't
+            // overwrite with employee.trade. The admin may have changed the
+            // trade in Accounts (e.g. from "Labor" to "Hilti") and that
+            // change must survive the allocation engine. Only fall back to
+            // employee.trade if the salary record doesn't have one yet.
+            trade: siteData.existingStandard?.trade || employee.trade || '',
             employeeCode: employee.employeeId || '',
             totalHours: alloc.lowRateHours,
             rtPerHour: effectiveLowRate,
@@ -436,7 +441,8 @@ export async function allocateEmployeeHours(
             empName: employee.fullName,
             siteName: alloc.siteName,
             nationality: employee.nationality || '',
-            trade: employee.trade || '',
+            // Preserve trade from existing record (see standard record comment above)
+            trade: siteData.existingPremium?.trade || employee.trade || '',
             employeeCode: employee.employeeId || '',
             totalHours: alloc.highRateHours,
             rtPerHour: effectiveHighRate,
