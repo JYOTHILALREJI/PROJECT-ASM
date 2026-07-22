@@ -1683,11 +1683,7 @@ export function AccountsPage() {
                                     </select>
                                   ) : (
                                     <span className="text-[11px] text-slate-300">
-                                      {emp.assignedTrade ? (
-                                        <Badge className="bg-violet-500/15 text-violet-300 border-violet-500/30 text-[9px] px-1 py-0">
-                                          {emp.assignedTrade}{emp.assignedTradeRate ? ` (${emp.assignedTradeRate})` : ''}
-                                        </Badge>
-                                      ) : tradeDisplay(emp)}
+                                      {emp.assignedTrade || tradeDisplay(emp)}
                                       {emp.isCustomRate && (
                                         <span className="ml-1 text-violet-400 text-[10px]">(custom)</span>
                                       )}

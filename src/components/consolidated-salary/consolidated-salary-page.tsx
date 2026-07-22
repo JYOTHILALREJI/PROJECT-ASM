@@ -930,6 +930,7 @@ export function ConsolidatedSalaryPage() {
                     <TableHead className="text-slate-400 font-semibold w-8">#</TableHead>
                     <TableHead className="text-slate-400 font-semibold min-w-[100px]">Emp Code</TableHead>
                     <TableHead className="text-slate-400 font-semibold min-w-[160px]">Name</TableHead>
+                    <TableHead className="text-slate-400 font-semibold min-w-[90px]">Trade</TableHead>
                     <TableHead className="text-slate-400 font-semibold min-w-[200px]">Sites (breakdown)</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right bg-cyan-900/10 min-w-[80px]">Below Hrs</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right bg-amber-900/10 min-w-[80px]">Above Hrs</TableHead>
@@ -972,6 +973,9 @@ export function ConsolidatedSalaryPage() {
                               <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0">CR</Badge>
                             )}
                           </div>
+                        </TableCell>
+                        <TableCell className="text-slate-400 text-xs">
+                          {emp.trade || '—'}
                         </TableCell>
                         <TableCell className="text-xs">
                           {/* Sites column: show each site name + hours + salary.

@@ -632,6 +632,8 @@ export async function GET(request: NextRequest) {
           employeeCode: emp?.employeeId || '',
           nationality: emp?.nationality || '',
           trade: emp?.trade || '',
+          assignedTrade: employeeTradeMap.get(stub.empId)?.trade || null,
+          assignedTradeRate: employeeTradeMap.get(stub.empId)?.hourlyRate ?? null,
           isTeamLeader: emp?.isTeamLeader ?? false,
           isSupervisor: emp?.isSupervisor ?? false,
           rateTier: 'standard',

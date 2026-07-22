@@ -1848,11 +1848,7 @@ export function SitesPage() {
                             </TableCell>
                             <TableCell className="text-slate-300 text-sm font-mono">{emp.employeeId}</TableCell>
                             <TableCell className="text-slate-300 text-sm">
-                              {emp.assignedTrade ? (
-                                <Badge className="bg-violet-500/15 text-violet-300 border-violet-500/30 text-[10px]">
-                                  {emp.assignedTrade}{emp.assignedTradeRate ? ` (${emp.assignedTradeRate})` : ''}
-                                </Badge>
-                              ) : emp.trade || emp.position || <span className="text-slate-600">&mdash;</span>}
+                              {emp.assignedTrade || emp.trade || emp.position || <span className="text-slate-600">&mdash;</span>}
                             </TableCell>
                             <TableCell>
                               <StarRating rating={emp.rating} />
