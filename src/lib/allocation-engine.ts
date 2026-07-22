@@ -147,7 +147,20 @@ export async function allocateEmployeeHours(
     // Priority: 1) employee.customHourlyRate (per-employee override)
     //           2) Trade rate (from TradeRate table, e.g. "Hilti" = 6)
     //           3) Role-based (TL/Sup: 3.0/5.5, Standard: 2.5/5.0)
-    const tradeRate = employee.trade ? tradeRateMap.get(employee.trade) : undefined;
+    //
+    // CRITICAL: use the trade from the SALARY RECORD (not the Employee table)
+    // to look up the trade rate. The admin may have changed the trade in
+    // Accounts (e.g. from "Labor" to "Hilti"), and that change is saved to
+    // the SalaryRecord. The allocation engine must use the saved trade, not
+    // the employee's original trade.
+    //
+    // We find the saved trade from any existing salary record for this
+    // employee+month+year. All records for the same employee should have the
+    // same trade (it's set per-employee, not per-tier).
+    const savedTrade = records.length > 0
+      ? (records.find(r => r.trade)?.trade || employee.trade)
+      : employee.trade;
+    const tradeRate = savedTrade ? tradeRateMap.get(savedTrade) : undefined;
     const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
     const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
 
