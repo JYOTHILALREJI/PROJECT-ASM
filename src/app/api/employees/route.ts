@@ -129,13 +129,26 @@ export async function GET(request: NextRequest) {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: {
+          employeeTrade: {
+            include: {
+              tradeRate: { select: { id: true, trade: true, hourlyRate: true } },
+            },
+          },
+        },
       }),
       db.employee.count({ where }),
     ]);
 
-    const decryptedEmployees = employees.map((emp) =>
-      decryptEmployee({ ...emp, dateOfBirth: emp.dateOfBirth?.toISOString() || null, joinDate: emp.joinDate?.toISOString() || null, createdAt: emp.createdAt.toISOString(), updatedAt: emp.updatedAt.toISOString() })
-    );
+    const decryptedEmployees = employees.map((emp) => {
+      const decrypted = decryptEmployee({ ...emp, dateOfBirth: emp.dateOfBirth?.toISOString() || null, joinDate: emp.joinDate?.toISOString() || null, createdAt: emp.createdAt.toISOString(), updatedAt: emp.updatedAt.toISOString() });
+      // Add assigned trade from EmployeeTrade junction table
+      return {
+        ...decrypted,
+        assignedTrade: emp.employeeTrade?.tradeRate?.trade || null,
+        assignedTradeRate: emp.employeeTrade?.tradeRate?.hourlyRate || null,
+      };
+    });
 
     // Get distinct trades for filter dropdowns
     const trades = await db.employee.findMany({

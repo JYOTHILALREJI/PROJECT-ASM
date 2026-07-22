@@ -1765,7 +1765,6 @@ export function EmployeePage() {
                   <TableRow className="border-slate-700/50 hover:bg-transparent">
                     <TableHead className="text-slate-400 font-medium">Employee</TableHead>
                     <TableHead className="text-slate-400 font-medium">Employee ID</TableHead>
-                    <TableHead className="text-slate-400 font-medium">Trade</TableHead>
                     <TableHead className="text-slate-400 font-medium">Site</TableHead>
                     <TableHead className="text-slate-400 font-medium">Rating</TableHead>
                     <TableHead className="text-slate-400 font-medium">Status</TableHead>
@@ -1818,9 +1817,6 @@ export function EmployeePage() {
                       </TableCell>
                       <TableCell>
                         <span className="text-sm text-slate-300 font-mono">{emp.employeeId}</span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm text-slate-300">{emp.trade || emp.position || '—'}</span>
                       </TableCell>
                       <TableCell>
                         {emp.currentSite === 'Idle' ? (
@@ -1936,10 +1932,6 @@ export function EmployeePage() {
                     <StatusBadge status={emp.status} />
                   </div>
                   <div className="grid grid-cols-2 gap-2 mb-3">
-                    <div>
-                      <p className="text-xs text-slate-500">Trade</p>
-                      <p className="text-sm text-slate-300">{emp.trade || emp.position || '—'}</p>
-                    </div>
                     <div>
                       <p className="text-xs text-slate-500">Site</p>
                       <p className="text-sm text-slate-300">

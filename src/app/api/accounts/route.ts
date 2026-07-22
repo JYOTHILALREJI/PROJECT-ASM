@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
 // GET /api/accounts
 // Mode 1: Per-site query (siteId + month required) → returns salary records for that site
@@ -14,6 +15,7 @@ export async function GET(request: NextRequest) {
 
     // Build trade rate map for trade-based custom rates
     const tradeRateMap = await buildTradeRateMap();
+    const employeeTradeMap = await buildEmployeeTradeMap();
 
     if (!month) {
       return NextResponse.json(
@@ -453,6 +455,8 @@ export async function GET(request: NextRequest) {
       employeeCode: string;
       nationality: string;
       trade: string;
+      assignedTrade: string | null;
+      assignedTradeRate: number | null;
       isTeamLeader: boolean;
       isSupervisor: boolean;
       rateTier: 'standard' | 'premium';
@@ -550,6 +554,8 @@ export async function GET(request: NextRequest) {
             employeeCode: rec.employeeCode,
             nationality: rec.nationality,
             trade: rec.trade,
+            assignedTrade: employeeTradeMap.get(eId)?.trade || null,
+            assignedTradeRate: employeeTradeMap.get(eId)?.hourlyRate ?? null,
             isTeamLeader: emp?.isTeamLeader ?? false,
             isSupervisor: emp?.isSupervisor ?? false,
             rateTier: rec.rateTier as 'standard' | 'premium',

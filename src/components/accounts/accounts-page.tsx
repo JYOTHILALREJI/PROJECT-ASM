@@ -59,6 +59,8 @@ interface MergedEmployeeRow {
   empName: string;
   nationality: string;
   trade: string;
+  assignedTrade: string | null;
+  assignedTradeRate: number | null;
   employeeCode: string;
   isTeamLeader: boolean;
   isSupervisor: boolean;
@@ -120,6 +122,8 @@ interface ApiEmployeeEntry {
   employeeCode: string;
   nationality: string;
   trade: string;
+  assignedTrade: string | null;
+  assignedTradeRate: number | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
   rateTier: 'standard' | 'premium';
@@ -281,6 +285,8 @@ function mergeApiEntries(
       empName: baseEntry.empName,
       nationality: baseEntry.salaryRecord?.nationality || baseEntry.nationality,
       trade: baseEntry.salaryRecord?.trade || baseEntry.trade,
+      assignedTrade: baseEntry.assignedTrade || null,
+      assignedTradeRate: baseEntry.assignedTradeRate ?? null,
       employeeCode: baseEntry.salaryRecord?.employeeCode || baseEntry.employeeCode,
       isTeamLeader: baseEntry.isTeamLeader,
       isSupervisor: baseEntry.isSupervisor,
@@ -1677,12 +1683,13 @@ export function AccountsPage() {
                                     </select>
                                   ) : (
                                     <span className="text-[11px] text-slate-300">
-                                      {tradeDisplay(emp)}
+                                      {emp.assignedTrade ? (
+                                        <Badge className="bg-violet-500/15 text-violet-300 border-violet-500/30 text-[9px] px-1 py-0">
+                                          {emp.assignedTrade}{emp.assignedTradeRate ? ` (${emp.assignedTradeRate})` : ''}
+                                        </Badge>
+                                      ) : tradeDisplay(emp)}
                                       {emp.isCustomRate && (
                                         <span className="ml-1 text-violet-400 text-[10px]">(custom)</span>
-                                      )}
-                                      {tradeRates.some(tr => tr.trade === emp.trade) && !emp.isCustomRate && (
-                                        <span className="ml-1 text-violet-400 text-[10px]">(trade rate)</span>
                                       )}
                                     </span>
                                   )}

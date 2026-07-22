@@ -62,6 +62,8 @@ interface Employee {
   position: string | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
+  assignedTrade?: string | null;
+  assignedTradeRate?: number | null;
   // ── Per-site-assignment fields (set when building employeesBySite) ──
   // The date the employee started at this site (clamped to month start).
   // Format: YYYY-MM-DD. Undefined for employees with no site-assignment
@@ -1518,16 +1520,18 @@ export function AttendancePage() {
           // Exclude 'Idle' (no currentSite) employees from the attendance grid
           const emps: Employee[] = (data.data.employees || [])
             .filter((e: Employee) => e.currentSite && e.currentSite !== 'Idle')
-            .map((e: Employee) => ({
-              id: e.id,
-              fullName: e.fullName,
-              employeeId: e.employeeId,
-              currentSite: e.currentSite,
-              status: e.status,
-              trade: e.trade || null,
-              position: (e as { position?: string | null }).position || null,
-              isTeamLeader: (e as { isTeamLeader?: boolean }).isTeamLeader || false,
-              isSupervisor: (e as { isSupervisor?: boolean }).isSupervisor || false,
+            .map((e: Record<string, unknown>) => ({
+              id: e.id as string,
+              fullName: e.fullName as string,
+              employeeId: e.employeeId as string,
+              currentSite: e.currentSite as string | null,
+              status: e.status as string,
+              trade: (e.trade as string) || null,
+              position: (e.position as string) || null,
+              isTeamLeader: (e.isTeamLeader as boolean) || false,
+              isSupervisor: (e.isSupervisor as boolean) || false,
+              assignedTrade: (e.assignedTrade as string) || null,
+              assignedTradeRate: (e.assignedTradeRate as number) ?? null,
             }));
           setEmployees(emps);
         }
@@ -2194,7 +2198,7 @@ export function AttendancePage() {
       id: e.id,
       fullName: e.fullName,
       employeeId: e.employeeId,
-      position: e.position || e.trade || '',
+      position: e.assignedTrade || e.position || e.trade || '',
       isTeamLeader: e.isTeamLeader,
       currentSite: e.currentSite,
     }));

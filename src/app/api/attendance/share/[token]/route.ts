@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { syncEmployeeSalaryFromAttendance } from '@/lib/attendance-sync';
 import { captureAttendanceVersion } from '@/lib/attendance-version';
 import { logActivity } from '@/lib/activity-logger';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
 // ---------------------------------------------------------------------------
 // /api/attendance/share/[token]
@@ -89,6 +90,9 @@ export async function GET(
       },
     });
 
+    // Build employee trade map for assigned trades
+    const employeeTradeMap = await buildEmployeeTradeMap();
+
     // Fetch the LIVE attendance records for this site's employees on the
     // share's date. This makes the share page bidirectional: when an admin
     // changes attendance on the website, the share page reflects it (when
@@ -143,7 +147,7 @@ export async function GET(
           id: e.id,
           fullName: e.fullName,
           employeeId: e.employeeId,
-          trade: e.trade,
+          trade: employeeTradeMap.get(e.id)?.trade || e.trade,
           position: e.position,
           isTeamLeader: e.isTeamLeader,
           isSupervisor: e.isSupervisor,
