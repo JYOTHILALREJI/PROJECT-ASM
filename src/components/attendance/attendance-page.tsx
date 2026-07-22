@@ -1519,7 +1519,7 @@ export function AttendancePage() {
         if (data.success) {
           // Exclude 'Idle' (no currentSite) employees from the attendance grid
           const emps: Employee[] = (data.data.employees || [])
-            .filter((e: Employee) => e.currentSite && e.currentSite !== 'Idle')
+            .filter((e: Record<string, unknown>) => e.currentSite && e.currentSite !== 'Idle')
             .map((e: Record<string, unknown>) => ({
               id: e.id as string,
               fullName: e.fullName as string,

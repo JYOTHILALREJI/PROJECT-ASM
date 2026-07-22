@@ -505,12 +505,16 @@ export async function GET(request: NextRequest) {
         const aggregateTotal = aggregateHoursMap.get(eId) || 0;
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
-        // Check trade rate (priority: custom rate > trade rate > role-based)
-        // Use the trade from the SALARY RECORD, not from the Employee table.
-        // The admin sets the trade per-month in the Accounts page; the
-        // Employee.trade field is only for ID purposes.
-        const salaryTrade = eRecords[0]?.trade || 'Helper';
-        const tradeRate = salaryTrade ? tradeRateMap.get(salaryTrade) : undefined;
+        // Check trade rate (priority: custom rate > salary record trade >
+        // EmployeeTrade > "Helper")
+        // The admin sets the trade per-month in the Accounts page (saved to
+        // SalaryRecord.trade). If not set there, fall back to the EmployeeTrade
+        // assignment (set from the Sites page). Employee.trade is only for ID.
+        const salaryTrade = eRecords[0]?.trade || null;
+        const empTradeInfo = employeeTradeMap.get(eId);
+        const effectiveTrade = salaryTrade || empTradeInfo?.trade || 'Helper';
+        const isHelper = effectiveTrade.toLowerCase() === 'helper';
+        const tradeRate = !isHelper ? tradeRateMap.get(effectiveTrade) : undefined;
 
         // Get working hours info
         const empWhRecords = whByEmp.get(eId) || [];
@@ -594,8 +598,11 @@ export async function GET(request: NextRequest) {
         const aggregateTotal = aggregateHoursMap.get(stub.empId) || 0;
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
-        // Check trade rate — use 'Helper' as default for stub entries
-        const tradeRate = tradeRateMap.get('Helper');
+        // Check trade rate — use EmployeeTrade assignment, fallback to 'Helper'
+        const stubEmpTradeInfo = employeeTradeMap.get(stub.empId);
+        const stubEffectiveTrade = stubEmpTradeInfo?.trade || 'Helper';
+        const stubIsHelper = stubEffectiveTrade.toLowerCase() === 'helper';
+        const tradeRate = !stubIsHelper ? tradeRateMap.get(stubEffectiveTrade) : undefined;
 
         const empWhRecords = whByEmp.get(stub.empId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
