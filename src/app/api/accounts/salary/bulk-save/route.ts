@@ -4,6 +4,11 @@ import { allocateEmployeeHours, type AllocationResult } from '@/lib/allocation-e
 import { recalcEmployeeFromMonth } from '@/lib/recalculation';
 import { logActivity } from '@/lib/activity-logger';
 
+// Force dynamic — ensures this route is always treated as a serverless function
+// and never statically optimized. Fixes 404 errors in Turbopack dev mode when
+// the .next cache is stale.
+export const dynamic = 'force-dynamic';
+
 // ---------------------------------------------------------------------------
 // POST /api/accounts/salary/bulk-save
 // ---------------------------------------------------------------------------
