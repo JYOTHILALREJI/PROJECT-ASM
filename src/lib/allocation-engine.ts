@@ -204,11 +204,15 @@ export async function allocateEmployeeHours(
     // CRITICAL: This is CUMULATIVE ACROSS ALL YEARS, not per-year.
     // String comparison "2024-12" < "2025-01" is correct for YYYY-MM format,
     // so month: { lt: month } correctly includes all prior months across years.
+    //
+    // CRITICAL: Exclude rateTier='camp_sitting' — camp sitting hours must NOT
+    // count toward the lifetime threshold (only P=10h and overtime count).
     const previousSalaryRecords = await db.salaryRecord.findMany({
       where: {
         empId,
         month: { lt: month },
         isDeleted: false,
+        rateTier: { in: ['standard', 'premium'] },
       },
     });
 
@@ -234,6 +238,10 @@ export async function allocateEmployeeHours(
     >();
 
     for (const record of records) {
+      // Skip camp_sitting records — they're handled separately and must NOT
+      // be included in the threshold split or the site's rawHours.
+      if (record.rateTier === 'camp_sitting') continue;
+
       if (!siteMap.has(record.siteId)) {
         siteMap.set(record.siteId, {
           siteId: record.siteId,

@@ -126,7 +126,7 @@ interface ApiEmployeeEntry {
   assignedTradeRate: number | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
-  rateTier: 'standard' | 'premium';
+  rateTier: 'standard' | 'premium' | 'camp_sitting';
   salaryRecord: {
     id: string;
     empId: string;
@@ -246,8 +246,9 @@ function mergeApiEntries(
     slNo++;
     const standardEntry = empEntries.find((e) => e.rateTier === 'standard');
     const premiumEntry = empEntries.find((e) => e.rateTier === 'premium');
+    const campEntry = empEntries.find((e) => e.rateTier === 'camp_sitting');
 
-    const baseEntry = standardEntry || premiumEntry || empEntries[0];
+    const baseEntry = standardEntry || premiumEntry || campEntry || empEntries[0];
     const hasBonus = baseEntry.isTeamLeader || baseEntry.isSupervisor;
 
     // Extract custom rate info BEFORE computing rates (PRD v2.0 — direct hourly rates)
@@ -263,11 +264,13 @@ function mergeApiEntries(
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
     const highRateHours = premiumEntry?.salaryRecord?.totalHours ?? 0;
-    const totalHours = lowRateHours + highRateHours;
+    const campHours = campEntry?.salaryRecord?.totalHours ?? 0;
+    const totalHours = lowRateHours + highRateHours + campHours;
 
     const standardSalary = standardEntry?.salaryRecord?.totalSalary ?? lowRateHours * lowRate;
     const premiumSalary = premiumEntry?.salaryRecord?.totalSalary ?? highRateHours * highRate;
-    const totalSalary = standardSalary + premiumSalary;
+    const campSalary = campEntry?.salaryRecord?.totalSalary ?? 0;
+    const totalSalary = standardSalary + premiumSalary + campSalary;
 
     const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
     const advance = standardEntry?.salaryRecord?.advance ?? 0;

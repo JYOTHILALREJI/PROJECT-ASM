@@ -94,7 +94,7 @@ interface ApiEmployeeEntry {
   assignedTradeRate: number | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
-  rateTier: 'standard' | 'premium';
+  rateTier: 'standard' | 'premium' | 'camp_sitting';
   salaryRecord: {
     id: string;
     empId: string;
@@ -224,8 +224,9 @@ function mergeApiEntries(
   for (const [empId, empEntries] of sortedGroups) {
     const standardEntry = empEntries.find((e) => e.rateTier === 'standard');
     const premiumEntry = empEntries.find((e) => e.rateTier === 'premium');
+    const campEntry = empEntries.find((e) => e.rateTier === 'camp_sitting');
 
-    const baseEntry = standardEntry || premiumEntry || empEntries[0];
+    const baseEntry = standardEntry || premiumEntry || campEntry || empEntries[0];
     const hasBonus = baseEntry.isTeamLeader || baseEntry.isSupervisor;
 
     // Custom rate info from workingHours (resolved server-side by /api/accounts)
@@ -254,22 +255,24 @@ function mergeApiEntries(
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
     const highRateHours = premiumEntry?.salaryRecord?.totalHours ?? 0;
-    const totalHours = lowRateHours + highRateHours;
+    const campHours = campEntry?.salaryRecord?.totalHours ?? 0;
+    const totalHours = lowRateHours + highRateHours + campHours;
 
-    // Gross salary = sum of the salary record totals (which are computed
-    // server-side using the trade-aware rate). For stub entries with no
-    // salary record, fall back to hours × rate.
+    // Gross salary = sum of ALL salary record totals (standard + premium + camp_sitting).
+    // Camp_sitting hours are at the low rate (not threshold-split).
     const standardSalary =
       standardEntry?.salaryRecord?.totalSalary ?? lowRateHours * lowRate;
     const premiumSalary =
       premiumEntry?.salaryRecord?.totalSalary ?? highRateHours * highRate;
-    const totalSalary = standardSalary + premiumSalary;
+    const campSalary = campEntry?.salaryRecord?.totalSalary ?? 0;
+    const totalSalary = standardSalary + premiumSalary + campSalary;
 
     const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
     const advance = standardEntry?.salaryRecord?.advance ?? 0;
     const isPaid =
       (standardEntry?.salaryRecord?.isPaid ?? false) ||
-      (premiumEntry?.salaryRecord?.isPaid ?? false);
+      (premiumEntry?.salaryRecord?.isPaid ?? false) ||
+      (campEntry?.salaryRecord?.isPaid ?? false);
 
     let rateTier: 'standard' | 'premium' | 'split' = 'standard';
     if (standardEntry && premiumEntry) {
@@ -385,6 +388,7 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
     const sites: FlatEmployeeSite[] = [];
     let totalBelow = 0;
     let totalAbove = 0;
+    let totalAllHours = 0;
     let totalGross = 0;
     let totalBelowComponent = 0;
     let totalAboveComponent = 0;
@@ -414,6 +418,7 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
 
       totalBelow += row.lowRateHours;
       totalAbove += row.highRateHours;
+      totalAllHours += row.totalHours; // includes camp_sitting hours
       totalGross += siteGross;
       totalBelowComponent += belowComponent;
       totalAboveComponent += aboveComponent;
@@ -439,7 +444,7 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
       highRate: baseRow.highRate,
       totalBelowThresholdHours: totalBelow,
       totalAboveThresholdHours: totalAbove,
-      totalHours: totalBelow + totalAbove,
+      totalHours: totalAllHours,
       grossSalary: totalGross,
       belowSalaryComponent: totalBelowComponent,
       aboveSalaryComponent: totalAboveComponent,

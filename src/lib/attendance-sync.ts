@@ -7,43 +7,53 @@ import { recalcEmployeeFromMonth } from '@/lib/recalculation';
 // ---------------------------------------------------------------------------
 // Business rule (per project owner):
 //   When attendance is marked for an employee on a given day:
-//     - status === "present"   → 10 hours for that day
-//     - status === "overtime"  → 10 hours base + overtimeHours additional
-//     - status === "absent"    → 0 hours
-//     - status === "no_site"   → 0 hours
-//     - status === "not_marked"→ 0 hours (treated as no entry)
+//     - status === "present"      → 10 hours for that day
+//     - status === "overtime"     → 10 hours base + overtimeHours additional
+//     - status === "camp_sitting" → 8 hours (NOT counted in lifetime/threshold)
+//     - status === "absent"       → 0 hours
+//     - status === "no_site"      → 0 hours
+//     - status === "not_marked"   → 0 hours (treated as no entry)
 //
-// These hours are written into the employee's SalaryRecord for the
-// employee's CURRENT WORKING SITE for that month. If the employee has
-// no current site, the sync is skipped (no-op).
+// Camp Sitting (C) is special: the 8 hours ARE added to the monthly total
+// for salary purposes, but they are NOT included in the lifetime cumulative
+// hours that determine the low/high rate threshold. This is implemented by
+// storing camp_sitting hours in a SEPARATE SalaryRecord with
+// rateTier='camp_sitting'. The allocation engine excludes 'camp_sitting'
+// records from the previousCumulative calculation and from the current
+// month's threshold split.
 //
-// After upserting the salary record, the allocation engine is run for
+// After upserting the salary records, the allocation engine is run for
 // that month so that the standard/premium split is recomputed, and
 // TotalEmployeeWorkingHours is updated accordingly.
 // ---------------------------------------------------------------------------
 
 export const HOURS_PER_PRESENT_DAY = 10;
+export const HOURS_PER_CAMP_SITTING = 8;
 
 /**
  * Compute the total working hours for an employee in a given month
  * based on attendance records.
  *
+ * Returns both the total (including camp_sitting) and the camp_sitting
+ * component separately so the caller can store them in different
+ * SalaryRecord rateTiers.
+ *
  * Rules:
- *   present  → 10 hours
- *   overtime → 10 + overtimeHours
- *   absent   → 0
- *   no_site  → 0
- *   not_marked → 0
+ *   present      → 10 hours
+ *   overtime     → 10 + overtimeHours
+ *   camp_sitting → 8 hours (tracked separately)
+ *   absent       → 0
+ *   no_site      → 0
+ *   not_marked   → 0
  */
 export async function computeMonthlyHoursFromAttendance(
   employeeId: string,
   month: string, // YYYY-MM
-): Promise<number> {
-  // month is "YYYY-MM" — build start/end dates that cover the whole month
+): Promise<{ totalHours: number; regularHours: number; campSittingHours: number }> {
   const [yearStr, monthStr] = month.split('-');
   const year = parseInt(yearStr, 10);
   const monthNum = parseInt(monthStr, 10);
-  if (!year || !monthNum) return 0;
+  if (!year || !monthNum) return { totalHours: 0, regularHours: 0, campSittingHours: 0 };
 
   const startDate = `${year}-${String(monthNum).padStart(2, '0')}-01`;
   const endDate = `${year}-${String(monthNum).padStart(2, '0')}-31`;
@@ -56,18 +66,24 @@ export async function computeMonthlyHoursFromAttendance(
     },
   });
 
-  let totalHours = 0;
+  let regularHours = 0;
+  let campSittingHours = 0;
   for (const r of records) {
     if (r.status === 'present') {
-      totalHours += HOURS_PER_PRESENT_DAY;
+      regularHours += HOURS_PER_PRESENT_DAY;
     } else if (r.status === 'overtime') {
-      // 10 hours base + overtime hours on top
-      totalHours += HOURS_PER_PRESENT_DAY + (r.overtimeHours || 0);
+      regularHours += HOURS_PER_PRESENT_DAY + (r.overtimeHours || 0);
+    } else if (r.status === 'camp_sitting') {
+      campSittingHours += HOURS_PER_CAMP_SITTING;
     }
     // absent / no_site / not_marked → 0 hours
   }
 
-  return totalHours;
+  return {
+    totalHours: regularHours + campSittingHours,
+    regularHours,
+    campSittingHours,
+  };
 }
 
 /**
@@ -140,8 +156,8 @@ export async function syncEmployeeSalaryFromAttendance(
     };
   }
 
-  // 2. Compute hours from attendance
-  const totalHours = await computeMonthlyHoursFromAttendance(employeeId, month);
+  // 2. Compute hours from attendance (regular + camp_sitting tracked separately)
+  const { totalHours, regularHours, campSittingHours } = await computeMonthlyHoursFromAttendance(employeeId, month);
 
   const [yearStr, monthStr] = month.split('-');
   const year = parseInt(yearStr, 10);
@@ -162,6 +178,19 @@ export async function syncEmployeeSalaryFromAttendance(
     },
   });
 
+  // Also fetch any existing camp_sitting record so we can preserve its fields
+  const existingCampRecord = await db.salaryRecord.findUnique({
+    where: {
+      empId_siteId_month_year_rateTier: {
+        empId: employeeId,
+        siteId: site.id,
+        month,
+        year,
+        rateTier: 'camp_sitting',
+      },
+    },
+  });
+
   const hasBonus = employee.isTeamLeader || employee.isSupervisor;
   const defaultLowRate = employee.customHourlyRate ?? (hasBonus ? 3.0 : 2.5);
   const rtPerHour = existingRecord?.rtPerHour ?? defaultLowRate;
@@ -173,11 +202,17 @@ export async function syncEmployeeSalaryFromAttendance(
   const slNo = existingRecord?.slNo ?? 0;
   const employeeCode = existingRecord?.employeeCode || employee.employeeId || '';
 
-  // 3. If totalHours is 0, soft-delete any existing standard record (no work = no salary entry)
+  // 3. If totalHours is 0, soft-delete any existing standard AND camp_sitting records
   if (totalHours <= 0) {
     if (existingRecord && !existingRecord.isDeleted) {
       await db.salaryRecord.update({
         where: { id: existingRecord.id },
+        data: { isDeleted: true },
+      });
+    }
+    if (existingCampRecord && !existingCampRecord.isDeleted) {
+      await db.salaryRecord.update({
+        where: { id: existingCampRecord.id },
         data: { isDeleted: true },
       });
     }
@@ -231,59 +266,137 @@ export async function syncEmployeeSalaryFromAttendance(
     };
   }
 
-  // 4. Upsert salary record with computed hours
-  const totalSalary = totalHours * rtPerHour;
-  const balanceSalary = totalSalary - deduction - advance;
+  // 4. Upsert STANDARD salary record with REGULAR hours (excludes camp_sitting)
+  //    The allocation engine will split these into standard/premium tiers.
+  //    Camp_sitting hours are stored in a SEPARATE record (rateTier='camp_sitting')
+  //    so they're excluded from the lifetime/threshold calculation.
+  const standardHours = regularHours;
+  const standardSalary = standardHours * rtPerHour;
+  const standardBalance = standardSalary - deduction - advance;
 
-  const upserted = await db.salaryRecord.upsert({
-    where: {
-      empId_siteId_month_year_rateTier: {
+  let upsertedId: string | undefined;
+
+  if (standardHours > 0) {
+    const upserted = await db.salaryRecord.upsert({
+      where: {
+        empId_siteId_month_year_rateTier: {
+          empId: employeeId,
+          siteId: site.id,
+          month,
+          year,
+          rateTier: 'standard',
+        },
+      },
+      update: {
+        empName: employee.fullName,
+        siteName: site.name,
+        nationality: employee.nationality || '',
+        employeeCode,
+        slNo,
+        totalHours: standardHours,
+        rtPerHour,
+        totalSalary: standardSalary,
+        deduction,
+        advance,
+        balanceSalary: standardBalance,
+        isPaid,
+        isDeleted: false,
+      },
+      create: {
         empId: employeeId,
+        empName: employee.fullName,
         siteId: site.id,
+        siteName: site.name,
         month,
         year,
+        nationality: employee.nationality || '',
+        trade: 'Helper',
+        employeeCode,
+        slNo,
+        totalHours: standardHours,
+        rtPerHour,
+        totalSalary: standardSalary,
+        deduction,
+        advance,
+        balanceSalary: standardBalance,
+        isPaid,
         rateTier: 'standard',
       },
-    },
-    update: {
-      empName: employee.fullName,
-      siteName: site.name,
-      nationality: employee.nationality || '',
-      // DO NOT overwrite trade — it's set by the admin in Accounts.
-      // Only set it if the existing record doesn't have one.
-      // The upsert will handle this via the create fallback below.
-      employeeCode,
-      slNo,
-      totalHours,
-      rtPerHour,
-      totalSalary,
-      deduction,
-      advance,
-      balanceSalary,
-      isPaid,
-      isDeleted: false,
-    },
-    create: {
-      empId: employeeId,
-      empName: employee.fullName,
-      siteId: site.id,
-      siteName: site.name,
-      month,
-      year,
-      nationality: employee.nationality || '',
-      trade: 'Helper',
-      employeeCode,
-      slNo,
-      totalHours,
-      rtPerHour,
-      totalSalary,
-      deduction,
-      advance,
-      balanceSalary,
-      isPaid,
-      rateTier: 'standard',
-    },
-  });
+    });
+    upsertedId = upserted.id;
+  } else {
+    // No regular hours — soft-delete the standard record if it exists
+    if (existingRecord && !existingRecord.isDeleted) {
+      await db.salaryRecord.update({
+        where: { id: existingRecord.id },
+        data: { isDeleted: true },
+      });
+    }
+  }
+
+  // 4b. Upsert CAMP_SITTING salary record (separate rateTier)
+  //    Camp_sitting hours are always at the low rate (no threshold split).
+  //    These hours ARE included in the monthly salary but NOT in lifetime.
+  if (campSittingHours > 0) {
+    const campSalary = campSittingHours * defaultLowRate;
+    const campDeduction = existingCampRecord?.deduction ?? 0;
+    const campAdvance = existingCampRecord?.advance ?? 0;
+    const campBalance = campSalary - campDeduction - campAdvance;
+    await db.salaryRecord.upsert({
+      where: {
+        empId_siteId_month_year_rateTier: {
+          empId: employeeId,
+          siteId: site.id,
+          month,
+          year,
+          rateTier: 'camp_sitting',
+        },
+      },
+      update: {
+        empName: employee.fullName,
+        siteName: site.name,
+        nationality: employee.nationality || '',
+        employeeCode,
+        slNo,
+        totalHours: campSittingHours,
+        rtPerHour: defaultLowRate,
+        totalSalary: campSalary,
+        deduction: campDeduction,
+        advance: campAdvance,
+        balanceSalary: campBalance,
+        isPaid,
+        isDeleted: false,
+      },
+      create: {
+        empId: employeeId,
+        empName: employee.fullName,
+        siteId: site.id,
+        siteName: site.name,
+        month,
+        year,
+        nationality: employee.nationality || '',
+        trade: 'Helper',
+        employeeCode,
+        slNo,
+        totalHours: campSittingHours,
+        rtPerHour: defaultLowRate,
+        totalSalary: campSalary,
+        deduction: campDeduction,
+        advance: campAdvance,
+        balanceSalary: campBalance,
+        isPaid,
+        rateTier: 'camp_sitting',
+      },
+    });
+  } else {
+    // No camp_sitting hours — soft-delete the camp_sitting record if it exists
+    if (existingCampRecord && !existingCampRecord.isDeleted) {
+      await db.salaryRecord.update({
+        where: { id: existingCampRecord.id },
+        data: { isDeleted: true },
+      });
+    }
+  }
 
   // 5. Ensure a TotalEmployeeWorkingHours entry exists for this month
   await db.totalEmployeeWorkingHours.upsert({
@@ -378,6 +491,6 @@ export async function syncEmployeeSalaryFromAttendance(
     ok: true,
     skipped: false,
     totalHours,
-    salaryRecordId: upserted.id,
+    salaryRecordId: upsertedId,
   };
 }

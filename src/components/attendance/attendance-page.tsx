@@ -26,6 +26,7 @@ import {
   UserPlus,
   Download,
   ArrowLeft,
+  Undo2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -65,26 +66,21 @@ interface Employee {
   assignedTrade?: string | null;
   assignedTradeRate?: number | null;
   // ── Per-site-assignment fields (set when building employeesBySite) ──
-  // The date the employee started at this site (clamped to month start).
-  // Format: YYYY-MM-DD. Undefined for employees with no site-assignment
-  // record (treated as active for the whole month).
   activeFrom?: string;
-  // The date the employee left this site (clamped to month end), or null
-  // if still at the site. Format: YYYY-MM-DD or null.
   activeUntil?: string | null;
-  // True if the employee has been moved away from this site (removedDate
-  // is set). Used to fade the row and sort it to the bottom.
   movedAway?: boolean;
-  // ── Previous-site info (for the faded out-of-range cells) ──
+  // ── Previous-site info (for the merged out-of-range cells at row start) ──
   // When an employee moved TO this site mid-month (activeFrom > monthStart),
   // previousSite is the name of the site they were at before. Used to show
-  // "← SiteName (Nd)" in the faded region of the row so the admin knows
-  // where the employee was before. Null if the employee was at this site
-  // for the whole month (no faded region to label).
+  // the site name in the merged non-editable cells before activeFrom.
   previousSite?: string | null;
-  // Number of days the employee was at the previous site during this month
-  // (for display alongside previousSite). 0 if no previous site.
   previousSiteDays?: number;
+  // ── Next-site info (for the merged out-of-range cells at row end) ──
+  // When an employee moved AWAY from this site mid-month (activeUntil < monthEnd),
+  // nextSite is the name of the site they moved to. Used to show the site name
+  // in the merged non-editable cells after activeUntil.
+  nextSite?: string | null;
+  nextSiteDays?: number;
 }
 
 interface SiteOption {
@@ -99,7 +95,7 @@ interface AttendanceRecord {
   id: string;
   employeeId: string;
   date: string;
-  status: 'present' | 'absent' | 'no_site' | 'overtime' | 'not_marked';
+  status: 'present' | 'absent' | 'no_site' | 'overtime' | 'camp_sitting' | 'not_marked';
   overtimeHours: number | null;
   employee?: { id: string; fullName: string; employeeId: string };
 }
@@ -145,53 +141,32 @@ function isFriday(year: number, month: number, day: number): boolean {
   return new Date(year, month - 1, day).getDay() === 5;
 }
 
-function getRelativeDateLabel(day: number, month: number, year: number): string | null {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(year, month - 1, day);
-  target.setHours(0, 0, 0, 0);
-  const diffMs = today.getTime() - target.getTime();
-  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays === 2) return '2 days ago';
-  if (diffDays === 3) return '3 days ago';
-  if (diffDays === 4) return '4 days ago';
-  if (diffDays === 5) return '5 days ago';
-  if (diffDays === 6) return '6 days ago';
-  return null;
-}
+// Hours credited per status per day
+const HOURS_PER_PRESENT = 10;
+const HOURS_PER_CAMP_SITTING = 8;
 
 const STATUS_CONFIG: Record<StatusOption, { label: string; short: string; color: string; dotColor: string }> = {
   present: { label: 'Present', short: 'P', color: 'bg-green-500/20 text-green-400', dotColor: 'bg-green-500' },
   absent: { label: 'Absent', short: 'A', color: 'bg-red-500/20 text-red-400', dotColor: 'bg-red-500' },
   no_site: { label: 'No Site', short: 'NS', color: 'bg-amber-500/20 text-amber-400', dotColor: 'bg-amber-500' },
   overtime: { label: 'Overtime', short: 'O', color: 'bg-blue-500/20 text-blue-400', dotColor: 'bg-blue-500' },
+  camp_sitting: { label: 'Camp Sitting', short: 'C', color: 'bg-orange-500/20 text-orange-400', dotColor: 'bg-orange-500' },
   not_marked: { label: 'Not Marked', short: '-', color: 'bg-slate-600/20 text-slate-500', dotColor: 'bg-slate-600' },
 };
 
 /* ───────── Excel-style Attendance Cell ───────── */
 // A single editable cell in the Excel-style attendance grid.
 //
-// Behaviour:
-//   - Click or keyboard-focus the cell to make it "active".
-//   - Press P (or p) → mark as Present. Cell turns GREEN, displays "10"
-//     (10 hours credited for the day).
-//   - Press A (or a) → mark as Absent. Cell turns solid RED, displays "A"
-//     (0 hours credited for the day).
-//   - Press Backspace / Delete → clear the cell (status = not_marked).
-//   - Arrow keys move between cells (handled by the parent grid, not here).
+// Keyboard behaviour:
+//   P → Present (solid green, "10", 10h credited)
+//   A → Absent  (solid red,   "A",  0h credited)
+//   C → Camp Sitting (solid orange, "C", 8h credited — NOT in lifetime hours)
+//   Backspace / Delete → clear (status = not_marked)
+//   Arrow keys / Enter / Tab → move between cells (handled by parent)
 //
 // The cell is a real <button> (not an <input>) so it's keyboard-focusable
-// but doesn't capture text. The only meaningful keys are P / A / Backspace /
-// Delete / Arrow keys / Enter / Tab — everything else is ignored.
-//
-// IMPORTANT: this component is defined at module scope (NOT inside the
-// SiteListView function body) so its function reference is stable across
-// re-renders. If it were defined inside SiteListView, every keystroke would
-// create a new component reference, React would unmount+remount the cell,
-// and focus would be lost after every keypress.
+// but doesn't capture text. Defined at module scope so the function
+// reference is stable across re-renders (prevents focus loss on keystroke).
 
 interface ExcelCellProps {
   employeeId: string;
@@ -201,8 +176,7 @@ interface ExcelCellProps {
   inRange: boolean;
   movedAway: boolean;
   isFriday: boolean;
-  isRecent: boolean;
-  onMark: (status: 'present' | 'absent') => void;
+  onMark: (status: 'present' | 'absent' | 'camp_sitting') => void;
   onClear: () => void;
   isActive: boolean;
   registerRef: (el: HTMLButtonElement | null) => void;
@@ -215,20 +189,23 @@ const ExcelCell = React.memo(function ExcelCell({
   inRange,
   movedAway,
   isFriday: fri,
-  isRecent,
   onMark,
   onClear,
   isActive,
   registerRef,
   onSelect,
 }: ExcelCellProps) {
+  // Tight cell: w-8 h-6 (32×24px) — minimal padding, no extra space.
   const baseClass =
-    'w-9 h-7 flex items-center justify-center text-[11px] font-bold transition-all outline-none select-none border border-slate-700/40';
+    'w-8 h-6 flex items-center justify-center text-[10px] font-bold transition-all outline-none select-none border border-slate-700/40';
 
   let cellClass = '';
   let cellContent: React.ReactNode = '';
 
   if (!inRange) {
+    // Out-of-range cells are handled by the merged-cell renderer in the
+    // parent, so this branch should never be hit for individual cells.
+    // Kept for safety.
     cellClass = 'bg-slate-800/30 text-slate-700 cursor-not-allowed';
     cellContent = '·';
   } else if (movedAway) {
@@ -238,6 +215,9 @@ const ExcelCell = React.memo(function ExcelCell({
     } else if (status === 'absent') {
       cellClass = 'bg-red-500/30 text-red-300/60 cursor-not-allowed';
       cellContent = 'A';
+    } else if (status === 'camp_sitting') {
+      cellClass = 'bg-orange-500/30 text-orange-300/60 cursor-not-allowed';
+      cellContent = 'C';
     } else if (status === 'overtime') {
       cellClass = 'bg-blue-500/30 text-blue-300/60 cursor-not-allowed';
       cellContent = 'O';
@@ -254,23 +234,18 @@ const ExcelCell = React.memo(function ExcelCell({
   } else if (status === 'absent') {
     cellClass = 'bg-red-500 text-white hover:bg-red-400';
     cellContent = 'A';
+  } else if (status === 'camp_sitting') {
+    cellClass = 'bg-orange-500 text-white hover:bg-orange-400';
+    cellContent = 'C';
   } else if (status === 'overtime') {
     cellClass = 'bg-blue-500 text-white hover:bg-blue-400';
-    cellContent = (
-      <span className="flex items-center gap-0.5">
-        O
-        {overtimeHours ? (
-          <span className="text-[8px] font-mono opacity-80">{overtimeHours}h</span>
-        ) : null}
-      </span>
-    );
+    cellContent = 'O';
   } else if (status === 'no_site') {
     cellClass = 'bg-amber-500 text-white hover:bg-amber-400';
     cellContent = 'NS';
   } else {
     cellClass = cn(
       'bg-slate-800/40 text-slate-600 hover:bg-slate-700/60',
-      isRecent && 'bg-emerald-500/10 hover:bg-emerald-500/20',
       fri && 'bg-red-500/5 hover:bg-red-500/10',
     );
     cellContent = '';
@@ -296,6 +271,9 @@ const ExcelCell = React.memo(function ExcelCell({
         } else if (k === 'a' || k === 'A') {
           e.preventDefault();
           onMark('absent');
+        } else if (k === 'c' || k === 'C') {
+          e.preventDefault();
+          onMark('camp_sitting');
         } else if (k === 'Backspace' || k === 'Delete') {
           e.preventDefault();
           onClear();
@@ -303,16 +281,18 @@ const ExcelCell = React.memo(function ExcelCell({
       }}
       title={
         !inRange
-          ? 'Out of range — employee was not at this site on this date'
+          ? 'Out of range'
           : movedAway
-            ? `Read-only — ${status === 'present' ? 'Present (10h)' : status === 'absent' ? 'Absent' : status === 'overtime' ? `Overtime (${overtimeHours ?? 0}h)` : 'Not marked'} — employee moved to another site`
+            ? `Read-only — ${status === 'present' ? 'Present (10h)' : status === 'absent' ? 'Absent' : status === 'camp_sitting' ? 'Camp Sitting (8h)' : status === 'overtime' ? `Overtime (${overtimeHours ?? 0}h)` : 'Not marked'} — employee moved`
             : status === 'present'
-              ? 'Present (10h) — press A to mark Absent, Backspace to clear'
+              ? 'Present (10h) — A=Absent, C=Camp, ⌫=clear'
               : status === 'absent'
-                ? 'Absent (0h) — press P to mark Present, Backspace to clear'
-                : status === 'overtime'
-                  ? `Overtime (${overtimeHours ?? 0}h)`
-                  : 'Not marked — press P for Present (10h), A for Absent'
+                ? 'Absent (0h) — P=Present, C=Camp, ⌫=clear'
+                : status === 'camp_sitting'
+                  ? 'Camp Sitting (8h, not in lifetime) — P=Present, A=Absent, ⌫=clear'
+                  : status === 'overtime'
+                    ? `Overtime (${overtimeHours ?? 0}h)`
+                    : 'Not marked — P=Present(10h), A=Absent(0h), C=Camp(8h)'
       }
       className={cn(baseClass, cellClass, activeRing, !interactive && 'cursor-not-allowed')}
     >
@@ -320,6 +300,40 @@ const ExcelCell = React.memo(function ExcelCell({
     </button>
   );
 });
+
+/* ───────── Merged Site Cell ───────── */
+// A wide non-editable cell that spans multiple day columns, showing the
+// site name where the employee was (previousSite) or where they went
+// (nextSite). Used when an employee moved between sites mid-month.
+function MergedSiteCell({
+  label,
+  dayCount,
+  align,
+}: {
+  label: string;
+  dayCount: number;
+  align: 'left' | 'right';
+}) {
+  // Each day cell is w-8 (32px) + 1px border. So total width = dayCount × 32.
+  const widthPx = dayCount * 32;
+  return (
+    <div
+      className="flex items-center justify-center border-r border-slate-700/30 bg-slate-700/30 select-none"
+      style={{ width: `${widthPx}px`, minWidth: `${widthPx}px` }}
+      title={label}
+    >
+      <span
+        className={cn(
+          'text-[10px] font-semibold text-slate-300 truncate px-1 uppercase tracking-wide',
+          align === 'left' ? 'text-right' : 'text-left',
+        )}
+        style={{ maxWidth: `${widthPx - 4}px` }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
 
 /* ───────── Site List View (Excel-style grid) ───────── */
 interface SiteListViewProps {
@@ -339,6 +353,9 @@ interface SiteListViewProps {
   onShare: () => void;
   onAttendanceSheet: () => void;
   onAddEmployee: (site: SiteOption) => void;
+  // Undo stack push — called before each mark so the parent can record the
+  // previous status for Ctrl+Z restoration.
+  onPushUndo: (entry: { empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null }) => void;
 }
 
 function SiteListView({
@@ -358,6 +375,7 @@ function SiteListView({
   onShare,
   onAttendanceSheet,
   onAddEmployee,
+  onPushUndo,
 }: SiteListViewProps) {
   const [activeCell, setActiveCell] = useState<string | null>(null);
 
@@ -380,31 +398,10 @@ function SiteListView({
     });
   }, [employees]);
 
+  // Always 1..N in order (left to right). No more reverse for current month.
   const displayDays = useMemo(() => {
-    if (isCurrentMonthView) {
-      const today = new Date();
-      const currentDay = today.getDate();
-      return Array.from({ length: currentDay }, (_, i) => currentDay - i);
-    }
     return Array.from({ length: daysInMonth }, (_, i) => i + 1);
-  }, [daysInMonth, isCurrentMonthView]);
-
-  const getDayLabel = useCallback(
-    (day: number): string => {
-      if (!isCurrentMonthView) return String(day);
-      const relLabel = getRelativeDateLabel(day, month, year);
-      return relLabel || String(day);
-    },
-    [isCurrentMonthView, month, year]
-  );
-
-  const isRecentDay = useCallback(
-    (day: number): boolean => {
-      if (!isCurrentMonthView) return false;
-      return getRelativeDateLabel(day, month, year) !== null;
-    },
-    [isCurrentMonthView, month, year]
-  );
+  }, [daysInMonth]);
 
   const dateStrFor = useCallback((day: number) => formatDate(day, monthStr, yearStr), [monthStr, yearStr]);
 
@@ -414,6 +411,7 @@ function SiteListView({
     return true;
   }, []);
 
+  // Total working hours = P×10 + C×8 + overtime(10+ot)
   const computeTotalHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
@@ -422,9 +420,10 @@ function SiteListView({
         if (!isInRange(emp, dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
-        if (rec.status === 'present') total += 10;
+        if (rec.status === 'present') total += HOURS_PER_PRESENT;
+        else if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
         else if (rec.status === 'overtime') {
-          total += 10 + (rec.overtimeHours || 0);
+          total += HOURS_PER_PRESENT + (rec.overtimeHours || 0);
         }
       }
       return total;
@@ -432,56 +431,70 @@ function SiteListView({
     [displayDays, dateStrFor, isInRange, attendanceMap]
   );
 
+  // ── Mark handler: save + push undo + auto-advance DOWN ──
+  // After marking, move to the NEXT EMPLOYEE's same-day cell (down).
+  // If this is the last in-range employee, STAY in the current cell.
   const handleMark = useCallback(
-    (empId: string, dateStr: string, status: 'present' | 'absent') => {
+    (empId: string, dateStr: string, status: 'present' | 'absent' | 'camp_sitting') => {
+      // Push undo entry with the previous status
+      const prev = attendanceMap.get(`${empId}-${dateStr}`);
+      onPushUndo({
+        empId,
+        date: dateStr,
+        prevStatus: prev?.status || 'not_marked',
+        prevOvertime: prev?.overtimeHours || null,
+      });
+
       onStatusChange(empId, dateStr, status);
+
+      // Auto-advance DOWN to the next in-range employee (same day).
+      // If no next employee, STAY in the current cell.
       setTimeout(() => {
-        const emp = sortedEmployees.find((e) => e.id === empId);
-        if (!emp) return;
-        const dayIdx = displayDays.findIndex((d) => dateStrFor(d) === dateStr);
-        if (dayIdx === -1) return;
+        const empIdx = sortedEmployees.findIndex((e) => e.id === empId);
+        if (empIdx === -1) return;
 
-        let nextEmpId = empId;
-        let nextDateStr: string | null = null;
-        if (dayIdx + 1 < displayDays.length) {
-          nextDateStr = dateStrFor(displayDays[dayIdx + 1]);
-        } else {
-          const empIdx = sortedEmployees.findIndex((e) => e.id === empId);
-          for (let i = empIdx + 1; i < sortedEmployees.length; i++) {
-            const cand = sortedEmployees[i];
-            if (cand.movedAway) continue;
-            for (const d of displayDays) {
-              const ds = dateStrFor(d);
-              if (isInRange(cand, ds)) {
-                nextEmpId = cand.id;
-                nextDateStr = ds;
-                break;
-              }
-            }
-            if (nextDateStr) break;
-          }
-        }
-
-        if (nextDateStr) {
-          const key = `${nextEmpId}::${nextDateStr}`;
+        for (let i = empIdx + 1; i < sortedEmployees.length; i++) {
+          const cand = sortedEmployees[i];
+          if (cand.movedAway) continue;
+          if (!isInRange(cand, dateStr)) continue;
+          const key = `${cand.id}::${dateStr}`;
           const el = cellRefs.current.get(key);
           if (el) {
             el.focus();
             setActiveCell(key);
+            return;
           }
+        }
+        // No next employee — stay in the current cell (re-focus to keep
+        // the active ring visible after re-render).
+        const curKey = `${empId}::${dateStr}`;
+        const curEl = cellRefs.current.get(curKey);
+        if (curEl) {
+          curEl.focus();
+          setActiveCell(curKey);
         }
       }, 0);
     },
-    [onStatusChange, sortedEmployees, displayDays, dateStrFor, isInRange]
+    [onStatusChange, onPushUndo, sortedEmployees, isInRange, attendanceMap]
   );
 
   const handleClear = useCallback(
     (empId: string, dateStr: string) => {
+      const prev = attendanceMap.get(`${empId}-${dateStr}`);
+      onPushUndo({
+        empId,
+        date: dateStr,
+        prevStatus: prev?.status || 'not_marked',
+        prevOvertime: prev?.overtimeHours || null,
+      });
       onStatusChange(empId, dateStr, 'not_marked');
     },
-    [onStatusChange]
+    [onStatusChange, onPushUndo, attendanceMap]
   );
 
+  // ── Document-level keyboard navigation ──
+  // Arrow keys move focus between cells. Ctrl+Z is handled by the parent
+  // (AttendancePage) which owns the undo stack.
   useEffect(() => {
     if (!activeCell) return;
     function handleKeyDown(e: KeyboardEvent) {
@@ -527,8 +540,18 @@ function SiteListView({
       if (nextEmpIdx < 0 || nextEmpIdx >= sortedEmployees.length) return;
       if (nextDayIdx < 0 || nextDayIdx >= displayDays.length) return;
 
+      // Skip moved-away employees and out-of-range cells
       let safeEmpIdx = nextEmpIdx;
-      while (safeEmpIdx >= 0 && safeEmpIdx < sortedEmployees.length && sortedEmployees[safeEmpIdx].movedAway) {
+      while (safeEmpIdx >= 0 && safeEmpIdx < sortedEmployees.length) {
+        const candEmp = sortedEmployees[safeEmpIdx];
+        if (candEmp.movedAway) {
+          if (k === 'ArrowDown' || k === 'Enter') safeEmpIdx++;
+          else if (k === 'ArrowUp') safeEmpIdx--;
+          else break;
+          continue;
+        }
+        const ds = dateStrFor(displayDays[nextDayIdx]);
+        if (isInRange(candEmp, ds)) break;
         if (k === 'ArrowDown' || k === 'Enter') safeEmpIdx++;
         else if (k === 'ArrowUp') safeEmpIdx--;
         else break;
@@ -546,7 +569,7 @@ function SiteListView({
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sortedEmployees, displayDays, dateStrFor]);
+  }, [activeCell, sortedEmployees, displayDays, dateStrFor, isInRange]);
 
   const siteStats = useMemo(() => {
     let present = 0;
@@ -565,7 +588,7 @@ function SiteListView({
         activeCount++;
         const rec = attendanceMap.get(`${emp.id}-${todayStrLocal}`);
         if (!rec || rec.status === 'not_marked') unmarked++;
-        else if (rec.status === 'present' || rec.status === 'overtime') present++;
+        else if (rec.status === 'present' || rec.status === 'overtime' || rec.status === 'camp_sitting') present++;
         else absent++;
       }
     }
@@ -607,8 +630,47 @@ function SiteListView({
     };
   }, []);
 
+  // Helper: for a given employee, compute the contiguous out-of-range regions
+  // at the start and end of the displayDays. Returns:
+  //   - startMergedDays: number of days at the start that are out-of-range
+  //   - startMergedLabel: site name to show in the merged start region
+  //   - endMergedDays: number of days at the end that are out-of-range
+  //   - endMergedLabel: site name to show in the merged end region
+  //   - inRangeDays: array of { day, dateStr } for the in-range days
+  function getRowLayout(emp: Employee): {
+    startMergedDays: number;
+    startMergedLabel: string;
+    endMergedDays: number;
+    endMergedLabel: string;
+    inRangeDays: number[];
+  } {
+    let startMerged = 0;
+    let endMerged = 0;
+    // Count out-of-range days at the start
+    for (let i = 0; i < displayDays.length; i++) {
+      const ds = dateStrFor(displayDays[i]);
+      if (isInRange(emp, ds)) break;
+      startMerged++;
+    }
+    // Count out-of-range days at the end
+    for (let i = displayDays.length - 1; i >= 0; i--) {
+      const ds = dateStrFor(displayDays[i]);
+      if (isInRange(emp, ds)) break;
+      endMerged++;
+    }
+    const inRangeDays = displayDays.slice(startMerged, displayDays.length - endMerged);
+    return {
+      startMergedDays: startMerged,
+      startMergedLabel: emp.previousSite || '',
+      endMergedDays: endMerged,
+      endMergedLabel: emp.nextSite || '',
+      inRangeDays,
+    };
+  }
+
   return (
     <Card className="bg-slate-800/50 border-slate-700/50 overflow-hidden">
+      {/* Site header */}
       <div
         role="button"
         tabIndex={0}
@@ -704,6 +766,7 @@ function SiteListView({
         </div>
       </div>
 
+      {/* Bulk-mark bar */}
       {!isCollapsed && (
         <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-900/30 border-b border-slate-700/50">
           <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wide font-medium">
@@ -767,42 +830,42 @@ function SiteListView({
             Mark all as {bulkMarkStatus === 'present' ? 'Present' : 'Absent'}
           </Button>
           <p className="text-[10px] text-slate-500 ml-auto hidden md:block">
-            P = Present (10h) · A = Absent (0h) · Backspace = clear · Arrow keys to navigate
+            P=Present(10h) · A=Absent(0h) · C=Camp(8h) · ⌫=clear · Ctrl+Z=undo · Arrows=navigate
           </p>
         </div>
       )}
 
+      {/* Excel-style attendance grid */}
       {!isCollapsed && (
         <ScrollArea className="w-full">
           <div className="min-w-[1100px]">
+            {/* Header row: plain day numbers 1..N (left to right) */}
             <div className="flex items-stretch bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
-              <div className="w-44 shrink-0 px-3 py-2.5 border-r border-slate-700/50">Employee</div>
-              <div className="w-24 shrink-0 px-2 py-2.5 border-r border-slate-700/50">Emp. Code</div>
-              <div className="w-28 shrink-0 px-2 py-2.5 border-r border-slate-700/50">Trade</div>
+              <div className="w-44 shrink-0 px-3 py-1.5 border-r border-slate-700/50">Employee</div>
+              <div className="w-24 shrink-0 px-2 py-1.5 border-r border-slate-700/50">Emp. Code</div>
+              <div className="w-28 shrink-0 px-2 py-1.5 border-r border-slate-700/50">Trade</div>
               <div className="flex-1 flex">
                 {displayDays.map((day) => {
                   const isFri = isFriday(year, month, day);
-                  const label = getDayLabel(day);
-                  const recent = isRecentDay(day);
                   return (
                     <div
                       key={day}
                       className={cn(
-                        'w-9 shrink-0 text-center py-2 leading-tight border-r border-slate-700/30',
-                        isFri && 'text-red-400/60 bg-red-500/5',
-                        recent && 'text-emerald-400 font-semibold bg-emerald-500/5'
+                        'w-8 shrink-0 text-center py-1 leading-tight border-r border-slate-700/30 text-[11px]',
+                        isFri && 'text-red-400/60 bg-red-500/5'
                       )}
                     >
-                      <span className={cn(recent && 'text-[9px] block')}>{label}</span>
+                      {day}
                     </div>
                   );
                 })}
               </div>
-              <div className="w-16 shrink-0 text-center py-2.5 px-1 bg-emerald-900/20 text-emerald-300 border-l border-slate-700/50">
+              <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-emerald-900/20 text-emerald-300 border-l border-slate-700/50">
                 Total Hrs
               </div>
             </div>
 
+            {/* Employee rows — tight, no extra padding */}
             <div className="divide-y divide-slate-700/40">
               {sortedEmployees.length === 0 ? (
                 <div className="py-12 text-center text-sm text-slate-500">
@@ -814,6 +877,7 @@ function SiteListView({
                   const isMovedAway = !!emp.movedAway;
                   const tradeDisplay =
                     emp.assignedTrade || emp.trade || emp.position || '—';
+                  const layout = getRowLayout(emp);
 
                   return (
                     <div
@@ -826,8 +890,9 @@ function SiteListView({
                         emp.isSupervisor && !emp.isTeamLeader && !isMovedAway && 'bg-blue-500/5',
                       )}
                     >
-                      <div className="w-44 shrink-0 px-3 py-1.5 border-r border-slate-700/40">
-                        <div className="flex items-center gap-1.5">
+                      {/* Employee name — tight, no vertical padding */}
+                      <div className="w-44 shrink-0 px-3 py-0 border-r border-slate-700/40 flex items-center">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <span className={cn(
                             'text-xs font-medium truncate block',
                             isMovedAway ? 'text-slate-400' : 'text-white'
@@ -847,24 +912,46 @@ function SiteListView({
                           )}
                         </div>
                       </div>
-                      <div className="w-24 shrink-0 px-2 py-1.5 border-r border-slate-700/40">
-                        <span className="text-[11px] text-slate-400 font-mono">{emp.employeeId}</span>
+                      {/* Emp code */}
+                      <div className="w-24 shrink-0 px-2 py-0 border-r border-slate-700/40 flex items-center">
+                        <span className="text-[11px] text-slate-400 font-mono truncate">{emp.employeeId}</span>
                       </div>
-                      <div className="w-28 shrink-0 px-2 py-1.5 border-r border-slate-700/40">
+                      {/* Trade */}
+                      <div className="w-28 shrink-0 px-2 py-0 border-r border-slate-700/40 flex items-center">
                         <span className="text-[11px] text-slate-400 truncate block">
                           {tradeDisplay}
                           {emp.isTeamLeader && <span className="text-amber-400"> / TL</span>}
                           {emp.isSupervisor && !emp.isTeamLeader && <span className="text-blue-400"> / SUP</span>}
                         </span>
                       </div>
-                      <div className="flex-1 flex">
-                        {displayDays.map((day) => {
+                      {/* Day cells area */}
+                      <div className="flex-1 flex items-stretch">
+                        {/* Merged start region (previousSite) */}
+                        {layout.startMergedDays > 0 && layout.startMergedLabel && (
+                          <MergedSiteCell
+                            label={layout.startMergedLabel}
+                            dayCount={layout.startMergedDays}
+                            align="left"
+                          />
+                        )}
+                        {layout.startMergedDays > 0 && !layout.startMergedLabel && (
+                          // Out-of-range at start but no previousSite label —
+                          // render faded empty cells
+                          Array.from({ length: layout.startMergedDays }).map((_, i) => (
+                            <div
+                              key={`start-empty-${i}`}
+                              className="w-8 shrink-0 border-r border-slate-700/30 bg-slate-800/20 flex items-center justify-center"
+                            >
+                              <span className="text-slate-700 text-[10px]">·</span>
+                            </div>
+                          ))
+                        )}
+                        {/* In-range day cells */}
+                        {layout.inRangeDays.map((day) => {
                           const dateStr = dateStrFor(day);
                           const record = attendanceMap.get(`${emp.id}-${dateStr}`);
                           const status: StatusOption = record?.status || 'not_marked';
                           const isFri = isFriday(year, month, day);
-                          const recent = isRecentDay(day);
-                          const inR = isInRange(emp, dateStr);
                           const key = `${emp.id}::${dateStr}`;
                           const isActive = activeCell === key;
 
@@ -872,7 +959,7 @@ function SiteListView({
                             <div
                               key={day}
                               className={cn(
-                                'w-9 shrink-0 flex items-center justify-center border-r border-slate-700/30',
+                                'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30',
                                 isFri && 'bg-red-500/5',
                               )}
                             >
@@ -881,10 +968,9 @@ function SiteListView({
                                 date={dateStr}
                                 status={status}
                                 overtimeHours={record?.overtimeHours || null}
-                                inRange={inR}
+                                inRange={true}
                                 movedAway={!!emp.movedAway}
                                 isFriday={isFri}
-                                isRecent={recent}
                                 onMark={(s) => handleMark(emp.id, dateStr, s)}
                                 onClear={() => handleClear(emp.id, dateStr)}
                                 isActive={isActive}
@@ -894,8 +980,27 @@ function SiteListView({
                             </div>
                           );
                         })}
+                        {/* Merged end region (nextSite) */}
+                        {layout.endMergedDays > 0 && layout.endMergedLabel && (
+                          <MergedSiteCell
+                            label={layout.endMergedLabel}
+                            dayCount={layout.endMergedDays}
+                            align="right"
+                          />
+                        )}
+                        {layout.endMergedDays > 0 && !layout.endMergedLabel && (
+                          Array.from({ length: layout.endMergedDays }).map((_, i) => (
+                            <div
+                              key={`end-empty-${i}`}
+                              className="w-8 shrink-0 border-r border-slate-700/30 bg-slate-800/20 flex items-center justify-center"
+                            >
+                              <span className="text-slate-700 text-[10px]">·</span>
+                            </div>
+                          ))
+                        )}
                       </div>
-                      <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-emerald-900/10 border-l border-slate-700/40">
+                      {/* Total hours */}
+                      <div className="w-16 shrink-0 text-center py-0 px-1 bg-emerald-900/10 border-l border-slate-700/40 flex items-center justify-center">
                         <span className={cn(
                           'text-xs font-bold font-mono',
                           totalHours > 0 ? 'text-emerald-300' : 'text-slate-600'
@@ -913,6 +1018,7 @@ function SiteListView({
         </ScrollArea>
       )}
 
+      {/* Legend — no overtime badge */}
       {!isCollapsed && (
         <div className="flex flex-wrap gap-3 px-4 py-3 border-t border-slate-700/50">
           <div className="flex items-center gap-1.5">
@@ -924,12 +1030,8 @@ function SiteListView({
             <span className="text-[11px] text-slate-400">A = Absent (0h)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-4 w-4 rounded bg-blue-500" />
-            <span className="text-[11px] text-slate-400">O = Overtime</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="h-4 w-4 rounded bg-amber-500" />
-            <span className="text-[11px] text-slate-400">NS = No Site</span>
+            <span className="h-4 w-4 rounded bg-orange-500" />
+            <span className="text-[11px] text-slate-400">C = Camp Sitting (8h, not in lifetime)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Crown className="h-2.5 w-2.5 text-amber-400" />
@@ -942,8 +1044,10 @@ function SiteListView({
           <div className="flex items-center gap-1.5">
             <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">P</kbd>
             <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">A</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">C</kbd>
             <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">⌫</kbd>
             <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">←↑↓→</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">Ctrl+Z</kbd>
             <span className="text-[11px] text-slate-400">keyboard only</span>
           </div>
         </div>
@@ -1048,6 +1152,47 @@ export function AttendancePage() {
 
   // Attendance sheet (existing component) state
   const [attendanceSheetSite, setAttendanceSheetSite] = useState<SiteOption | null>(null);
+
+  // ── Undo stack ──
+  // Each entry records the previous status of a cell before it was changed.
+  // Ctrl+Z pops the last entry and restores the previous status.
+  // The stack is capped at 100 entries to avoid unbounded memory growth.
+  const undoStack = useRef<Array<{ empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null }>>([]);
+  const [undoCount, setUndoCount] = useState(0); // triggers re-render for button state
+
+  const pushUndo = useCallback((entry: { empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null }) => {
+    undoStack.current.push(entry);
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    setUndoCount(undoStack.current.length);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const entry = undoStack.current.pop();
+    if (!entry) return;
+    setUndoCount(undoStack.current.length);
+    // Restore the previous status via the same API call used for marking.
+    // This fires the same POST /api/attendance that handleStatusChange uses.
+    handleStatusChangeRef.current(entry.empId, entry.date, entry.prevStatus, entry.prevOvertime);
+    toast({ title: 'Undone', description: `Reverted to ${STATUS_CONFIG[entry.prevStatus].label}` });
+  }, []);
+
+  // Keep a ref to handleStatusChange so handleUndo can call it without
+  // being stale (handleStatusChange is defined later via useCallback).
+  const handleStatusChangeRef = useRef<(employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void>(() => {});
+
+  // ── Ctrl+Z listener ──
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        handleUndo();
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo]);
 
   const month = parseInt(selectedMonth, 10);
   const year = parseInt(selectedYear, 10);
@@ -1321,6 +1466,35 @@ export function AttendancePage() {
           }
         }
 
+        // ── Compute nextSite info ──
+        // If the employee moved AWAY from this site mid-month (activeUntil set
+        // and < monthEnd), there should be another site-assignment record for
+        // this employee at a DIFFERENT site where createdDate ≈ this site's
+        // removedDate. That other site is the "next site" — we show its name
+        // in the merged non-editable cells after activeUntil so the admin
+        // knows where the employee went.
+        let nextSite: string | null = null;
+        let nextSiteDays = 0;
+        if (activeUntil && activeUntil < monthEndStr) {
+          // Employee left this site before month end — they went somewhere
+          // else. Find the next-site assignment.
+          for (const other of siteAssignments) {
+            if (other.empId !== assignment.empId) continue;
+            if (other.siteName === siteName) continue; // same site — skip
+            // The other site's createdDate should be on or after this site's
+            // activeUntil (they started at the new site when/after leaving here).
+            const otherCreatedStr = clampToMonth(other.createdDate.split('T')[0]);
+            if (otherCreatedStr >= activeUntil) {
+              const otherRemovedStr = other.removedDate
+                ? clampToMonth(other.removedDate.split('T')[0])
+                : monthEndStr;
+              nextSite = other.siteName;
+              nextSiteDays = daysBetween(otherCreatedStr, otherRemovedStr);
+              break; // take the first match
+            }
+          }
+        }
+
         // If the employee moved away AND has NO attendance records for
         // this month at this site, skip them entirely — don't add to the
         // list. The user only wants moved-away employees to remain visible
@@ -1344,6 +1518,8 @@ export function AttendancePage() {
           movedAway,
           previousSite,
           previousSiteDays,
+          nextSite,
+          nextSiteDays,
         });
       }
     }
@@ -1434,6 +1610,8 @@ export function AttendancePage() {
     []
   );
 
+  // Keep the ref in sync so handleUndo can call the latest handleStatusChange
+  handleStatusChangeRef.current = handleStatusChange;
   // Bulk-mark all employees at a site as present/absent for a given date.
   // Calls the existing /api/attendance/bulk-mark endpoint (which already
   // accepts a custom status + employeeIds array, preserves overtime records
@@ -1902,9 +2080,20 @@ export function AttendancePage() {
           )}
         </div>
 
-        {/* Expand/Collapse all + Export Excel */}
+        {/* Expand/Collapse all + Undo + Export Excel */}
         {sites.length > 0 && (
           <div className="flex items-center gap-2 shrink-0 ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleUndo}
+              disabled={undoCount === 0}
+              className="text-slate-400 hover:text-white text-xs h-7 gap-1.5 disabled:opacity-30"
+              title="Undo last change (Ctrl+Z)"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              {undoCount > 0 ? `Undo (${undoCount})` : 'Undo'}
+            </Button>
             <Button
               onClick={handleOpenExportPreview}
               className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs h-7"
@@ -1965,6 +2154,7 @@ export function AttendancePage() {
                 onShare={() => openShareDialog(site)}
                 onAttendanceSheet={() => openAttendanceSheet(site)}
                 onAddEmployee={(s) => openAddEmployeeDialog(s)}
+                onPushUndo={pushUndo}
               />
             );
           })}
