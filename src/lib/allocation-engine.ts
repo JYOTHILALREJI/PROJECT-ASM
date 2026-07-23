@@ -145,15 +145,17 @@ export async function allocateEmployeeHours(
     const hasBonus = employee.isTeamLeader || employee.isSupervisor;
     const employeeCustomRate = employee.customHourlyRate;
 
-    // Direct hourly rates:
-    // Priority: 1) employee.customHourlyRate (per-employee override)
-    //           2) Trade from SalaryRecord (Accounts edit — HIGHEST trade priority)
-    //           3) Trade from EmployeeTrade (assigned from Sites page)
-    //           4) "Helper" (default) → threshold-based rates
+    // Direct hourly rates — NEW priority (per project owner):
+    //   1) Employee.customHourlyRate (set from Employee Hours Ledger page)
+    //      → ONLY this rate is used. No trade, no +0.5 bonus, no threshold.
+    //   2) Trade rate (from SalaryRecord.trade or EmployeeTrade junction)
+    //      → If TL/Supervisor: rate = tradeRate + 0.5
+    //      → If NOT TL/Sup:    rate = tradeRate (no bonus)
+    //   3) "Helper" (default, no trade) → threshold-based:
+    //      → below threshold: 2.5 (standard) or 3.0 (TL/Sup)
+    //      → above threshold: 5.0 (standard) or 5.5 (TL/Sup)
     //
     // NEVER use Employee.trade — that field is only for ID purposes.
-    // "Helper" uses threshold-based rates (2.5/5.0 or 3.0/5.5).
-    // All other trades use the TradeRate.hourlyRate for both tiers.
     const savedTrade = records.length > 0
       ? (records.find(r => r.trade && r.trade.trim() !== '')?.trade || null)
       : null;
@@ -164,23 +166,30 @@ export async function allocateEmployeeHours(
     const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
     const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
 
-    const lowRate = hasCustomRate
-      ? employeeCustomRate!
-      : hasTradeRate
-        ? tradeRate!
-        : (hasBonus ? 3.0 : 2.5);
-    const highRate = hasCustomRate
-      ? employeeCustomRate!
-      : hasTradeRate
-        ? tradeRate!
-        : (hasBonus ? 5.5 : 5.0);
+    // ── Compute the effective low/high rates ──
+    let lowRate: number;
+    let highRate: number;
+
+    if (hasCustomRate) {
+      // Priority 1: Custom rate from Hours Ledger → ONLY this rate, no bonus
+      lowRate = employeeCustomRate!;
+      highRate = employeeCustomRate!;
+    } else if (hasTradeRate) {
+      // Priority 2: Trade rate → +0.5 if TL/Sup, otherwise just the trade rate
+      const bonusAdjustedRate = hasBonus ? tradeRate! + 0.5 : tradeRate!;
+      lowRate = bonusAdjustedRate;
+      highRate = bonusAdjustedRate;
+    } else {
+      // Priority 3: Helper (no trade) → threshold-based defaults
+      lowRate = hasBonus ? 3.0 : 2.5;
+      highRate = hasBonus ? 5.5 : 5.0;
+    }
 
     // ------------------------------------------------------------------
     // 3a2. Check if employee has a custom rate override
     // ------------------------------------------------------------------
-    // Priority: 1) Employee.customHourlyRate (set directly on employee)
-    //           2) TotalEmployeeWorkingHours.isCustom + rtPerHour (legacy)
-    //           3) Standard tier rates
+    // isCustomRate = true when the employee has a custom rate OR a trade rate
+    // (both override the threshold-based split).
     const currentMonthWhRecord = await db.totalEmployeeWorkingHours.findUnique({
       where: { empId_month: { empId, month } },
     });
@@ -190,7 +199,7 @@ export async function allocateEmployeeHours(
     const customRate = hasCustomRate
       ? employeeCustomRate!
       : hasTradeRate
-        ? tradeRate!
+        ? (hasBonus ? tradeRate! + 0.5 : tradeRate!)
         : (currentMonthWhRecord?.rtPerHour ?? lowRate);
 
     // ------------------------------------------------------------------

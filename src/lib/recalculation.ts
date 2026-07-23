@@ -41,7 +41,10 @@ export function getEmployeeRates(
   },
   tradeRateMap?: Map<string, number> | null,
 ): { lowRate: number; highRate: number; isCustom: boolean } {
-  // 1. Per-employee custom rate (highest priority)
+  const isLeader = employee.isTeamLeader || employee.isSupervisor || employee.role === 'Team Leader' || employee.role === 'Supervisor';
+
+  // 1. Per-employee custom rate (from Hours Ledger) — HIGHEST priority
+  //    ONLY this rate is used. No trade, no +0.5 bonus, no threshold.
   if (employee.customHourlyRate !== null && employee.customHourlyRate !== undefined) {
     return {
       lowRate: employee.customHourlyRate,
@@ -51,26 +54,23 @@ export function getEmployeeRates(
   }
 
   // 2. Trade-based rate (if a TradeRate exists for this employee's trade)
-  // NOTE: employee.trade here is the EFFECTIVE trade (overridden by the caller
-  // to be the SalaryRecord trade, NOT the Employee table trade). The caller
-  // is responsible for setting it correctly before calling this function.
+  //    NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
+  //    NOTE: employee.trade here is the EFFECTIVE trade (overridden by the caller
+  //    to be the SalaryRecord trade, NOT the Employee table trade). The caller
+  //    is responsible for setting it correctly before calling this function.
   if (tradeRateMap && employee.trade) {
     const tradeRate = tradeRateMap.get(employee.trade);
     if (tradeRate !== undefined && tradeRate > 0) {
+      const effectiveRate = isLeader ? tradeRate + 0.5 : tradeRate;
       return {
-        lowRate: tradeRate,
-        highRate: tradeRate,
+        lowRate: effectiveRate,
+        highRate: effectiveRate,
         isCustom: true,
       };
     }
   }
 
-  // 2b. If no trade rate found and the trade is "Helper" (default), use
-  // the standard role-based rates below. If the trade is something else
-  // but has no rate in the TradeRate table, also fall through to role-based.
-
-  // 3. Role-based rates
-  const isLeader = employee.isTeamLeader || employee.isSupervisor || employee.role === 'Team Leader' || employee.role === 'Supervisor';
+  // 3. Role-based rates (Helper / no trade)
   return {
     lowRate: isLeader ? 3.0 : 2.5,
     highRate: isLeader ? 5.5 : 5.0,

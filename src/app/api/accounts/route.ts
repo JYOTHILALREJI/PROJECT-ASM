@@ -505,42 +505,47 @@ export async function GET(request: NextRequest) {
         const aggregateTotal = aggregateHoursMap.get(eId) || 0;
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
-        // Check trade rate (priority: custom rate > salary record trade >
-        // EmployeeTrade > "Helper")
-        // The admin sets the trade per-month in the Accounts page (saved to
-        // SalaryRecord.trade). If not set there, fall back to the EmployeeTrade
-        // assignment (set from the Sites page). Employee.trade is only for ID.
+        // Check trade rate (priority: custom rate > trade rate > Helper)
+        // NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
+        //      if custom rate exists, ONLY that rate is used (no trade, no bonus).
         const salaryTrade = eRecords[0]?.trade || null;
         const empTradeInfo = employeeTradeMap.get(eId);
         const effectiveTrade = salaryTrade || empTradeInfo?.trade || 'Helper';
         const isHelper = effectiveTrade.toLowerCase() === 'helper';
         const tradeRate = !isHelper ? tradeRateMap.get(effectiveTrade) : undefined;
+        const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
+        const hasCustomRate = employeeCustomRate != null;
+
+        // Compute the effective rate with TL/Sup +0.5 bonus on trade rate
+        const effectiveTradeRate = hasTradeRate
+          ? (hasBonus ? tradeRate! + 0.5 : tradeRate!)
+          : undefined;
 
         // Get working hours info
         const empWhRecords = whByEmp.get(eId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
-        const isCustom = employeeCustomRate != null
+        const isCustom = hasCustomRate
           ? true
-          : (tradeRate !== undefined && tradeRate > 0)
+          : hasTradeRate
             ? true
             : (currentMonthWh?.isCustom ?? empWhRecords.some((wh) => wh.isCustom));
-        const customRtPerHour = employeeCustomRate != null
-          ? employeeCustomRate
-          : (tradeRate !== undefined && tradeRate > 0)
-            ? tradeRate
-            : (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : 2.5));
+        const customRtPerHour = hasCustomRate
+          ? employeeCustomRate!
+          : effectiveTradeRate ??
+            (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : 2.5));
 
-        // Calculate rtPerHour based on aggregate total (direct rates — no divisors)
-        const lowRate = employeeCustomRate !== null
-          ? employeeCustomRate
-          : (tradeRate !== undefined && tradeRate > 0)
-            ? tradeRate
-            : (hasBonus ? 3.0 : 2.5);
-        const highRate = employeeCustomRate !== null
-          ? employeeCustomRate
-          : (tradeRate !== undefined && tradeRate > 0)
-            ? tradeRate
-            : (hasBonus ? 5.5 : 5.0);
+        // Calculate low/high rates:
+        // 1) Custom rate → only that rate (no bonus, no threshold)
+        // 2) Trade rate → +0.5 if TL/Sup, otherwise just trade rate
+        // 3) Helper → threshold-based defaults
+        const lowRate = hasCustomRate
+          ? employeeCustomRate!
+          : effectiveTradeRate ??
+            (hasBonus ? 3.0 : 2.5);
+        const highRate = hasCustomRate
+          ? employeeCustomRate!
+          : effectiveTradeRate ??
+            (hasBonus ? 5.5 : 5.0);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold
@@ -599,34 +604,40 @@ export async function GET(request: NextRequest) {
         const employeeCustomRate = emp?.customHourlyRate ?? null;
 
         // Check trade rate — use EmployeeTrade assignment, fallback to 'Helper'
+        // NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
+        //      if custom rate exists, ONLY that rate is used.
         const stubEmpTradeInfo = employeeTradeMap.get(stub.empId);
         const stubEffectiveTrade = stubEmpTradeInfo?.trade || 'Helper';
         const stubIsHelper = stubEffectiveTrade.toLowerCase() === 'helper';
         const tradeRate = !stubIsHelper ? tradeRateMap.get(stubEffectiveTrade) : undefined;
+        const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
+        const hasCustomRate = employeeCustomRate != null;
+
+        // Compute the effective rate with TL/Sup +0.5 bonus on trade rate
+        const effectiveTradeRate = hasTradeRate
+          ? (hasBonus ? tradeRate! + 0.5 : tradeRate!)
+          : undefined;
 
         const empWhRecords = whByEmp.get(stub.empId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
-        const isCustom = employeeCustomRate != null
+        const isCustom = hasCustomRate
           ? true
-          : (tradeRate !== undefined && tradeRate > 0)
+          : hasTradeRate
             ? true
             : (currentMonthWh?.isCustom ?? false);
-        const customRtPerHour = employeeCustomRate != null
-          ? employeeCustomRate
-          : (tradeRate !== undefined && tradeRate > 0)
-            ? tradeRate
-            : (currentMonthWh?.rtPerHour ?? 2.5);
+        const customRtPerHour = hasCustomRate
+          ? employeeCustomRate!
+          : effectiveTradeRate ??
+            (currentMonthWh?.rtPerHour ?? 2.5);
 
-        const lowRate = employeeCustomRate !== null
-          ? employeeCustomRate
-          : (tradeRate !== undefined && tradeRate > 0)
-            ? tradeRate
-            : (hasBonus ? 3.0 : 2.5);
-        const highRate = employeeCustomRate !== null
-          ? employeeCustomRate
-          : (tradeRate !== undefined && tradeRate > 0)
-            ? tradeRate
-            : (hasBonus ? 5.5 : 5.0);
+        const lowRate = hasCustomRate
+          ? employeeCustomRate!
+          : effectiveTradeRate ??
+            (hasBonus ? 3.0 : 2.5);
+        const highRate = hasCustomRate
+          ? employeeCustomRate!
+          : effectiveTradeRate ??
+            (hasBonus ? 5.5 : 5.0);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold ? highRate : lowRate;
