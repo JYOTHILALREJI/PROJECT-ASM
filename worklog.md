@@ -37,3 +37,21 @@ Stage Summary:
 - Custom current total working hours: new `Employee.currentTotalWorkingHours` field, settable at any point via the employee edit form AND a quick inline editor in the details dialog.
 - Excel salary-sheet export: GET /api/salary-records/export-excel produces a single-sheet .xlsx with all sites, each under a merged site-name header, employee details + merged site subtotals, and a merged grand total. Button added to the Consolidated Salary page.
 - Dev server runs on port 3000. Test admin account created: admin@asm.com / admin123 (plus sample site + employee for demonstration).
+
+---
+Task ID: attendance-trade-fix
+Agent: main (Z.ai Code)
+Task: Fix trade not displaying in attendance PDF sheet (trade assigned from Sites page wasn't appearing in the printable attendance sheet)
+
+Work Log:
+- Traced the data flow: AttendanceSheet component receives employee objects with a `position` field and only reads `emp.position` (legacy field). When trades are assigned from the Sites page, they go into the `EmployeeTrade` junction table and surface as `assignedTrade` on the employee object — but AttendanceSheet ignored `assignedTrade` and `trade`, so the printed/PDF sheet showed an empty trade cell whenever the employee had no legacy `position` set.
+- Added a `resolveTrade()` helper in attendance-sheet.tsx with priority: assignedTrade → trade → position (matches the rest of the app).
+- Widened the AttendanceSheetProps.employees type to accept `assignedTrade?` and `trade?` optional fields.
+- Updated employeeData initialization in AttendanceSheet to use resolveTrade(emp) for both the `position` (display value) and the `isSupervisor` derivation.
+- Updated attendance-page.tsx `attendanceSheetEmployees` mapping to pass through position/assignedTrade/trade separately instead of collapsing them into a single string. This keeps the resolver in AttendanceSheet as the single source of truth.
+- Updated the AttendanceSheetLazy wrapper type to allow position: string | null and the optional trade fields.
+- Sites page already passes raw employee objects (which include assignedTrade/trade/position) directly to AttendanceSheet, so the resolver now picks up assignedTrade automatically — no change needed there.
+
+Stage Summary:
+- Root cause: AttendanceSheet only read `emp.position` (legacy) and ignored `assignedTrade` (from EmployeeTrade junction) and `trade` (legacy Employee.trade). Trades assigned from the Sites page live in EmployeeTrade and surface as `assignedTrade`, so they were invisible in the PDF.
+- Fix: centralised trade resolution in AttendanceSheet via resolveTrade(emp) using the same priority as everywhere else (assignedTrade → trade → position). Both call paths (Attendance page and Sites page) now display the correct trade.

@@ -2198,7 +2198,13 @@ export function AttendancePage() {
       id: e.id,
       fullName: e.fullName,
       employeeId: e.employeeId,
-      position: e.assignedTrade || e.position || e.trade || '',
+      // Pass through all trade sources so AttendanceSheet can resolve via
+      // priority: assignedTrade → trade → position. (We avoid collapsing to a
+      // single `position` here so the sheet's own resolver stays the single
+      // source of truth — same logic used everywhere else in the app.)
+      position: e.position || null,
+      assignedTrade: e.assignedTrade ?? null,
+      trade: e.trade ?? null,
       isTeamLeader: e.isTeamLeader,
       currentSite: e.currentSite,
     }));
@@ -2724,7 +2730,9 @@ function AttendanceSheetLazy({
     id: string;
     fullName: string;
     employeeId: string;
-    position: string;
+    position: string | null;
+    assignedTrade?: string | null;
+    trade?: string | null;
     isTeamLeader: boolean;
     currentSite: string | null;
   }>;

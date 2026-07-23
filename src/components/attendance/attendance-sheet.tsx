@@ -21,10 +21,33 @@ interface AttendanceSheetProps {
     fullName: string;
     employeeId: string;
     position: string | null;
+    // Trade assigned via the Sites page (EmployeeTrade junction table).
+    // This takes priority over the legacy `position` / `trade` fields.
+    assignedTrade?: string | null;
+    // Legacy trade field from the Employee record.
+    trade?: string | null;
     isTeamLeader: boolean;
     currentSite: string | null;
   }>;
   onClose: () => void;
+}
+
+/* ───────── Helpers ───────── */
+// Resolve the displayed trade for an employee using the same priority as
+// the rest of the app:
+//   1. assignedTrade (EmployeeTrade junction — set from the Sites page)
+//   2. trade (legacy Employee.trade field)
+//   3. position (legacy Employee.position field)
+// Returns '' when none are set.
+function resolveTrade(emp: {
+  position?: string | null;
+  assignedTrade?: string | null;
+  trade?: string | null;
+}): string {
+  return (emp.assignedTrade && emp.assignedTrade.trim())
+    || (emp.trade && emp.trade.trim())
+    || (emp.position && emp.position.trim())
+    || '';
 }
 
 /* ───────── Constants ───────── */
@@ -322,9 +345,12 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
       // (e.g. ASM-2026-001). The cell remains editable so the user can override
       // for print/PDF if needed.
       code: emp.employeeId || '',
-      position: emp.position || '',
+      // Resolve the trade via priority: assignedTrade (Sites page) → trade
+      // (legacy Employee.trade) → position (legacy Employee.position). This
+      // matches how trades are displayed everywhere else in the app.
+      position: resolveTrade(emp),
       isTeamLeader: emp.isTeamLeader,
-      isSupervisor: emp.position?.toLowerCase().includes('supervisor') ?? false,
+      isSupervisor: resolveTrade(emp).toLowerCase().includes('supervisor') ?? false,
     }))
   );
 
