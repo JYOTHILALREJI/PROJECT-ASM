@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   Wallet,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   CalendarDays,
   AlertCircle,
@@ -22,6 +23,7 @@ import {
   Loader2,
   Search,
   X,
+  GitBranch,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -194,6 +196,10 @@ interface MergedEmployeeRow {
   // Site scoping
   siteId: string;
   siteName: string;
+
+  // Branch scoping (for grouping in the flat table)
+  branchId: string | null;
+  branchName: string | null;
 }
 
 /**
@@ -206,6 +212,8 @@ function mergeApiEntries(
   entries: ApiEmployeeEntry[],
   siteId: string,
   siteName: string,
+  branchId: string | null = null,
+  branchName: string | null = null,
 ): MergedEmployeeRow[] {
   const grouped = new Map<string, ApiEmployeeEntry[]>();
   for (const entry of entries) {
@@ -318,6 +326,8 @@ function mergeApiEntries(
       customHourlyRate,
       siteId,
       siteName,
+      branchId,
+      branchName,
     });
   }
 
@@ -366,6 +376,10 @@ interface FlatEmployee {
   isPaid: boolean;
   // Per-site breakdown (sorted alphabetically by site name)
   sites: FlatEmployeeSite[];
+  // Branch (from the row with the most hours — an employee may work at
+  // sites in different branches in the same month, so we pick the primary)
+  branchId: string | null;
+  branchName: string | null;
 }
 
 /**
@@ -437,6 +451,12 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
 
     sites.sort((a, b) => a.siteName.localeCompare(b.siteName));
 
+    // Determine the primary branch: the branch of the row with the most
+    // hours. If all rows have 0 hours, use the first row's branch.
+    const primaryBranchRow = empRows.length > 0
+      ? empRows.reduce((best, r) => (r.totalHours > best.totalHours ? r : best), empRows[0])
+      : null;
+
     flatEmployees.push({
       empId,
       empName: baseRow.empName,
@@ -461,6 +481,8 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
       balanceSalary: totalGross - totalDeduction - totalAdvance,
       isPaid,
       sites,
+      branchId: primaryBranchRow?.branchId ?? null,
+      branchName: primaryBranchRow?.branchName ?? null,
     });
   }
 
@@ -573,6 +595,7 @@ export function ConsolidatedSalaryPage() {
   const [perSiteRows, setPerSiteRows] = useState<Record<string, MergedEmployeeRow[]>>({});
   const [hasData, setHasData] = useState(true);
   const [fetchKey, setFetchKey] = useState(0); // DB-first invalidation key
+  const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
 
   const yearOptions = useMemo(() => {
     const currentYear = now.getFullYear();
@@ -607,9 +630,16 @@ export function ConsolidatedSalaryPage() {
 
         // Merge split entries into single rows per employee per site
         // (same logic as Accounts page → guarantees identical numbers)
+        // Pass branch info so the flat table can group by branch.
         const empMap: Record<string, MergedEmployeeRow[]> = {};
         for (const s of siteResults) {
-          empMap[s.site.id] = mergeApiEntries(s.employees, s.site.id, s.site.name);
+          empMap[s.site.id] = mergeApiEntries(
+            s.employees,
+            s.site.id,
+            s.site.name,
+            s.site.branchId ?? null,
+            s.site.branch?.name ?? null,
+          );
         }
         setPerSiteRows(empMap);
 
@@ -679,6 +709,57 @@ export function ConsolidatedSalaryPage() {
 
   /* ── Build flat employee list (merged across all sites) ── */
   const flatEmployees = useMemo(() => buildFlatEmployees(perSiteRows), [perSiteRows]);
+
+  /* ── Group flat employees by branch ── */
+  // Returns an array of { branchId, branchName, employees, totals } sorted
+  // alphabetically by branch name. Employees with no branch are grouped
+  // under "No Branch".
+  const branchGroups = useMemo(() => {
+    const map = new Map<string, { branchId: string | null; branchName: string; employees: FlatEmployee[] }>();
+    for (const emp of flatEmployees) {
+      const key = emp.branchId || '__no_branch__';
+      const label = emp.branchName || 'No Branch';
+      if (!map.has(key)) {
+        map.set(key, { branchId: emp.branchId, branchName: label, employees: [] });
+      }
+      map.get(key)!.employees.push(emp);
+    }
+    // Build the final array with per-branch totals
+    const groups = Array.from(map.values()).map((g) => {
+      const totalHours = g.employees.reduce((s, e) => s + e.totalHours, 0);
+      const totalSalary = g.employees.reduce((s, e) => s + e.grossSalary, 0);
+      const totalDeductions = g.employees.reduce((s, e) => s + e.deduction, 0);
+      const totalAdvances = g.employees.reduce((s, e) => s + e.advance, 0);
+      const netBalance = g.employees.reduce((s, e) => s + e.balanceSalary, 0);
+      const paidCount = g.employees.filter((e) => e.isPaid).length;
+      return {
+        branchId: g.branchId,
+        branchName: g.branchName,
+        employees: g.employees,
+        totals: {
+          employeeCount: g.employees.length,
+          totalHours,
+          totalSalary,
+          totalDeductions,
+          totalAdvances,
+          netBalance,
+          paidCount,
+        },
+      };
+    });
+    // Sort alphabetically by branch name
+    groups.sort((a, b) => a.branchName.localeCompare(b.branchName));
+    return groups;
+  }, [flatEmployees]);
+
+  const toggleBranchCollapse = useCallback((branchKey: string) => {
+    setCollapsedBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(branchKey)) next.delete(branchKey);
+      else next.add(branchKey);
+      return next;
+    });
+  }, []);
 
   /* ── Build site summaries (from merged rows — trade-aware) ── */
   const siteSummaries: SiteSummary[] = useMemo(() => {
@@ -1072,118 +1153,173 @@ export function ConsolidatedSalaryPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {flatEmployees.map((emp, idx) => {
-                    const rowId = `${emp.empId}::${idx}`;
-                    const isCurrentRow = isRowCurrent(emp.empId, idx);
-                    const isMatchedRow = !isCurrentRow && isRowMatched(emp.empId, idx);
-
-                    // Rate display: show the effective low/high rates so the
-                    // user can verify the trade-specific rate was applied.
-                    const rateLabel =
-                      emp.lowRate === emp.highRate
-                        ? emp.lowRate.toFixed(2)
-                        : `${emp.lowRate.toFixed(1)}/${emp.highRate.toFixed(1)}`;
-
+                  {branchGroups.map((group) => {
+                    const branchKey = group.branchId || '__no_branch__';
+                    const isCollapsed = collapsedBranches.has(branchKey);
                     return (
-                      <TableRow
-                        key={rowId}
-                        ref={(el) => registerRowRef(rowId, el)}
-                        className={cn(
-                          'border-slate-700/20',
-                          isCurrentRow && 'scroll-mt-20',
-                          isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
-                          isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
-                          !isCurrentRow && !isMatchedRow && 'hover:bg-slate-800/30',
-                          !isCurrentRow && !isMatchedRow && emp.isPaid && 'bg-emerald-500/5',
-                        )}
-                      >
-                        <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
-                        <TableCell className="text-slate-400 text-xs font-mono">{emp.employeeCode}</TableCell>
-                        <TableCell className={cn(
-                          'text-sm font-medium',
-                          isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-slate-300'
-                        )}>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {emp.empName}
-                            <RoleBadge emp={emp} />
-                            {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
-                              <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0" title={`Custom rate: ${emp.customHourlyRate}/hr`}>
-                                CR {emp.customHourlyRate.toFixed(1)}
+                      <React.Fragment key={branchKey}>
+                        {/* Branch header row — clickable to collapse/expand */}
+                        <TableRow
+                          className="bg-slate-700/40 hover:bg-slate-700/60 cursor-pointer border-slate-600/50"
+                          onClick={() => toggleBranchCollapse(branchKey)}
+                        >
+                          <TableCell colSpan={4} className="py-2">
+                            <div className="flex items-center gap-2">
+                              {isCollapsed ? (
+                                <ChevronRight className="h-4 w-4 text-emerald-400" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-emerald-400" />
+                              )}
+                              <GitBranch className="h-4 w-4 text-emerald-400" />
+                              <span className="text-sm font-bold text-white">{group.branchName}</span>
+                              <Badge className="bg-slate-600 text-slate-200 text-[9px] px-1.5 py-0">
+                                {group.totals.employeeCount} emp
                               </Badge>
-                            )}
-                            {emp.assignedTrade && emp.assignedTrade.toLowerCase() !== 'helper' && (
-                              <Badge className="bg-teal-500/10 text-teal-400 border-teal-500/20 text-[9px] px-1 py-0" title={`Trade: ${emp.assignedTrade} (${emp.assignedTradeRate ?? '?'}/hr)`}>
-                                {emp.assignedTrade}
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {/* Sites column: show each site name + hours + salary.
-                              For single-site employees, just show the name.
-                              For multi-site, show each on its own line with breakdown. */}
-                          <div className="flex flex-col gap-1">
-                            {emp.sites.map((site, sIdx) => (
-                              <div key={sIdx} className="flex items-center gap-1.5 text-[10px]">
-                                <Building2 className="h-3 w-3 text-slate-500 shrink-0" />
-                                <span className="text-slate-300 font-medium">{site.siteName}</span>
-                                <span className="text-slate-500">·</span>
-                                <span className="text-slate-400 font-mono">{formatHours(site.totalHours)}h</span>
-                                <span className="text-slate-500">·</span>
-                                <span className="text-emerald-400/70 font-mono">{formatCurrency(site.grossSalary)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-cyan-400/80 text-xs text-right bg-cyan-900/5 font-mono">
-                          {formatHours(emp.totalBelowThresholdHours)}
-                        </TableCell>
-                        <TableCell className="text-amber-400/80 text-xs text-right bg-amber-900/5 font-mono">
-                          {formatHours(emp.totalAboveThresholdHours)}
-                        </TableCell>
-                        <TableCell className="text-slate-300 text-xs text-right font-medium font-mono">
-                          {formatHours(emp.totalHours)}
-                        </TableCell>
-                        <TableCell className="text-slate-400 text-xs text-right font-mono" title="Effective hourly rate (low/high)">
-                          {rateLabel}
-                        </TableCell>
-                        <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5 font-mono">
-                          {formatCurrency(emp.grossSalary)}
-                        </TableCell>
-                        <TableCell className="text-red-400/80 text-xs text-right font-mono">
-                          {formatCurrency(emp.deduction)}
-                        </TableCell>
-                        <TableCell className="text-amber-400/80 text-xs text-right font-mono">
-                          {formatCurrency(emp.advance)}
-                        </TableCell>
-                        <TableCell className={cn(
-                          'text-xs text-right font-medium font-mono',
-                          emp.balanceSalary >= 0 ? 'text-slate-200' : 'text-red-400'
-                        )}>
-                          {formatCurrency(emp.balanceSalary)}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {/* Clickable Paid/Unpaid badge — toggles via /api/accounts/salary/toggle-paid */}
-                          <button
-                            type="button"
-                            onClick={() => handleTogglePaid(emp.empId, emp.isPaid)}
-                            className="focus:outline-none"
-                            title={emp.isPaid ? 'Click to mark as unpaid' : 'Click to mark as paid'}
-                          >
-                            {emp.isPaid ? (
-                              <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25 text-[10px] px-2 py-0.5 cursor-pointer transition-colors">
-                                <CheckCircle2 className="h-3 w-3" />
-                                Paid
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/25 text-[10px] px-2 py-0.5 cursor-pointer transition-colors">
-                                <XCircle className="h-3 w-3" />
-                                Unpaid
-                              </Badge>
-                            )}
-                          </button>
-                        </TableCell>
-                      </TableRow>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-cyan-400 text-right font-bold bg-cyan-900/10 font-mono py-2">
+                            {formatHours(group.totals.totalHours)}
+                          </TableCell>
+                          <TableCell className="text-amber-400 text-right font-bold bg-amber-900/10 font-mono py-2">
+                            {formatHours(group.totals.totalHours)}
+                          </TableCell>
+                          <TableCell className="text-white text-right font-bold font-mono py-2">
+                            {formatHours(group.totals.totalHours)}
+                          </TableCell>
+                          <TableCell className="text-slate-400 text-right font-mono text-xs py-2">—</TableCell>
+                          <TableCell className="text-emerald-400 text-right font-bold bg-emerald-900/10 font-mono py-2">
+                            {formatCurrency(group.totals.totalSalary)}
+                          </TableCell>
+                          <TableCell className="text-red-400 text-right font-bold font-mono py-2">
+                            {formatCurrency(group.totals.totalDeductions)}
+                          </TableCell>
+                          <TableCell className="text-amber-400 text-right font-bold font-mono py-2">
+                            {formatCurrency(group.totals.totalAdvances)}
+                          </TableCell>
+                          <TableCell className={cn(
+                            'text-right font-bold font-mono py-2',
+                            group.totals.netBalance >= 0 ? 'text-purple-400' : 'text-red-400'
+                          )}>
+                            {formatCurrency(group.totals.netBalance)}
+                          </TableCell>
+                          <TableCell className="text-center py-2">
+                            <span className="text-emerald-400 font-bold text-xs">{group.totals.paidCount}</span>
+                            <span className="text-slate-400 text-xs">/</span>
+                            <span className="text-white font-bold text-xs">{group.totals.employeeCount}</span>
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Employee rows (only when branch is expanded) */}
+                        {!isCollapsed && group.employees.map((emp) => {
+                          const globalIdx = flatEmployees.indexOf(emp);
+                          const rowId = `${emp.empId}::${globalIdx}`;
+                          const isCurrentRow = isRowCurrent(emp.empId, globalIdx);
+                          const isMatchedRow = !isCurrentRow && isRowMatched(emp.empId, globalIdx);
+
+                          const rateLabel =
+                            emp.lowRate === emp.highRate
+                              ? emp.lowRate.toFixed(2)
+                              : `${emp.lowRate.toFixed(1)}/${emp.highRate.toFixed(1)}`;
+
+                          return (
+                            <TableRow
+                              key={rowId}
+                              ref={(el) => registerRowRef(rowId, el)}
+                              className={cn(
+                                'border-slate-700/20',
+                                isCurrentRow && 'scroll-mt-20',
+                                isCurrentRow && 'bg-yellow-500/30 ring-2 ring-inset ring-yellow-400',
+                                isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
+                                !isCurrentRow && !isMatchedRow && 'hover:bg-slate-800/30',
+                                !isCurrentRow && !isMatchedRow && emp.isPaid && 'bg-emerald-500/5',
+                              )}
+                            >
+                              <TableCell className="text-slate-500 text-xs">{globalIdx + 1}</TableCell>
+                              <TableCell className="text-slate-400 text-xs font-mono">{emp.employeeCode}</TableCell>
+                              <TableCell className={cn(
+                                'text-sm font-medium',
+                                isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-slate-300'
+                              )}>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {emp.empName}
+                                  <RoleBadge emp={emp} />
+                                  {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
+                                    <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0" title={`Custom rate: ${emp.customHourlyRate}/hr`}>
+                                      CR {emp.customHourlyRate.toFixed(1)}
+                                    </Badge>
+                                  )}
+                                  {emp.assignedTrade && emp.assignedTrade.toLowerCase() !== 'helper' && (
+                                    <Badge className="bg-teal-500/10 text-teal-400 border-teal-500/20 text-[9px] px-1 py-0" title={`Trade: ${emp.assignedTrade} (${emp.assignedTradeRate ?? '?'}/hr)`}>
+                                      {emp.assignedTrade}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-xs">
+                                <div className="flex flex-col gap-1">
+                                  {emp.sites.map((site, sIdx) => (
+                                    <div key={sIdx} className="flex items-center gap-1.5 text-[10px]">
+                                      <Building2 className="h-3 w-3 text-slate-500 shrink-0" />
+                                      <span className="text-slate-300 font-medium">{site.siteName}</span>
+                                      <span className="text-slate-500">·</span>
+                                      <span className="text-slate-400 font-mono">{formatHours(site.totalHours)}h</span>
+                                      <span className="text-slate-500">·</span>
+                                      <span className="text-emerald-400/70 font-mono">{formatCurrency(site.grossSalary)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-cyan-400/80 text-xs text-right bg-cyan-900/5 font-mono">
+                                {formatHours(emp.totalBelowThresholdHours)}
+                              </TableCell>
+                              <TableCell className="text-amber-400/80 text-xs text-right bg-amber-900/5 font-mono">
+                                {formatHours(emp.totalAboveThresholdHours)}
+                              </TableCell>
+                              <TableCell className="text-slate-300 text-xs text-right font-medium font-mono">
+                                {formatHours(emp.totalHours)}
+                              </TableCell>
+                              <TableCell className="text-slate-400 text-xs text-right font-mono" title="Effective hourly rate (low/high)">
+                                {rateLabel}
+                              </TableCell>
+                              <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5 font-mono">
+                                {formatCurrency(emp.grossSalary)}
+                              </TableCell>
+                              <TableCell className="text-red-400/80 text-xs text-right font-mono">
+                                {formatCurrency(emp.deduction)}
+                              </TableCell>
+                              <TableCell className="text-amber-400/80 text-xs text-right font-mono">
+                                {formatCurrency(emp.advance)}
+                              </TableCell>
+                              <TableCell className={cn(
+                                'text-xs text-right font-medium font-mono',
+                                emp.balanceSalary >= 0 ? 'text-slate-200' : 'text-red-400'
+                              )}>
+                                {formatCurrency(emp.balanceSalary)}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleTogglePaid(emp.empId, emp.isPaid)}
+                                  className="focus:outline-none"
+                                  title={emp.isPaid ? 'Click to mark as unpaid' : 'Click to mark as paid'}
+                                >
+                                  {emp.isPaid ? (
+                                    <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25 text-[10px] px-2 py-0.5 cursor-pointer transition-colors">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Paid
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/25 text-[10px] px-2 py-0.5 cursor-pointer transition-colors">
+                                      <XCircle className="h-3 w-3" />
+                                      Unpaid
+                                    </Badge>
+                                  )}
+                                </button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </React.Fragment>
                     );
                   })}
 
