@@ -171,309 +171,157 @@ const STATUS_CONFIG: Record<StatusOption, { label: string; short: string; color:
   not_marked: { label: 'Not Marked', short: '-', color: 'bg-slate-600/20 text-slate-500', dotColor: 'bg-slate-600' },
 };
 
-const STATUS_OPTIONS: StatusOption[] = ['present', 'absent', 'no_site', 'overtime', 'not_marked'];
-
-/* ───────── Status Dropdown ───────── */
-interface StatusDropdownProps {
-  employeeId: string;
-  date: string;
-  currentStatus: StatusOption;
-  currentOvertimeHours: number | null;
-  onClose: () => void;
-  onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void;
-  position: { top: number; left: number };
-  // Optional: called after confirming a status, signalling the parent to
-  // auto-advance the dropdown to the next employee's same-day cell. If not
-  // provided, the dropdown just closes after saving (original behaviour).
-  onAdvance?: () => void;
-  // Optional: called when the user presses ArrowUp — saves the current
-  // selection and moves to the PREVIOUS employee's same-day cell. The
-  // parent closes this dropdown and enters stealth mode at the prev cell.
-  onPrev?: () => void;
-}
-
-function StatusDropdown({
-  employeeId,
-  date,
-  currentStatus,
-  currentOvertimeHours,
-  onClose,
-  onStatusChange,
-  position,
-  onAdvance,
-  onPrev,
-}: StatusDropdownProps) {
-  const [selectedStatus, setSelectedStatus] = useState<StatusOption>(currentStatus);
-  const [overtimeHours, setOvertimeHours] = useState<string>(
-    currentOvertimeHours ? String(currentOvertimeHours) : '2'
-  );
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
-
-  const handleConfirm = useCallback(() => {
-    const hours = selectedStatus === 'overtime' ? parseFloat(overtimeHours) || 0 : null;
-    onStatusChange(employeeId, date, selectedStatus, hours);
-    if (onAdvance) {
-      // Auto-advance: tell the parent to open the dropdown on the next
-      // employee's same-day cell. The parent will close this dropdown and
-      // open a new one.
-      onAdvance();
-    } else {
-      onClose();
-    }
-  }, [selectedStatus, overtimeHours, employeeId, date, onStatusChange, onAdvance, onClose]);
-
-  // ── Keyboard shortcuts ──
-  // P / p → select Present (does NOT auto-confirm; user presses Enter to confirm)
-  // A / a → select Absent
-  // Enter / ArrowDown → confirm current selection + advance to next employee.
-  //                     If onAdvance is set, auto-advance + enter stealth mode.
-  //                     Otherwise just close.
-  // ArrowUp → confirm current selection + move to PREVIOUS employee.
-  //           If onPrev is set, the parent closes this dropdown and enters
-  //           stealth mode at the previous employee's cell.
-  // Escape → close without saving.
-  //
-  // Other statuses (overtime, no_site, not_marked) still require the mouse
-  // because they need additional input (overtime hours) or are rarely used
-  // in the fast keyboard flow. The user can still click them with the mouse.
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      // Ignore if the focus is inside an <input> (e.g. the overtime hours
-      // field) so typing numbers there doesn't trigger shortcuts.
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-
-      if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        setSelectedStatus('present');
-      } else if (e.key === 'a' || e.key === 'A') {
-        e.preventDefault();
-        setSelectedStatus('absent');
-      } else if (e.key === 'Enter' || e.key === 'ArrowDown') {
-        // Enter / ArrowDown: confirm + advance to next
-        e.preventDefault();
-        handleConfirm();
-      } else if (e.key === 'ArrowUp') {
-        // ArrowUp: confirm + go to previous employee
-        e.preventDefault();
-        // Save the current selection first (same as handleConfirm, but
-        // call onPrev instead of onAdvance)
-        const hours = selectedStatus === 'overtime' ? parseFloat(overtimeHours) || 0 : null;
-        onStatusChange(employeeId, date, selectedStatus, hours);
-        if (onPrev) {
-          onPrev();
-        } else {
-          onClose();
-        }
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleConfirm, onClose, selectedStatus, overtimeHours, employeeId, date, onStatusChange, onPrev]);
-
-  return (
-    <div
-      ref={ref}
-      className="fixed z-[100] w-52 rounded-xl border border-slate-600 bg-slate-800 p-2 shadow-xl shadow-black/40"
-      style={{ top: Math.max(8, position.top - 240), left: Math.min(position.left, window.innerWidth - 220) }}
-    >
-      <div className="mb-2 px-2 py-1.5 text-xs font-medium text-slate-400 border-b border-slate-700 flex items-center justify-between">
-        <span>{date}</span>
-        {onAdvance && (
-          <span className="text-[9px] text-slate-500 normal-case font-normal">
-            P=present · A=absent · ↓/↑=next/prev
-          </span>
-        )}
-      </div>
-      <div className="flex flex-col gap-0.5">
-        {STATUS_OPTIONS.map((status) => {
-          const cfg = STATUS_CONFIG[status];
-          return (
-            <button
-              key={status}
-              onClick={() => setSelectedStatus(status)}
-              className={cn(
-                'flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors text-left w-full',
-                selectedStatus === status ? 'bg-slate-700/80 text-white' : 'text-slate-300 hover:bg-slate-700/50'
-              )}
-            >
-              <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', cfg.dotColor)} />
-              <span>{cfg.label}</span>
-              {selectedStatus === status && (
-                <Check className="ml-auto h-3.5 w-3.5 text-blue-400" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-      {selectedStatus === 'overtime' && (
-        <div className="mt-2 px-2">
-          <label className="text-xs text-slate-400 mb-1 block">Overtime Hours</label>
-          <Input
-            type="number"
-            min="0"
-            max="24"
-            step="0.5"
-            value={overtimeHours}
-            onChange={(e) => setOvertimeHours(e.target.value)}
-            className="h-8 bg-slate-900 border-slate-600 text-white text-sm"
-          />
-        </div>
-      )}
-      <div className="mt-2 pt-2 border-t border-slate-700">
-        <Button
-          onClick={handleConfirm}
-          size="sm"
-          className="w-full h-8 bg-blue-500 hover:bg-blue-600 text-white text-xs"
-        >
-          {onAdvance ? 'Save & Next' : 'Save'}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/* ───────── Stealth Keyboard Indicator ───────── */
-// A small floating badge shown when stealth keyboard mode is active.
-// It appears near the currently-active cell and shows the employee name +
-// current status + a hint. It has pointer-events-none so it doesn't block
-// clicks. The actual key handling is done by the document-level listener
-// in SiteListView.
+/* ───────── Excel-style Attendance Cell ───────── */
+// A single editable cell in the Excel-style attendance grid.
 //
-// This is NOT the full StatusDropdown — it's just a visual indicator so
-// the user knows which cell is active and what keys to press.
-interface StealthKeyboardIndicatorProps {
+// Behaviour:
+//   - Click or keyboard-focus the cell to make it "active".
+//   - Press P (or p) → mark as Present. Cell turns GREEN, displays "10"
+//     (10 hours credited for the day).
+//   - Press A (or a) → mark as Absent. Cell turns solid RED, displays "A"
+//     (0 hours credited for the day).
+//   - Press Backspace / Delete → clear the cell (status = not_marked).
+//   - Arrow keys move between cells (handled by the parent grid, not here).
+//
+// The cell is a real <button> (not an <input>) so it's keyboard-focusable
+// but doesn't capture text. The only meaningful keys are P / A / Backspace /
+// Delete / Arrow keys / Enter / Tab — everything else is ignored.
+//
+// IMPORTANT: this component is defined at module scope (NOT inside the
+// SiteListView function body) so its function reference is stable across
+// re-renders. If it were defined inside SiteListView, every keystroke would
+// create a new component reference, React would unmount+remount the cell,
+// and focus would be lost after every keypress.
+
+interface ExcelCellProps {
   employeeId: string;
   date: string;
-  employees: Employee[];
-  attendanceMap: Map<string, AttendanceRecord>;
-  onExit: () => void;
+  status: StatusOption;
+  overtimeHours: number | null;
+  inRange: boolean;
+  movedAway: boolean;
+  isFriday: boolean;
+  isRecent: boolean;
+  onMark: (status: 'present' | 'absent') => void;
+  onClear: () => void;
+  isActive: boolean;
+  registerRef: (el: HTMLButtonElement | null) => void;
+  onSelect: () => void;
 }
 
-function StealthKeyboardIndicator({
-  employeeId,
-  date,
-  employees,
-  attendanceMap,
-}: StealthKeyboardIndicatorProps) {
-  const emp = employees.find((e) => e.id === employeeId);
-  const record = attendanceMap.get(`${employeeId}-${date}`);
-  const status = record?.status || 'not_marked';
-  const cfg = STATUS_CONFIG[status];
+const ExcelCell = React.memo(function ExcelCell({
+  status,
+  overtimeHours,
+  inRange,
+  movedAway,
+  isFriday: fri,
+  isRecent,
+  onMark,
+  onClear,
+  isActive,
+  registerRef,
+  onSelect,
+}: ExcelCellProps) {
+  const baseClass =
+    'w-9 h-7 flex items-center justify-center text-[11px] font-bold transition-all outline-none select-none border border-slate-700/40';
 
-  // Find the active cell's position in the DOM so we can position the
-  // indicator near it. We query by data-emp-id + data-date.
-  //
-  // CRITICAL: the indicator uses position:fixed, which is relative to the
-  // viewport. When the page scrolls, the cell moves but the indicator stays
-  // put — so we must re-query the cell's position on every scroll and resize
-  // event to keep the indicator "following" its owner cell. We also re-query
-  // when the employee changes (keyboardMode moves to a new cell).
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  let cellClass = '';
+  let cellContent: React.ReactNode = '';
 
-  // Re-query the cell position. Called on employee change, scroll, resize,
-  // and any DOM mutation that might shift the cell (e.g. a collapsed site
-  // expanding). Uses a rAF guard to avoid thrashing on rapid scroll events.
-  const updatePos = useCallback(() => {
-    const btn = document.querySelector(
-      `button[data-emp-id="${employeeId}"][data-date="${date}"]`,
-    ) as HTMLElement | null;
-    if (btn) {
-      const rect = btn.getBoundingClientRect();
-      // Only update if the cell is visible (non-zero rect). If the cell is
-      // scrolled out of view, the indicator will re-position when the cell
-      // comes back (the scroll listener fires continuously).
-      if (rect.width > 0 && rect.height > 0) {
-        setPos({ top: rect.top, left: rect.left });
-      }
+  if (!inRange) {
+    cellClass = 'bg-slate-800/30 text-slate-700 cursor-not-allowed';
+    cellContent = '·';
+  } else if (movedAway) {
+    if (status === 'present') {
+      cellClass = 'bg-green-500/30 text-green-300/60 cursor-not-allowed';
+      cellContent = '10';
+    } else if (status === 'absent') {
+      cellClass = 'bg-red-500/30 text-red-300/60 cursor-not-allowed';
+      cellContent = 'A';
+    } else if (status === 'overtime') {
+      cellClass = 'bg-blue-500/30 text-blue-300/60 cursor-not-allowed';
+      cellContent = 'O';
+    } else if (status === 'no_site') {
+      cellClass = 'bg-amber-500/30 text-amber-300/60 cursor-not-allowed';
+      cellContent = 'NS';
+    } else {
+      cellClass = 'bg-slate-800/30 text-slate-700/50 cursor-not-allowed';
+      cellContent = '';
     }
-  }, [employeeId, date]);
+  } else if (status === 'present') {
+    cellClass = 'bg-green-500 text-white hover:bg-green-400';
+    cellContent = '10';
+  } else if (status === 'absent') {
+    cellClass = 'bg-red-500 text-white hover:bg-red-400';
+    cellContent = 'A';
+  } else if (status === 'overtime') {
+    cellClass = 'bg-blue-500 text-white hover:bg-blue-400';
+    cellContent = (
+      <span className="flex items-center gap-0.5">
+        O
+        {overtimeHours ? (
+          <span className="text-[8px] font-mono opacity-80">{overtimeHours}h</span>
+        ) : null}
+      </span>
+    );
+  } else if (status === 'no_site') {
+    cellClass = 'bg-amber-500 text-white hover:bg-amber-400';
+    cellContent = 'NS';
+  } else {
+    cellClass = cn(
+      'bg-slate-800/40 text-slate-600 hover:bg-slate-700/60',
+      isRecent && 'bg-emerald-500/10 hover:bg-emerald-500/20',
+      fri && 'bg-red-500/5 hover:bg-red-500/10',
+    );
+    cellContent = '';
+  }
 
-  // Re-position when the employee changes (keyboardMode moved to a new cell)
-  useEffect(() => {
-    updatePos();
-  }, [updatePos]);
-
-  // Follow the owner cell on scroll + resize. The indicator is position:fixed
-  // so it doesn't move with the page — we must manually re-query the cell's
-  // viewport position on every scroll/resize event and update the indicator's
-  // top/left to match. Without this, the indicator stays frozen at its
-  // original viewport position while the cell scrolls away underneath it.
-  useEffect(() => {
-    let rafId = 0;
-    const onScrollOrResize = () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        updatePos();
-      });
-    };
-    // Listen on both window and all scrollable containers (the attendance
-    // grid has its own ScrollArea with horizontal/vertical scroll). Using
-    // capture: true catches scroll events from nested scroll containers
-    // that don't bubble.
-    window.addEventListener('scroll', onScrollOrResize, true);
-    window.addEventListener('resize', onScrollOrResize);
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
-    };
-  }, [updatePos]);
-
-  if (!emp) return null;
+  const activeRing = isActive ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-900 z-10' : '';
+  const interactive = inRange && !movedAway;
 
   return (
-    <div
-      className="fixed z-[100] pointer-events-none"
-      style={{
-        top: pos ? Math.max(8, pos.top - 56) : 100,
-        left: pos ? Math.min(pos.left, window.innerWidth - 280) : 100,
+    <button
+      type="button"
+      ref={registerRef}
+      data-cell="1"
+      tabIndex={interactive ? 0 : -1}
+      onFocus={interactive ? onSelect : undefined}
+      onClick={interactive ? onSelect : undefined}
+      onKeyDown={(e) => {
+        if (!interactive) return;
+        const k = e.key;
+        if (k === 'p' || k === 'P') {
+          e.preventDefault();
+          onMark('present');
+        } else if (k === 'a' || k === 'A') {
+          e.preventDefault();
+          onMark('absent');
+        } else if (k === 'Backspace' || k === 'Delete') {
+          e.preventDefault();
+          onClear();
+        }
       }}
+      title={
+        !inRange
+          ? 'Out of range — employee was not at this site on this date'
+          : movedAway
+            ? `Read-only — ${status === 'present' ? 'Present (10h)' : status === 'absent' ? 'Absent' : status === 'overtime' ? `Overtime (${overtimeHours ?? 0}h)` : 'Not marked'} — employee moved to another site`
+            : status === 'present'
+              ? 'Present (10h) — press A to mark Absent, Backspace to clear'
+              : status === 'absent'
+                ? 'Absent (0h) — press P to mark Present, Backspace to clear'
+                : status === 'overtime'
+                  ? `Overtime (${overtimeHours ?? 0}h)`
+                  : 'Not marked — press P for Present (10h), A for Absent'
+      }
+      className={cn(baseClass, cellClass, activeRing, !interactive && 'cursor-not-allowed')}
     >
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/95 border border-blue-500/50 shadow-xl shadow-black/40 backdrop-blur-sm">
-        {/* Employee name + current status dot */}
-        <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', cfg.dotColor)} />
-        <div className="flex flex-col">
-          <span className="text-xs font-medium text-white truncate max-w-[140px]">
-            {emp.fullName}
-          </span>
-          <span className="text-[9px] text-slate-400">
-            {cfg.label} · {date}
-          </span>
-        </div>
-        <div className="h-6 w-px bg-slate-700" />
-        {/* Key hints — includes ↑/↓ for navigation */}
-        <div className="flex items-center gap-1.5">
-          <kbd className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold border border-emerald-500/30">P</kbd>
-          <span className="text-[9px] text-slate-500">present</span>
-          <kbd className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 text-[9px] font-mono font-bold border border-red-500/30">A</kbd>
-          <span className="text-[9px] text-slate-500">absent</span>
-          <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[9px] font-mono font-bold border border-slate-600">↓</kbd>
-          <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[9px] font-mono font-bold border border-slate-600">↑</kbd>
-          <span className="text-[9px] text-slate-500">nav</span>
-          <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[9px] font-mono font-bold border border-slate-600">↵</kbd>
-          <span className="text-[9px] text-slate-500">skip</span>
-          <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[9px] font-mono font-bold border border-slate-600">Esc</kbd>
-        </div>
-      </div>
-    </div>
+      {cellContent}
+    </button>
   );
-}
+});
 
-/* ───────── Site List View (per-site collapsible table) ───────── */
+/* ───────── Site List View (Excel-style grid) ───────── */
 interface SiteListViewProps {
   site: SiteOption;
   employees: Employee[];
@@ -490,8 +338,6 @@ interface SiteListViewProps {
   onBulkMark: (siteId: string, siteName: string, date: string, status: 'present' | 'absent', employeeIds: string[]) => Promise<void>;
   onShare: () => void;
   onAttendanceSheet: () => void;
-  // Called when the user wants to add an employee to this site. Opens the
-  // Add Employee dialog (handled by the parent AttendancePage).
   onAddEmployee: (site: SiteOption) => void;
 }
 
@@ -513,62 +359,20 @@ function SiteListView({
   onAttendanceSheet,
   onAddEmployee,
 }: SiteListViewProps) {
-  const [dropdown, setDropdown] = useState<{
-    employeeId: string;
-    date: string;
-    status: StatusOption;
-    overtimeHours: number | null;
-    position: { top: number; left: number };
-  } | null>(null);
+  const [activeCell, setActiveCell] = useState<string | null>(null);
 
-  // ── Stealth keyboard mode ──
-  // After the user confirms a status via Enter in the dropdown, we auto-
-  // advance to the next employee's same-day cell. Instead of opening the
-  // full dropdown again (which is visually noisy when rapid-fire marking),
-  // we enter "stealth keyboard mode": the dropdown stays hidden, and a
-  // document-level key listener captures P/A/Enter/Escape directly.
-  //
-  // The user sees a small floating indicator (not the full dropdown) showing
-  // which cell is currently active. They type P+Enter or A+Enter to mark
-  // and auto-advance through the roster without the dropdown popping up.
-  //
-  // Stealth mode ends when:
-  //   - The user presses Escape
-  //   - The user clicks anywhere (mousedown outside the indicator)
-  //   - There's no next employee to advance to
-  //
-  // `keyboardMode` holds the current employee+date being marked. When null,
-  // stealth mode is off.
-  const [keyboardMode, setKeyboardMode] = useState<{
-    employeeId: string;
-    date: string;
-  } | null>(null);
-
-  // ── Bulk-mark state ──
-  // Defaults to today's date (in YYYY-MM-DD) so the admin can mark "today"
-  // with one click. The date input is constrained to the current month
-  // being viewed (the parent passes monthStr/yearStr).
   const todayStr = new Date().toISOString().split('T')[0];
   const [bulkMarkDate, setBulkMarkDate] = useState<string>(todayStr);
   const [bulkMarkStatus, setBulkMarkStatus] = useState<'present' | 'absent'>('present');
   const [bulkMarkLoading, setBulkMarkLoading] = useState(false);
 
-  // Sort:
-  //   1. Active employees (movedAway !== true) first — Team Leaders, then
-  //      Supervisors, then everyone else, alphabetically by name.
-  //   2. Moved-away employees (movedAway === true) at the VERY BOTTOM,
-  //      alphabetically by name. These are employees who were at this site
-  //      during the month but have since been moved to another site. We
-  //      keep them visible (with a faded row) so the site's history is
-  //      preserved — you can still see who worked here and for how many
-  //      days — but they sink to the bottom so the active roster is at top.
+  const cellRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
+
   const sortedEmployees = useMemo(() => {
     return [...employees].sort((a, b) => {
-      // Moved-away employees always sort after active employees
       const aMoved = a.movedAway ? 1 : 0;
       const bMoved = b.movedAway ? 1 : 0;
       if (aMoved !== bMoved) return aMoved - bMoved;
-      // Within the same moved/active group: TL first, then SUP, then others
       const aRank = a.isTeamLeader ? 0 : a.isSupervisor ? 1 : 2;
       const bRank = b.isTeamLeader ? 0 : b.isSupervisor ? 1 : 2;
       if (aRank !== bRank) return aRank - bRank;
@@ -576,151 +380,6 @@ function SiteListView({
     });
   }, [employees]);
 
-  // ── Advance-to-next-employee helper ──
-  // Given the current employeeId + date, find the NEXT in-range employee
-  // in sortedEmployees (scanning forward, skipping moved-away/out-of-range).
-  // CRITICAL: skip employees with movedAway=true — they are no longer at this
-  // site and must NOT be markable via keyboard or mouse. Their cells are
-  // read-only (faded) for historical reference only.
-  // Returns the next Employee or null if there's no next employee.
-  // Used by both the dropdown's onAdvance and the stealth keyboard mode.
-  const findNextEmployee = useCallback((currentEmpId: string, date: string): Employee | null => {
-    const currentIdx = sortedEmployees.findIndex((e) => e.id === currentEmpId);
-    if (currentIdx === -1) return null;
-    for (let i = currentIdx + 1; i < sortedEmployees.length; i++) {
-      const cand = sortedEmployees[i];
-      if (cand.movedAway) continue; // skip moved-away employees
-      if (cand.activeFrom && date < cand.activeFrom) continue;
-      if (cand.activeUntil && date > cand.activeUntil) continue;
-      return cand;
-    }
-    return null;
-  }, [sortedEmployees]);
-
-  // ── Go-to-previous-employee helper ──
-  // Mirror of findNextEmployee but scans backward. Also skips moved-away
-  // employees — they cannot be the target of keyboard navigation/marking.
-  const findPrevEmployee = useCallback((currentEmpId: string, date: string): Employee | null => {
-    const currentIdx = sortedEmployees.findIndex((e) => e.id === currentEmpId);
-    if (currentIdx === -1) return null;
-    for (let i = currentIdx - 1; i >= 0; i--) {
-      const cand = sortedEmployees[i];
-      if (cand.movedAway) continue; // skip moved-away employees
-      if (cand.activeFrom && date < cand.activeFrom) continue;
-      if (cand.activeUntil && date > cand.activeUntil) continue;
-      return cand;
-    }
-    return null;
-  }, [sortedEmployees]);
-
-  // ── Scroll a cell into view and return its button element ──
-  // Finds the cell button for (empId, date) in the DOM, scrolls it into
-  // view, and returns it. Returns null if not found. An employee can appear
-  // at multiple sites, so we pick the first visible (non-zero rect) match.
-  const findAndScrollToCell = useCallback((empId: string, date: string): HTMLElement | null => {
-    const candidates = document.querySelectorAll(
-      `button[data-emp-id="${empId}"][data-date="${date}"]`,
-    );
-    for (let i = 0; i < candidates.length; i++) {
-      const btn = candidates[i] as HTMLElement;
-      const rect = btn.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return btn;
-      }
-    }
-    return null;
-  }, []);
-
-  // ── Stealth keyboard mode: advance + mark ──
-  // Called when the user confirms a status in stealth mode (P+Enter or
-  // A+Enter). Marks the current employee, finds the next in-range employee,
-  // scrolls their cell into view, and updates keyboardMode to point at them.
-  // If there's no next employee, exits stealth mode.
-  const advanceAndMark = useCallback((currentEmpId: string, date: string, status: 'present' | 'absent') => {
-    // Mark the current employee
-    onStatusChange(currentEmpId, date, status);
-    // Find + scroll to the next employee
-    const next = findNextEmployee(currentEmpId, date);
-    if (!next) {
-      // No more employees — exit stealth mode
-      setKeyboardMode(null);
-      return;
-    }
-    findAndScrollToCell(next.id, date);
-    setKeyboardMode({ employeeId: next.id, date });
-  }, [onStatusChange, findNextEmployee, findAndScrollToCell]);
-
-  // ── Stealth keyboard mode: document-level key listener ──
-  // When keyboardMode is active, capture P/A/Enter/ArrowUp/ArrowDown/Escape
-  // at the document level. The dropdown is NOT shown — the user just types
-  // and the marking happens silently with a small floating indicator.
-  useEffect(() => {
-    if (!keyboardMode) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      // Ignore if focus is inside an <input>/<textarea>
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-
-      if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        // Mark as present + advance immediately (no Enter needed in stealth
-        // mode — single keystroke marks and moves to next, for maximum speed)
-        advanceAndMark(keyboardMode!.employeeId, keyboardMode!.date, 'present');
-      } else if (e.key === 'a' || e.key === 'A') {
-        e.preventDefault();
-        advanceAndMark(keyboardMode!.employeeId, keyboardMode!.date, 'absent');
-      } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
-        // ArrowDown / Enter: move to the NEXT employee's same-day cell
-        // WITHOUT marking. Useful for skipping someone whose status you
-        // don't want to change, or for navigating down the roster to
-        // reach a specific employee before marking.
-        e.preventDefault();
-        const next = findNextEmployee(keyboardMode!.employeeId, keyboardMode!.date);
-        if (next) {
-          findAndScrollToCell(next.id, keyboardMode!.date);
-          setKeyboardMode({ employeeId: next.id, date: keyboardMode!.date });
-        } else {
-          // No more employees — exit stealth mode
-          setKeyboardMode(null);
-        }
-      } else if (e.key === 'ArrowUp') {
-        // ArrowUp: move to the PREVIOUS employee's same-day cell without
-        // marking. Lets the user go back up the roster to fix a mistake
-        // or review what was marked.
-        e.preventDefault();
-        const prev = findPrevEmployee(keyboardMode!.employeeId, keyboardMode!.date);
-        if (prev) {
-          findAndScrollToCell(prev.id, keyboardMode!.date);
-          setKeyboardMode({ employeeId: prev.id, date: keyboardMode!.date });
-        }
-        // If no previous employee, stay on the current one (do nothing)
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        setKeyboardMode(null);
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [keyboardMode, advanceAndMark, findNextEmployee, findPrevEmployee, findAndScrollToCell]);
-
-  // ── Stealth keyboard mode: exit on outside click ──
-  // If the user clicks anywhere while in stealth mode, exit it (they're
-  // switching to mouse mode).
-  useEffect(() => {
-    if (!keyboardMode) return;
-    function handleMouseDown(e: MouseEvent) {
-      // Don't exit if clicking on the stealth indicator itself (it has
-      // pointer-events-none, so this shouldn't fire, but just in case)
-      setKeyboardMode(null);
-    }
-    // Use mousedown (not click) so we exit before any cell click handler
-    // fires — the click will then open the normal dropdown.
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [keyboardMode]);
-
-  // For current month: today on the left, all previous dates to the right
   const displayDays = useMemo(() => {
     if (isCurrentMonthView) {
       const today = new Date();
@@ -747,28 +406,164 @@ function SiteListView({
     [isCurrentMonthView, month, year]
   );
 
-  // Site-level stats for the header.
-  // Only counts employees who are IN RANGE for today (i.e. not moved-away
-  // employees whose active range doesn't include today). This keeps the
-  // "present/absent/unmarked" counts accurate for the current active roster.
+  const dateStrFor = useCallback((day: number) => formatDate(day, monthStr, yearStr), [monthStr, yearStr]);
+
+  const isInRange = useCallback((emp: Employee, dateStr: string): boolean => {
+    if (emp.activeFrom && dateStr < emp.activeFrom) return false;
+    if (emp.activeUntil && dateStr > emp.activeUntil) return false;
+    return true;
+  }, []);
+
+  const computeTotalHours = useCallback(
+    (emp: Employee): number => {
+      let total = 0;
+      for (const day of displayDays) {
+        const dateStr = dateStrFor(day);
+        if (!isInRange(emp, dateStr)) continue;
+        const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
+        if (!rec) continue;
+        if (rec.status === 'present') total += 10;
+        else if (rec.status === 'overtime') {
+          total += 10 + (rec.overtimeHours || 0);
+        }
+      }
+      return total;
+    },
+    [displayDays, dateStrFor, isInRange, attendanceMap]
+  );
+
+  const handleMark = useCallback(
+    (empId: string, dateStr: string, status: 'present' | 'absent') => {
+      onStatusChange(empId, dateStr, status);
+      setTimeout(() => {
+        const emp = sortedEmployees.find((e) => e.id === empId);
+        if (!emp) return;
+        const dayIdx = displayDays.findIndex((d) => dateStrFor(d) === dateStr);
+        if (dayIdx === -1) return;
+
+        let nextEmpId = empId;
+        let nextDateStr: string | null = null;
+        if (dayIdx + 1 < displayDays.length) {
+          nextDateStr = dateStrFor(displayDays[dayIdx + 1]);
+        } else {
+          const empIdx = sortedEmployees.findIndex((e) => e.id === empId);
+          for (let i = empIdx + 1; i < sortedEmployees.length; i++) {
+            const cand = sortedEmployees[i];
+            if (cand.movedAway) continue;
+            for (const d of displayDays) {
+              const ds = dateStrFor(d);
+              if (isInRange(cand, ds)) {
+                nextEmpId = cand.id;
+                nextDateStr = ds;
+                break;
+              }
+            }
+            if (nextDateStr) break;
+          }
+        }
+
+        if (nextDateStr) {
+          const key = `${nextEmpId}::${nextDateStr}`;
+          const el = cellRefs.current.get(key);
+          if (el) {
+            el.focus();
+            setActiveCell(key);
+          }
+        }
+      }, 0);
+    },
+    [onStatusChange, sortedEmployees, displayDays, dateStrFor, isInRange]
+  );
+
+  const handleClear = useCallback(
+    (empId: string, dateStr: string) => {
+      onStatusChange(empId, dateStr, 'not_marked');
+    },
+    [onStatusChange]
+  );
+
+  useEffect(() => {
+    if (!activeCell) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+      const k = e.key;
+      if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== 'ArrowUp' && k !== 'ArrowDown' && k !== 'Enter' && k !== 'Tab') {
+        return;
+      }
+
+      if (!activeCell) return;
+      const [empId, dateStr] = activeCell.split('::');
+      const empIdx = sortedEmployees.findIndex((em) => em.id === empId);
+      if (empIdx === -1) return;
+      const dayIdx = displayDays.findIndex((d) => dateStrFor(d) === dateStr);
+      if (dayIdx === -1) return;
+
+      e.preventDefault();
+
+      let nextEmpIdx = empIdx;
+      let nextDayIdx = dayIdx;
+
+      if (k === 'ArrowRight' || (k === 'Tab' && !e.shiftKey)) {
+        nextDayIdx = dayIdx + 1;
+        if (nextDayIdx >= displayDays.length) {
+          nextDayIdx = 0;
+          nextEmpIdx = empIdx + 1;
+        }
+      } else if (k === 'ArrowLeft' || (k === 'Tab' && e.shiftKey)) {
+        nextDayIdx = dayIdx - 1;
+        if (nextDayIdx < 0) {
+          nextEmpIdx = empIdx - 1;
+          if (nextEmpIdx < 0) return;
+          nextDayIdx = displayDays.length - 1;
+        }
+      } else if (k === 'ArrowDown' || k === 'Enter') {
+        nextEmpIdx = empIdx + 1;
+      } else if (k === 'ArrowUp') {
+        nextEmpIdx = empIdx - 1;
+      }
+
+      if (nextEmpIdx < 0 || nextEmpIdx >= sortedEmployees.length) return;
+      if (nextDayIdx < 0 || nextDayIdx >= displayDays.length) return;
+
+      let safeEmpIdx = nextEmpIdx;
+      while (safeEmpIdx >= 0 && safeEmpIdx < sortedEmployees.length && sortedEmployees[safeEmpIdx].movedAway) {
+        if (k === 'ArrowDown' || k === 'Enter') safeEmpIdx++;
+        else if (k === 'ArrowUp') safeEmpIdx--;
+        else break;
+      }
+      if (safeEmpIdx < 0 || safeEmpIdx >= sortedEmployees.length) return;
+
+      const nextEmp = sortedEmployees[safeEmpIdx];
+      const nextDateStr = dateStrFor(displayDays[nextDayIdx]);
+      const key = `${nextEmp.id}::${nextDateStr}`;
+      const el = cellRefs.current.get(key);
+      if (el) {
+        el.focus();
+        setActiveCell(key);
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeCell, sortedEmployees, displayDays, dateStrFor]);
+
   const siteStats = useMemo(() => {
     let present = 0;
     let absent = 0;
     let unmarked = 0;
     let activeCount = 0;
     const today = new Date();
-    const todayStr = isCurrentMonthView
+    const todayStrLocal = isCurrentMonthView
       ? formatDate(today.getDate(), monthStr, yearStr)
       : null;
-    if (todayStr) {
+    if (todayStrLocal) {
       for (const emp of employees) {
-        // Skip employees who are out of range today (moved away before today
-        // or haven't started yet). They shouldn't count toward the site's
-        // present/absent/unmarked stats.
-        if (emp.activeFrom && todayStr < emp.activeFrom) continue;
-        if (emp.activeUntil && todayStr > emp.activeUntil) continue;
+        if (emp.activeFrom && todayStrLocal < emp.activeFrom) continue;
+        if (emp.activeUntil && todayStrLocal > emp.activeUntil) continue;
+        if (emp.movedAway) continue;
         activeCount++;
-        const rec = attendanceMap.get(`${emp.id}-${todayStr}`);
+        const rec = attendanceMap.get(`${emp.id}-${todayStrLocal}`);
         if (!rec || rec.status === 'not_marked') unmarked++;
         else if (rec.status === 'present' || rec.status === 'overtime') present++;
         else absent++;
@@ -777,19 +572,14 @@ function SiteListView({
     return { present, absent, unmarked, total: activeCount };
   }, [employees, attendanceMap, isCurrentMonthView, monthStr, yearStr]);
 
-  // Handle bulk mark for this site.
-  // Only includes employees who were actually at this site on the selected
-  // date (i.e. the date falls within their activeFrom–activeUntil range).
-  // Moved-away employees whose range doesn't include the selected date are
-  // excluded — we can't mark attendance for a date they weren't at the site.
   const handleBulkMark = useCallback(async () => {
     if (employees.length === 0) return;
     if (!bulkMarkDate) {
       toast({ title: 'Date required', description: 'Please pick a date first.', variant: 'destructive' });
       return;
     }
-    // Filter to employees in range for the selected date
     const eligibleEmps = employees.filter((emp) => {
+      if (emp.movedAway) return false;
       if (emp.activeFrom && bulkMarkDate < emp.activeFrom) return false;
       if (emp.activeUntil && bulkMarkDate > emp.activeUntil) return false;
       return true;
@@ -797,7 +587,7 @@ function SiteListView({
     if (eligibleEmps.length === 0) {
       toast({
         title: 'No eligible employees',
-        description: 'No employees were at this site on the selected date.',
+        description: 'No active employees were at this site on the selected date.',
         variant: 'destructive',
       });
       return;
@@ -810,14 +600,15 @@ function SiteListView({
     }
   }, [employees, bulkMarkDate, bulkMarkStatus, onBulkMark, site.id, site.name]);
 
+  const registerCell = useCallback((key: string) => {
+    return (el: HTMLButtonElement | null) => {
+      if (el) cellRefs.current.set(key, el);
+      else cellRefs.current.delete(key);
+    };
+  }, []);
+
   return (
     <Card className="bg-slate-800/50 border-slate-700/50 overflow-hidden">
-      {/* Site header (clickable to collapse/expand).
-          Note: this is a <div> with role="button" rather than a real <button>
-          because it contains action buttons (Share / Sheet) as children, and
-          HTML forbids nesting <button> inside <button>. Using a div keeps the
-          action buttons as real buttons for accessibility while still
-          allowing the whole header to be clickable for collapse/expand. */}
       <div
         role="button"
         tabIndex={0}
@@ -876,10 +667,6 @@ function SiteListView({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          {/* Add Employee button — opens the Add Employee dialog (handled by
-              the parent AttendancePage) to assign an existing employee to
-              this site. Only shown for the current month (can't add to a
-              past month's roster retroactively). */}
           {isCurrentMonthView && (
             <Button
               variant="ghost"
@@ -892,7 +679,6 @@ function SiteListView({
               <span className="hidden sm:inline">Add Employee</span>
             </Button>
           )}
-          {/* Share button */}
           <Button
             variant="ghost"
             size="sm"
@@ -904,7 +690,6 @@ function SiteListView({
             <Share2 className="h-3 w-3" />
             <span className="hidden sm:inline">Share</span>
           </Button>
-          {/* Attendance Sheet button */}
           <Button
             variant="ghost"
             size="sm"
@@ -919,7 +704,6 @@ function SiteListView({
         </div>
       </div>
 
-      {/* Bulk-mark bar (only when site is expanded) */}
       {!isCollapsed && (
         <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-900/30 border-b border-slate-700/50">
           <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wide font-medium">
@@ -931,7 +715,6 @@ function SiteListView({
             value={bulkMarkDate}
             onChange={(e) => setBulkMarkDate(e.target.value)}
             className="h-7 px-2 text-xs bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-emerald-500/50"
-            // Constrain to the month currently being viewed
             min={`${yearStr}-${monthStr}-01`}
             max={`${yearStr}-${monthStr}-${String(daysInMonth).padStart(2, '0')}`}
             title="Date to mark all employees"
@@ -948,7 +731,7 @@ function SiteListView({
               )}
             >
               <Check className="h-3 w-3" />
-              Present
+              Present (10h)
             </button>
             <button
               type="button"
@@ -961,7 +744,7 @@ function SiteListView({
               )}
             >
               <X className="h-3 w-3" />
-              Absent
+              Absent (0h)
             </button>
           </div>
           <Button
@@ -974,30 +757,28 @@ function SiteListView({
                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                 : 'bg-red-600 hover:bg-red-700 text-white',
             )}
-            title={`Mark all ${employees.length} employee(s) as ${bulkMarkStatus} on ${bulkMarkDate}`}
+            title={`Mark all eligible employees as ${bulkMarkStatus} on ${bulkMarkDate}`}
           >
             {bulkMarkLoading ? (
               <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
               <Check className="h-3 w-3" />
             )}
-            Mark all {employees.length} as {bulkMarkStatus === 'present' ? 'Present' : 'Absent'}
+            Mark all as {bulkMarkStatus === 'present' ? 'Present' : 'Absent'}
           </Button>
           <p className="text-[10px] text-slate-500 ml-auto hidden md:block">
-            Overtime records are preserved when marking Present.
+            P = Present (10h) · A = Absent (0h) · Backspace = clear · Arrow keys to navigate
           </p>
         </div>
       )}
 
-      {/* Collapsible table */}
       {!isCollapsed && (
         <ScrollArea className="w-full">
-          <div className="min-w-[1000px]">
-            {/* Header row */}
-            <div className="flex items-center bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
-              <div className="w-52 shrink-0 px-4 py-3">Employee</div>
-              <div className="w-28 shrink-0 px-3 py-3">Emp. Code</div>
-              <div className="w-28 shrink-0 px-3 py-3">Trade</div>
+          <div className="min-w-[1100px]">
+            <div className="flex items-stretch bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
+              <div className="w-44 shrink-0 px-3 py-2.5 border-r border-slate-700/50">Employee</div>
+              <div className="w-24 shrink-0 px-2 py-2.5 border-r border-slate-700/50">Emp. Code</div>
+              <div className="w-28 shrink-0 px-2 py-2.5 border-r border-slate-700/50">Trade</div>
               <div className="flex-1 flex">
                 {displayDays.map((day) => {
                   const isFri = isFriday(year, month, day);
@@ -1007,55 +788,48 @@ function SiteListView({
                     <div
                       key={day}
                       className={cn(
-                        'w-16 shrink-0 text-center py-3 leading-tight',
-                        isFri && 'text-red-400/50',
-                        recent && 'text-emerald-400 font-semibold'
+                        'w-9 shrink-0 text-center py-2 leading-tight border-r border-slate-700/30',
+                        isFri && 'text-red-400/60 bg-red-500/5',
+                        recent && 'text-emerald-400 font-semibold bg-emerald-500/5'
                       )}
                     >
-                      <span className={cn(recent && 'text-[10px] block')}>{label}</span>
+                      <span className={cn(recent && 'text-[9px] block')}>{label}</span>
                     </div>
                   );
                 })}
               </div>
-              <div className="w-16 shrink-0 text-center py-3 px-2">OT</div>
+              <div className="w-16 shrink-0 text-center py-2.5 px-1 bg-emerald-900/20 text-emerald-300 border-l border-slate-700/50">
+                Total Hrs
+              </div>
             </div>
 
-            {/* Employee rows */}
-            <div className="divide-y divide-slate-700/50">
+            <div className="divide-y divide-slate-700/40">
               {sortedEmployees.length === 0 ? (
                 <div className="py-12 text-center text-sm text-slate-500">
                   No active employees assigned to this site.
                 </div>
               ) : (
                 sortedEmployees.map((emp) => {
-                  const totalOT = Array.from(attendanceMap.values())
-                    .filter((r) => r.employeeId === emp.id && r.status === 'overtime')
-                    .reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
-
-                  // Determine if this employee has been moved away from this
-                  // site (removedDate is set on their site-assignment record).
-                  // Moved-away employees get a faded row effect and sink to
-                  // the bottom of the list (handled by sortedEmployees above).
+                  const totalHours = computeTotalHours(emp);
                   const isMovedAway = !!emp.movedAway;
+                  const tradeDisplay =
+                    emp.assignedTrade || emp.trade || emp.position || '—';
 
                   return (
                     <div
                       key={`${emp.id}-${emp.activeFrom || 'active'}`}
                       className={cn(
-                        'flex items-center transition-colors',
-                        // Faded effect for moved-away employees — the whole
-                        // row is dimmed so it's visually clear they're no
-                        // longer at this site, but still visible for history.
+                        'flex items-stretch transition-colors',
                         isMovedAway && 'opacity-40',
-                        !isMovedAway && 'hover:bg-slate-700/20',
+                        !isMovedAway && 'hover:bg-slate-700/10',
                         emp.isTeamLeader && !isMovedAway && 'bg-amber-500/5',
                         emp.isSupervisor && !emp.isTeamLeader && !isMovedAway && 'bg-blue-500/5',
                       )}
                     >
-                      <div className="w-52 shrink-0 px-4 py-2.5">
+                      <div className="w-44 shrink-0 px-3 py-1.5 border-r border-slate-700/40">
                         <div className="flex items-center gap-1.5">
                           <span className={cn(
-                            'text-sm font-medium truncate block',
+                            'text-xs font-medium truncate block',
                             isMovedAway ? 'text-slate-400' : 'text-white'
                           )}>
                             {emp.fullName}
@@ -1073,188 +847,61 @@ function SiteListView({
                           )}
                         </div>
                       </div>
-                      <div className="w-28 shrink-0 px-3 py-2.5">
-                        <span className="text-xs text-slate-400 font-mono">{emp.employeeId}</span>
+                      <div className="w-24 shrink-0 px-2 py-1.5 border-r border-slate-700/40">
+                        <span className="text-[11px] text-slate-400 font-mono">{emp.employeeId}</span>
                       </div>
-                      <div className="w-28 shrink-0 px-3 py-2.5">
-                        <span className="text-xs text-slate-400 truncate block">
-                          {emp.trade || emp.position || '—'}
+                      <div className="w-28 shrink-0 px-2 py-1.5 border-r border-slate-700/40">
+                        <span className="text-[11px] text-slate-400 truncate block">
+                          {tradeDisplay}
                           {emp.isTeamLeader && <span className="text-amber-400"> / TL</span>}
                           {emp.isSupervisor && !emp.isTeamLeader && <span className="text-blue-400"> / SUP</span>}
                         </span>
                       </div>
                       <div className="flex-1 flex">
-                        {displayDays.map((day, dayIdx) => {
-                          const dateStr = formatDate(day, monthStr, yearStr);
+                        {displayDays.map((day) => {
+                          const dateStr = dateStrFor(day);
                           const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-                          const status = record?.status || 'not_marked';
-                          const cfg = STATUS_CONFIG[status];
+                          const status: StatusOption = record?.status || 'not_marked';
                           const isFri = isFriday(year, month, day);
                           const recent = isRecentDay(day);
-
-                          // ── Date-range check ──
-                          // If the employee has an activeFrom/activeUntil
-                          // range (from EmpCountSitePerMonth), check whether
-                          // this day falls within it. Days outside the range
-                          // are rendered as faded non-interactive cells —
-                          // the user can see the cell exists but can't mark
-                          // it, because the employee wasn't at this site on
-                          // that day.
-                          //
-                          // activeFrom is inclusive (employee started this day).
-                          // activeUntil is inclusive (employee's last day at site).
-                          // activeUntil === null means still at the site.
-                          let isInRange = true;
-                          if (emp.activeFrom && dateStr < emp.activeFrom) {
-                            isInRange = false;
-                          }
-                          if (emp.activeUntil && dateStr > emp.activeUntil) {
-                            isInRange = false;
-                          }
-
-                          // Out-of-range cell: faded, non-interactive, no
-                          // attendance status shown (the attendance record
-                          // belongs to a different site for this date).
-                          if (!isInRange) {
-                            // Determine if this is the FIRST faded cell of a
-                            // contiguous faded region. We show the previous-site
-                            // label on the first faded cell so the admin can see
-                            // where the employee was before (or after) this site.
-                            //
-                            // "First faded cell" = either the very first cell
-                            // (dayIdx === 0) OR the previous cell was in-range.
-                            // We compute prevDateStr for the previous displayDay.
-                            let isFirstFaded = dayIdx === 0;
-                            if (dayIdx > 0) {
-                              const prevDay = displayDays[dayIdx - 1];
-                              const prevDateStr = formatDate(prevDay, monthStr, yearStr);
-                              let prevInRange = true;
-                              if (emp.activeFrom && prevDateStr < emp.activeFrom) prevInRange = false;
-                              if (emp.activeUntil && prevDateStr > emp.activeUntil) prevInRange = false;
-                              if (prevInRange) isFirstFaded = true;
-                            }
-
-                            // Build the tooltip text: shows where the employee
-                            // was on this date (previous site or "not yet at
-                            // this site").
-                            const tooltipText = emp.previousSite
-                              ? `Was at ${emp.previousSite} (${emp.previousSiteDays ?? 0}d) — not at this site on this date`
-                              : 'Employee was not at this site on this date';
-
-                            return (
-                              <div
-                                key={day}
-                                className={cn(
-                                  'w-16 shrink-0 flex items-center justify-center py-1.5 relative',
-                                  isFri && 'bg-red-500/5',
-                                )}
-                              >
-                                {/* Previous-site label — shown once at the start
-                                    of the faded region. Overlays the faded cells
-                                    with a small "← SiteName (Nd)" badge so the
-                                    admin knows where the employee was before. */}
-                                {isFirstFaded && emp.previousSite && (
-                                  <div
-                                    className="absolute left-1 top-1/2 -translate-y-1/2 z-10 flex items-center gap-0.5 px-1 py-0.5 rounded bg-slate-800/80 border border-slate-700/50 pointer-events-none whitespace-nowrap"
-                                    title={tooltipText}
-                                  >
-                                    <span className="text-[8px] text-slate-500">←</span>
-                                    <span className="text-[8px] text-slate-400 font-medium truncate max-w-[60px]">
-                                      {emp.previousSite}
-                                    </span>
-                                    {(emp.previousSiteDays ?? 0) > 0 && (
-                                      <span className="text-[8px] text-slate-500 font-mono">
-                                        {emp.previousSiteDays ?? 0}d
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                                <span
-                                  className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-800/40 text-slate-700 cursor-not-allowed"
-                                  title={tooltipText}
-                                >
-                                  ·
-                                </span>
-                              </div>
-                            );
-                          }
-
-                          // In-range cell: normal interactive button.
-                          // BUT: if the employee has moved away (movedAway=true),
-                          // render a non-interactive read-only span instead.
-                          // The historical attendance status is still visible,
-                          // but you can't click it to change it — the employee
-                          // is no longer at this site.
-                          //
-                          // data-emp-id and data-date are used by the
-                          // auto-advance logic to find the next employee's
-                          // same-day cell after a keyboard confirm.
-                          if (emp.movedAway) {
-                            return (
-                              <div
-                                key={day}
-                                className={cn(
-                                  'w-16 shrink-0 flex items-center justify-center py-1.5',
-                                  isFri && 'bg-red-500/5',
-                                )}
-                              >
-                                <span
-                                  className={cn(
-                                    'h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold cursor-not-allowed',
-                                    cfg.color,
-                                  )}
-                                  title={`${cfg.label} — employee has moved to another site (read-only)`}
-                                >
-                                  {cfg.short}
-                                </span>
-                              </div>
-                            );
-                          }
+                          const inR = isInRange(emp, dateStr);
+                          const key = `${emp.id}::${dateStr}`;
+                          const isActive = activeCell === key;
 
                           return (
                             <div
                               key={day}
                               className={cn(
-                                'w-16 shrink-0 flex items-center justify-center py-1.5',
+                                'w-9 shrink-0 flex items-center justify-center border-r border-slate-700/30',
                                 isFri && 'bg-red-500/5',
-                                recent && 'bg-emerald-500/5'
                               )}
                             >
-                              <button
-                                data-emp-id={emp.id}
-                                data-date={dateStr}
-                                onClick={(e) => {
-                                  // Clear stealth keyboard mode if active —
-                                  // clicking a cell always opens the normal
-                                  // dropdown (user is switching to mouse mode).
-                                  setKeyboardMode(null);
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  setDropdown({
-                                    employeeId: emp.id,
-                                    date: dateStr,
-                                    status,
-                                    overtimeHours: record?.overtimeHours || null,
-                                    position: { top: rect.top, left: rect.left },
-                                  });
-                                }}
-                                className={cn(
-                                  'h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all hover:ring-2 hover:ring-slate-500/50',
-                                  cfg.color
-                                )}
-                                title={`${cfg.label}${status === 'overtime' && record?.overtimeHours ? ` (${record.overtimeHours}h)` : ''}`}
-                              >
-                                {cfg.short}
-                              </button>
+                              <ExcelCell
+                                employeeId={emp.id}
+                                date={dateStr}
+                                status={status}
+                                overtimeHours={record?.overtimeHours || null}
+                                inRange={inR}
+                                movedAway={!!emp.movedAway}
+                                isFriday={isFri}
+                                isRecent={recent}
+                                onMark={(s) => handleMark(emp.id, dateStr, s)}
+                                onClear={() => handleClear(emp.id, dateStr)}
+                                isActive={isActive}
+                                registerRef={registerCell(key)}
+                                onSelect={() => setActiveCell(key)}
+                              />
                             </div>
                           );
                         })}
                       </div>
-                      <div className="w-16 shrink-0 text-center py-2.5 px-2">
-                        {totalOT > 0 ? (
-                          <span className="text-xs font-medium text-blue-400">{totalOT}h</span>
-                        ) : (
-                          <span className="text-xs text-slate-600">—</span>
-                        )}
+                      <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-emerald-900/10 border-l border-slate-700/40">
+                        <span className={cn(
+                          'text-xs font-bold font-mono',
+                          totalHours > 0 ? 'text-emerald-300' : 'text-slate-600'
+                        )}>
+                          {totalHours > 0 ? totalHours : '—'}
+                        </span>
                       </div>
                     </div>
                   );
@@ -1266,18 +913,24 @@ function SiteListView({
         </ScrollArea>
       )}
 
-      {/* Legend */}
       {!isCollapsed && (
         <div className="flex flex-wrap gap-3 px-4 py-3 border-t border-slate-700/50">
-          {STATUS_OPTIONS.map((s) => {
-            const cfg = STATUS_CONFIG[s];
-            return (
-              <div key={s} className="flex items-center gap-1.5">
-                <span className={cn('h-2 w-2 rounded-full', cfg.dotColor)} />
-                <span className="text-[11px] text-slate-400">{cfg.label}</span>
-              </div>
-            );
-          })}
+          <div className="flex items-center gap-1.5">
+            <span className="h-4 w-4 rounded bg-green-500" />
+            <span className="text-[11px] text-slate-400">P = Present (10h)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-4 w-4 rounded bg-red-500" />
+            <span className="text-[11px] text-slate-400">A = Absent (0h)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-4 w-4 rounded bg-blue-500" />
+            <span className="text-[11px] text-slate-400">O = Overtime</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-4 w-4 rounded bg-amber-500" />
+            <span className="text-[11px] text-slate-400">NS = No Site</span>
+          </div>
           <div className="flex items-center gap-1.5">
             <Crown className="h-2.5 w-2.5 text-amber-400" />
             <span className="text-[11px] text-slate-400">Team Leader</span>
@@ -1287,66 +940,13 @@ function SiteListView({
             <span className="text-[11px] text-slate-400">Supervisor</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-red-400/40" />
-            <span className="text-[11px] text-slate-400">Friday</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">P</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">A</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">⌫</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">←↑↓→</kbd>
+            <span className="text-[11px] text-slate-400">keyboard only</span>
           </div>
         </div>
-      )}
-
-      {/* Status Dropdown — only shown when NOT in stealth keyboard mode.
-          In stealth mode, the dropdown is hidden and a small floating
-          indicator shows the active cell instead. The user types P/A/Enter
-          directly (captured by the document-level key listener above). */}
-      {dropdown && !keyboardMode && (
-        <StatusDropdown
-          employeeId={dropdown.employeeId}
-          date={dropdown.date}
-          currentStatus={dropdown.status}
-          currentOvertimeHours={dropdown.overtimeHours}
-          onStatusChange={onStatusChange}
-          onClose={() => setDropdown(null)}
-          position={dropdown.position}
-          onAdvance={() => {
-            // ── Enter stealth keyboard mode at the NEXT employee ──
-            // After confirming a status via Enter/ArrowDown in the dropdown,
-            // we close the dropdown and enter stealth mode at the NEXT
-            // employee's same-day cell. The dropdown stays hidden — the
-            // user just types P (present) or A (absent) to mark and
-            // auto-advance, without the dropdown popping up on every cell.
-            const next = findNextEmployee(dropdown.employeeId, dropdown.date);
-            setDropdown(null); // close the dropdown
-            if (next) {
-              findAndScrollToCell(next.id, dropdown.date);
-              setKeyboardMode({ employeeId: next.id, date: dropdown.date });
-            }
-          }}
-          onPrev={() => {
-            // ── Enter stealth keyboard mode at the PREVIOUS employee ──
-            // Triggered by ArrowUp in the dropdown. Saves the current
-            // selection, closes the dropdown, and enters stealth mode at
-            // the PREVIOUS employee's same-day cell. Lets the user go back
-            // up the roster to fix a mistake or re-mark someone.
-            const prev = findPrevEmployee(dropdown.employeeId, dropdown.date);
-            setDropdown(null); // close the dropdown
-            if (prev) {
-              findAndScrollToCell(prev.id, dropdown.date);
-              setKeyboardMode({ employeeId: prev.id, date: dropdown.date });
-            }
-          }}
-        />
-      )}
-
-      {/* Stealth keyboard mode indicator — a small floating badge showing
-          which cell is currently active. NOT the full dropdown. The user
-          types P/A/Enter/Escape (captured by the document-level listener). */}
-      {keyboardMode && (
-        <StealthKeyboardIndicator
-          employeeId={keyboardMode.employeeId}
-          date={keyboardMode.date}
-          employees={sortedEmployees}
-          attendanceMap={attendanceMap}
-          onExit={() => setKeyboardMode(null)}
-        />
       )}
     </Card>
   );
