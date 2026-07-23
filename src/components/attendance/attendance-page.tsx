@@ -1529,18 +1529,26 @@ export function AttendancePage() {
           }
         }
 
-        // If the employee moved away AND has NO attendance records for
-        // this month at this site, skip them entirely — don't add to the
-        // list. The user only wants moved-away employees to remain visible
-        // at their old site if they actually have attendance data there.
-        // If they were moved without ever marking attendance, they should
-        // disappear from the old site.
+        // If the employee moved away AND has NO meaningful attendance
+        // records (P / A / C / O) for this month at this site, skip them
+        // entirely — don't add to the list. The user only wants moved-away
+        // employees to remain visible at their old site if they actually
+        // have a Present, Absent, Camp Sitting, or Overtime mark there.
+        // If they were moved without ever marking attendance (or all their
+        // records are 'not_marked' / 'no_site'), they should disappear
+        // from the old site entirely.
         if (movedAway) {
-          const hasAttendance = attendanceRecords.some(
-            (r) => r.employeeId === emp.id && r.date.startsWith(monthPrefix),
+          const hasMarkedAttendance = attendanceRecords.some(
+            (r) =>
+              r.employeeId === emp.id &&
+              r.date.startsWith(monthPrefix) &&
+              (r.status === 'present' ||
+                r.status === 'absent' ||
+                r.status === 'camp_sitting' ||
+                r.status === 'overtime'),
           );
-          if (!hasAttendance) {
-            // No attendance at this site — skip entirely
+          if (!hasMarkedAttendance) {
+            // No P/A/C/O at this site — skip entirely
             continue;
           }
         }
