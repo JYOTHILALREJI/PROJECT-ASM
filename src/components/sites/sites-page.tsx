@@ -28,6 +28,7 @@ import {
   CheckCircle2,
   Check,
   Wrench,
+  Briefcase,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -913,6 +914,11 @@ export function SitesPage() {
   const [editingTradeValue, setEditingTradeValue] = useState<string>('');
   const [savingTrade, setSavingTrade] = useState(false);
 
+  // Bulk change trade state (uses the same multi-select as Remove)
+  const [showBulkTradeDialog, setShowBulkTradeDialog] = useState(false);
+  const [bulkTradeRateId, setBulkTradeRateId] = useState<string>('');
+  const [bulkTradeLoading, setBulkTradeLoading] = useState(false);
+
   // Remove employees state
   const [showRemoveEmpDialog, setShowRemoveEmpDialog] = useState(false);
   const [removeEmpLoading, setRemoveEmpLoading] = useState(false);
@@ -1070,6 +1076,43 @@ export function SitesPage() {
       setSavingTrade(false);
     }
   }, [viewSite, fetchSiteEmployees]);
+
+  /* ── Bulk change trade for selected employees ── */
+  // Uses the same multi-select (selectedEmps) as the Remove button.
+  // Calls POST /api/employee-trades with all selected employeeIds + the
+  // chosen tradeRateId. On success, refreshes the site employees so the
+  // new trade shows up for all of them.
+  const handleBulkChangeTrade = useCallback(async () => {
+    if (selectedEmps.size === 0 || !bulkTradeRateId) return;
+    setBulkTradeLoading(true);
+    try {
+      const res = await fetch('/api/employee-trades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeIds: Array.from(selectedEmps),
+          tradeRateId: bulkTradeRateId,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: 'Trade updated',
+          description: `${json.data.upserted} employee(s) set to ${json.data.trade} (${json.data.hourlyRate}/hr)`,
+        });
+        setShowBulkTradeDialog(false);
+        setBulkTradeRateId('');
+        setSelectedEmps(new Set());
+        if (viewSite) await fetchSiteEmployees(viewSite.name);
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to update trade', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update trade', variant: 'destructive' });
+    } finally {
+      setBulkTradeLoading(false);
+    }
+  }, [selectedEmps, bulkTradeRateId, viewSite, fetchSiteEmployees]);
 
   /* ── Fetch all employees (for add dropdown) ── */
   const fetchAllEmployees = useCallback(async () => {
@@ -1787,14 +1830,28 @@ export function SitesPage() {
                 loading={addingEmployee || loadingAllEmployees}
               />
               {selectedEmps.size > 0 && (
-                <Button
-                  variant="destructive"
-                  className="gap-2"
-                  onClick={() => setShowRemoveEmpDialog(true)}
-                >
-                  <UserMinus className="h-4 w-4" />
-                  Remove ({selectedEmps.size})
-                </Button>
+                <>
+                  <Button
+                    variant="default"
+                    className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => {
+                      setBulkTradeRateId('');
+                      setShowBulkTradeDialog(true);
+                    }}
+                    title="Change trade for all selected employees"
+                  >
+                    <Briefcase className="h-4 w-4" />
+                    Change Trade ({selectedEmps.size})
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="gap-2"
+                    onClick={() => setShowRemoveEmpDialog(true)}
+                  >
+                    <UserMinus className="h-4 w-4" />
+                    Remove ({selectedEmps.size})
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -2269,6 +2326,63 @@ export function SitesPage() {
             </Button>
             <Button variant="destructive" onClick={handleRemoveEmployees} disabled={removeEmpLoading}>
               {removeEmpLoading ? 'Removing...' : 'Remove'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Change Trade Dialog — uses the same multi-select as Remove */}
+      <Dialog open={showBulkTradeDialog} onOpenChange={setShowBulkTradeDialog}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-slate-200">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Briefcase className="h-5 w-5 text-blue-400" />
+              Change Trade for {selectedEmps.size} {selectedEmps.size === 1 ? 'Employee' : 'Employees'}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Select a trade from the dropdown. It will be applied to all{' '}
+              {selectedEmps.size} selected{' '}
+              {selectedEmps.size === 1 ? 'employee' : 'employees'}. The trade
+              determines their hourly rate and is used in salary calculations.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <label className="text-xs font-medium text-slate-300 uppercase tracking-wide mb-1.5 block">
+              Trade
+            </label>
+            <select
+              value={bulkTradeRateId}
+              onChange={(e) => setBulkTradeRateId(e.target.value)}
+              disabled={bulkTradeLoading}
+              className="w-full h-9 px-3 text-sm bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-blue-500/50"
+            >
+              <option value="">— Select a trade —</option>
+              {siteTradeRates.map((tr) => (
+                <option key={tr.id} value={tr.id}>
+                  {tr.trade} ({tr.hourlyRate}/hr)
+                </option>
+              ))}
+            </select>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkTradeDialog(false)}
+              className="bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleBulkChangeTrade}
+              disabled={bulkTradeLoading || !bulkTradeRateId}
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+            >
+              {bulkTradeLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              {bulkTradeLoading ? 'Applying...' : `Apply to ${selectedEmps.size} ${selectedEmps.size === 1 ? 'Employee' : 'Employees'}`}
             </Button>
           </DialogFooter>
         </DialogContent>
