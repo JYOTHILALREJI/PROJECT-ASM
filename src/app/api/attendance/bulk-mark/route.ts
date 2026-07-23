@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validStatuses = ['present', 'absent', 'no_site', 'overtime'];
+    const validStatuses = ['present', 'absent', 'no_site', 'overtime', 'camp_sitting'];
     if (!validStatuses.includes(status)) {
       return NextResponse.json(
         { success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },

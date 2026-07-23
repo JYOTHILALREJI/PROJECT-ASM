@@ -33,7 +33,7 @@ export async function PUT(
       );
     }
 
-    const validStatuses = ['present', 'absent', 'no_site', 'overtime', 'not_marked'];
+    const validStatuses = ['present', 'absent', 'no_site', 'overtime', 'camp_sitting', 'not_marked'];
     if (!validStatuses.includes(status)) {
       return NextResponse.json(
         { success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },

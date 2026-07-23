@@ -301,40 +301,6 @@ const ExcelCell = React.memo(function ExcelCell({
   );
 });
 
-/* ───────── Merged Site Cell ───────── */
-// A wide non-editable cell that spans multiple day columns, showing the
-// site name where the employee was (previousSite) or where they went
-// (nextSite). Used when an employee moved between sites mid-month.
-function MergedSiteCell({
-  label,
-  dayCount,
-  align,
-}: {
-  label: string;
-  dayCount: number;
-  align: 'left' | 'right';
-}) {
-  // Each day cell is w-8 (32px) + 1px border. So total width = dayCount × 32.
-  const widthPx = dayCount * 32;
-  return (
-    <div
-      className="flex items-center justify-center border-r border-slate-700/30 bg-slate-700/30 select-none"
-      style={{ width: `${widthPx}px`, minWidth: `${widthPx}px` }}
-      title={label}
-    >
-      <span
-        className={cn(
-          'text-[10px] font-semibold text-slate-300 truncate px-1 uppercase tracking-wide',
-          align === 'left' ? 'text-right' : 'text-left',
-        )}
-        style={{ maxWidth: `${widthPx - 4}px` }}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
 /* ───────── Site List View (Excel-style grid) ───────── */
 interface SiteListViewProps {
   site: SiteOption;
@@ -425,6 +391,22 @@ function SiteListView({
         else if (rec.status === 'overtime') {
           total += HOURS_PER_PRESENT + (rec.overtimeHours || 0);
         }
+      }
+      return total;
+    },
+    [displayDays, dateStrFor, isInRange, attendanceMap]
+  );
+
+  // Total camp sitting hours = C×8 (only camp_sitting days)
+  const computeCampSittingHours = useCallback(
+    (emp: Employee): number => {
+      let total = 0;
+      for (const day of displayDays) {
+        const dateStr = dateStrFor(day);
+        if (!isInRange(emp, dateStr)) continue;
+        const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
+        if (!rec) continue;
+        if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
       }
       return total;
     },
@@ -839,7 +821,7 @@ function SiteListView({
       {!isCollapsed && (
         <ScrollArea className="w-full">
           <div className="min-w-[1100px]">
-            {/* Header row: plain day numbers 1..N (left to right) */}
+            {/* Header row: day number + weekday (SUN/MON/...) left to right */}
             <div className="flex items-stretch bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
               <div className="w-44 shrink-0 px-3 py-1.5 border-r border-slate-700/50">Employee</div>
               <div className="w-24 shrink-0 px-2 py-1.5 border-r border-slate-700/50">Emp. Code</div>
@@ -847,21 +829,28 @@ function SiteListView({
               <div className="flex-1 flex">
                 {displayDays.map((day) => {
                   const isFri = isFriday(year, month, day);
+                  const weekday = new Date(year, month - 1, day).getDay();
+                  const weekdayLabels = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+                  const wd = weekdayLabels[weekday];
                   return (
                     <div
                       key={day}
                       className={cn(
-                        'w-8 shrink-0 text-center py-1 leading-tight border-r border-slate-700/30 text-[11px]',
+                        'w-8 shrink-0 text-center py-0.5 leading-tight border-r border-slate-700/30 flex flex-col items-center justify-center',
                         isFri && 'text-red-400/60 bg-red-500/5'
                       )}
                     >
-                      {day}
+                      <span className="text-[11px] font-semibold">{day}</span>
+                      <span className="text-[7px] opacity-60">{wd}</span>
                     </div>
                   );
                 })}
               </div>
               <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-emerald-900/20 text-emerald-300 border-l border-slate-700/50">
                 Total Hrs
+              </div>
+              <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-orange-900/20 text-orange-300 border-l border-slate-700/30">
+                Camp Hrs
               </div>
             </div>
 
@@ -874,6 +863,7 @@ function SiteListView({
               ) : (
                 sortedEmployees.map((emp) => {
                   const totalHours = computeTotalHours(emp);
+                  const campHours = computeCampSittingHours(emp);
                   const isMovedAway = !!emp.movedAway;
                   const tradeDisplay =
                     emp.assignedTrade || emp.trade || emp.position || '—';
@@ -926,26 +916,53 @@ function SiteListView({
                       </div>
                       {/* Day cells area */}
                       <div className="flex-1 flex items-stretch">
-                        {/* Merged start region (previousSite) */}
-                        {layout.startMergedDays > 0 && layout.startMergedLabel && (
-                          <MergedSiteCell
-                            label={layout.startMergedLabel}
-                            dayCount={layout.startMergedDays}
-                            align="left"
-                          />
-                        )}
-                        {layout.startMergedDays > 0 && !layout.startMergedLabel && (
-                          // Out-of-range at start but no previousSite label —
-                          // render faded empty cells
-                          Array.from({ length: layout.startMergedDays }).map((_, i) => (
+                        {/* Out-of-range days at the start (previous site) —
+                            show faded attendance if a record exists, otherwise
+                            show a faded empty cell. If there's a previousSite
+                            label, show it as a small overlay on the first cell. */}
+                        {displayDays.slice(0, layout.startMergedDays).map((day, i) => {
+                          const dateStr = dateStrFor(day);
+                          const record = attendanceMap.get(`${emp.id}-${dateStr}`);
+                          const status: StatusOption = record?.status || 'not_marked';
+                          const isFri = isFriday(year, month, day);
+                          const showLabel = i === 0 && layout.startMergedLabel;
+                          return (
                             <div
-                              key={`start-empty-${i}`}
-                              className="w-8 shrink-0 border-r border-slate-700/30 bg-slate-800/20 flex items-center justify-center"
+                              key={`start-${day}`}
+                              className={cn(
+                                'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30 relative',
+                                isFri && 'bg-red-500/5',
+                                'bg-slate-800/20',
+                              )}
                             >
-                              <span className="text-slate-700 text-[10px]">·</span>
+                              {showLabel && (
+                                <span
+                                  className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-slate-500 uppercase truncate px-0.5 pointer-events-none"
+                                  title={`Was at: ${layout.startMergedLabel}`}
+                                >
+                                  {layout.startMergedLabel}
+                                </span>
+                              )}
+                              {record && (
+                                <span
+                                  className={cn(
+                                    'relative z-10 text-[10px] font-bold opacity-40',
+                                    status === 'present' && 'text-green-400',
+                                    status === 'absent' && 'text-red-400',
+                                    status === 'camp_sitting' && 'text-orange-400',
+                                    status === 'overtime' && 'text-blue-400',
+                                  )}
+                                  title={`${status} (faded — out of range)`}
+                                >
+                                  {status === 'present' ? '10' : status === 'absent' ? 'A' : status === 'camp_sitting' ? 'C' : status === 'overtime' ? 'O' : ''}
+                                </span>
+                              )}
+                              {!record && !showLabel && (
+                                <span className="text-slate-700 text-[10px]">·</span>
+                              )}
                             </div>
-                          ))
-                        )}
+                          );
+                        })}
                         {/* In-range day cells */}
                         {layout.inRangeDays.map((day) => {
                           const dateStr = dateStrFor(day);
@@ -980,24 +997,54 @@ function SiteListView({
                             </div>
                           );
                         })}
-                        {/* Merged end region (nextSite) */}
-                        {layout.endMergedDays > 0 && layout.endMergedLabel && (
-                          <MergedSiteCell
-                            label={layout.endMergedLabel}
-                            dayCount={layout.endMergedDays}
-                            align="right"
-                          />
-                        )}
-                        {layout.endMergedDays > 0 && !layout.endMergedLabel && (
-                          Array.from({ length: layout.endMergedDays }).map((_, i) => (
+                        {/* Out-of-range days at the end (next site) —
+                            show faded attendance if a record exists, otherwise
+                            show a faded empty cell. If there's a nextSite
+                            label, show it as a small overlay on the last cell. */}
+                        {displayDays.slice(displayDays.length - layout.endMergedDays).map((day, i) => {
+                          const dateStr = dateStrFor(day);
+                          const record = attendanceMap.get(`${emp.id}-${dateStr}`);
+                          const status: StatusOption = record?.status || 'not_marked';
+                          const isFri = isFriday(year, month, day);
+                          const isLast = i === layout.endMergedDays - 1;
+                          const showLabel = isLast && layout.endMergedLabel;
+                          return (
                             <div
-                              key={`end-empty-${i}`}
-                              className="w-8 shrink-0 border-r border-slate-700/30 bg-slate-800/20 flex items-center justify-center"
+                              key={`end-${day}`}
+                              className={cn(
+                                'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30 relative',
+                                isFri && 'bg-red-500/5',
+                                'bg-slate-800/20',
+                              )}
                             >
-                              <span className="text-slate-700 text-[10px]">·</span>
+                              {showLabel && (
+                                <span
+                                  className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-slate-500 uppercase truncate px-0.5 pointer-events-none"
+                                  title={`Moved to: ${layout.endMergedLabel}`}
+                                >
+                                  {layout.endMergedLabel}
+                                </span>
+                              )}
+                              {record && (
+                                <span
+                                  className={cn(
+                                    'relative z-10 text-[10px] font-bold opacity-40',
+                                    status === 'present' && 'text-green-400',
+                                    status === 'absent' && 'text-red-400',
+                                    status === 'camp_sitting' && 'text-orange-400',
+                                    status === 'overtime' && 'text-blue-400',
+                                  )}
+                                  title={`${status} (faded — out of range)`}
+                                >
+                                  {status === 'present' ? '10' : status === 'absent' ? 'A' : status === 'camp_sitting' ? 'C' : status === 'overtime' ? 'O' : ''}
+                                </span>
+                              )}
+                              {!record && !showLabel && (
+                                <span className="text-slate-700 text-[10px]">·</span>
+                              )}
                             </div>
-                          ))
-                        )}
+                          );
+                        })}
                       </div>
                       {/* Total hours */}
                       <div className="w-16 shrink-0 text-center py-0 px-1 bg-emerald-900/10 border-l border-slate-700/40 flex items-center justify-center">
@@ -1006,6 +1053,15 @@ function SiteListView({
                           totalHours > 0 ? 'text-emerald-300' : 'text-slate-600'
                         )}>
                           {totalHours > 0 ? totalHours : '—'}
+                        </span>
+                      </div>
+                      {/* Camp sitting hours */}
+                      <div className="w-16 shrink-0 text-center py-0 px-1 bg-orange-900/10 border-l border-slate-700/30 flex items-center justify-center">
+                        <span className={cn(
+                          'text-xs font-bold font-mono',
+                          campHours > 0 ? 'text-orange-300' : 'text-slate-600'
+                        )}>
+                          {campHours > 0 ? campHours : '—'}
                         </span>
                       </div>
                     </div>
@@ -1181,17 +1237,21 @@ export function AttendancePage() {
   const handleStatusChangeRef = useRef<(employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void>(() => {});
 
   // ── Ctrl+Z listener ──
+  // Uses capture phase (true) so it fires BEFORE the cell's onKeyDown handler,
+  // ensuring Ctrl+Z is caught even when a cell button has focus.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      // Check both e.key (lowercase/uppercase) and e.code for cross-platform
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.code === 'KeyZ')) {
         e.preventDefault();
+        e.stopPropagation();
         handleUndo();
       }
     }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [handleUndo]);
 
   const month = parseInt(selectedMonth, 10);

@@ -907,6 +907,12 @@ export function SitesPage() {
   const [empSearch, setEmpSearch] = useState('');
   const [selectedEmps, setSelectedEmps] = useState<Set<string>>(new Set());
 
+  // Trade rates for the Edit Trade dropdown (fetched from /api/trade-rates)
+  const [siteTradeRates, setSiteTradeRates] = useState<Array<{ id: string; trade: string; hourlyRate: number }>>([]);
+  const [editingTradeEmpId, setEditingTradeEmpId] = useState<string | null>(null);
+  const [editingTradeValue, setEditingTradeValue] = useState<string>('');
+  const [savingTrade, setSavingTrade] = useState(false);
+
   // Remove employees state
   const [showRemoveEmpDialog, setShowRemoveEmpDialog] = useState(false);
   const [removeEmpLoading, setRemoveEmpLoading] = useState(false);
@@ -1011,6 +1017,60 @@ export function SitesPage() {
     }
   }, []);
 
+  /* ── Fetch trade rates (for the Edit Trade dropdown) ── */
+  const fetchSiteTradeRates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/trade-rates');
+      const data = await res.json();
+      if (data.success) {
+        setSiteTradeRates(data.data.tradeRates || []);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  /* ── Save trade for an employee ── */
+  // Calls POST /api/employee-trades with a single employeeId + tradeRateId.
+  // On success, refreshes the site employees so the new trade shows up.
+  const handleSaveTrade = useCallback(async (empId: string, tradeRateId: string) => {
+    if (!tradeRateId) {
+      // Empty selection → remove the trade assignment
+      try {
+        setSavingTrade(true);
+        await fetch(`/api/employee-trades?employeeId=${empId}`, { method: 'DELETE' });
+        toast({ title: 'Trade removed', description: 'Employee trade assignment cleared.' });
+        setEditingTradeEmpId(null);
+        if (viewSite) await fetchSiteEmployees(viewSite.name);
+      } catch {
+        toast({ title: 'Error', description: 'Failed to remove trade', variant: 'destructive' });
+      } finally {
+        setSavingTrade(false);
+      }
+      return;
+    }
+    try {
+      setSavingTrade(true);
+      const res = await fetch('/api/employee-trades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeIds: [empId], tradeRateId }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: 'Trade updated', description: `Trade set to ${json.data.trade} (${json.data.hourlyRate}/hr)` });
+        setEditingTradeEmpId(null);
+        if (viewSite) await fetchSiteEmployees(viewSite.name);
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to update trade', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update trade', variant: 'destructive' });
+    } finally {
+      setSavingTrade(false);
+    }
+  }, [viewSite, fetchSiteEmployees]);
+
   /* ── Fetch all employees (for add dropdown) ── */
   const fetchAllEmployees = useCallback(async () => {
     try {
@@ -1047,7 +1107,8 @@ export function SitesPage() {
     setSubView('employees');
     fetchSiteEmployees(site.name);
     fetchAllEmployees();
-  }, [fetchSiteEmployees, fetchAllEmployees]);
+    fetchSiteTradeRates();
+  }, [fetchSiteEmployees, fetchAllEmployees, fetchSiteTradeRates]);
 
   /* ── Back to sites list ── */
   const handleBackToList = useCallback(() => {
@@ -1848,7 +1909,56 @@ export function SitesPage() {
                             </TableCell>
                             <TableCell className="text-slate-300 text-sm font-mono">{emp.employeeId}</TableCell>
                             <TableCell className="text-slate-300 text-sm">
-                              {emp.assignedTrade || emp.trade || emp.position || <span className="text-slate-600">&mdash;</span>}
+                              {editingTradeEmpId === emp.id ? (
+                                <div className="flex items-center gap-1">
+                                  <select
+                                    value={editingTradeValue}
+                                    onChange={(e) => setEditingTradeValue(e.target.value)}
+                                    disabled={savingTrade}
+                                    className="h-7 px-1.5 text-xs bg-slate-900 border border-slate-600 rounded text-white focus:outline-none focus:border-emerald-500/50"
+                                    autoFocus
+                                  >
+                                    <option value="">— No trade —</option>
+                                    {siteTradeRates.map((tr) => (
+                                      <option key={tr.id} value={tr.id}>
+                                        {tr.trade} ({tr.hourlyRate}/hr)
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveTrade(emp.id, editingTradeValue)}
+                                    disabled={savingTrade}
+                                    className="h-7 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white rounded disabled:opacity-50"
+                                    title="Save trade"
+                                  >
+                                    {savingTrade ? '...' : 'OK'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingTradeEmpId(null); setEditingTradeValue(''); }}
+                                    disabled={savingTrade}
+                                    className="h-7 px-1.5 text-[10px] text-slate-400 hover:text-white"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    // Find the tradeRateId matching the employee's current assignedTrade
+                                    const matching = siteTradeRates.find((tr) => tr.trade === emp.assignedTrade);
+                                    setEditingTradeEmpId(emp.id);
+                                    setEditingTradeValue(matching?.id || '');
+                                  }}
+                                  className="text-left hover:text-emerald-400 hover:underline cursor-pointer transition-colors"
+                                  title="Click to edit trade"
+                                >
+                                  {emp.assignedTrade || emp.trade || emp.position || <span className="text-slate-600">&mdash;</span>}
+                                </button>
+                              )}
                             </TableCell>
                             <TableCell>
                               <StarRating rating={emp.rating} />
