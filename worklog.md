@@ -55,3 +55,25 @@ Work Log:
 Stage Summary:
 - Root cause: AttendanceSheet only read `emp.position` (legacy) and ignored `assignedTrade` (from EmployeeTrade junction) and `trade` (legacy Employee.trade). Trades assigned from the Sites page live in EmployeeTrade and surface as `assignedTrade`, so they were invisible in the PDF.
 - Fix: centralised trade resolution in AttendanceSheet via resolveTrade(emp) using the same priority as everywhere else (assignedTrade → trade → position). Both call paths (Attendance page and Sites page) now display the correct trade.
+
+---
+Task ID: attendance-excel-grid
+Agent: main
+Task: Replace the circular-button + dropdown attendance UI with an Excel-style keyboard-only grid
+
+Work Log:
+- Removed StatusDropdown + StealthKeyboardIndicator components
+- Added ExcelCell component (module-scope, React.memo) — keyboard-focusable button
+- P = solid green '10' (10h), A = solid red 'A' (0h), Backspace = clear
+- Arrow keys / Enter / Tab move focus between cells, skip moved-away employees
+- Auto-advance after marking P/A: next day on same row, wrap to next employee
+- Total Hrs column at the right (present*10 + overtime hours)
+- Preserved: site header, bulk-mark bar, moved-away handling, Friday/recent tint, TL/SUP badges
+- Preserved: Excel export (independent of grid), share-link flow (writes to same attendance table)
+- Removed unused STATUS_OPTIONS constant
+
+Stage Summary:
+- File: src/components/attendance/attendance-page.tsx
+- Net delta: +377 / -777 lines
+- Commit: fbb9b20
+- Pushed to origin/main
