@@ -290,9 +290,14 @@ function mergeApiEntries(
     const campHours = campEntry?.salaryRecord?.totalHours ?? 0;
     const totalHours = lowRateHours + highRateHours + campHours;
 
-    const standardSalary = standardEntry?.salaryRecord?.totalSalary ?? lowRateHours * lowRate;
-    const premiumSalary = premiumEntry?.salaryRecord?.totalSalary ?? highRateHours * highRate;
-    const campSalary = campEntry?.salaryRecord?.totalSalary ?? 0;
+    // ALWAYS recompute salary from hours × rate using the live rates.
+    // Do NOT use salaryRecord.totalSalary from the DB — it may be stale
+    // (computed with an old rate before the trade was changed).
+    // The admin can still edit deduction/advance/balance; totalSalary is
+    // always hours × rate.
+    const standardSalary = lowRateHours * lowRate;
+    const premiumSalary = highRateHours * highRate;
+    const campSalary = campHours * lowRate; // camp_sitting uses the low rate
     const totalSalary = standardSalary + premiumSalary + campSalary;
 
     const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
@@ -462,29 +467,42 @@ export function AccountsPage() {
       const json = await res.json();
       if (json.success) {
         const siteResults: ApiSiteResult[] = json.data.sites || [];
-        const mappedSites: SiteData[] = siteResults.map((s) => ({
-          id: s.site.id,
-          name: s.site.name,
-          clientName: s.site.clientName,
-          projectName: s.site.projectName,
-          branchId: s.site.branchId || null,
-          branch: s.site.branch || null,
-          employeeCount: s.employeeCount,
-          totalHours: s.totalHours,
-          totalSalary: s.totalSalary,
-          totalDeductions: s.totalDeductions,
-          totalAdvances: s.totalAdvances,
-          totalBalanceSalary: s.totalBalanceSalary,
-        }));
-        setSites(mappedSites);
 
-        // Merge split entries into single rows per employee per site
+        // Merge split entries into single rows per employee per site FIRST,
+        // so we can recompute site totals from the merged rows (which use
+        // live trade rates) instead of the stale DB totals.
         const empMap: Record<string, MergedEmployeeRow[]> = {};
         for (const s of siteResults) {
           empMap[s.site.id] = mergeApiEntries(s.employees, s.site.id, s.site.name);
         }
         setSiteEmployees(empMap);
         setOriginalSiteEmployees(JSON.parse(JSON.stringify(empMap)));
+
+        // Recompute site totals from the merged employee rows (which use
+        // live trade rates) instead of using the stale DB totals.
+        const mappedSites: SiteData[] = siteResults.map((s) => {
+          const siteEmpRows = empMap[s.site.id] || [];
+          const recomputedTotalSalary = siteEmpRows.reduce((sum, e) => sum + e.totalSalary, 0);
+          const recomputedTotalHours = siteEmpRows.reduce((sum, e) => sum + e.totalHours, 0);
+          const recomputedTotalBalance = siteEmpRows.reduce((sum, e) => sum + e.balanceSalary, 0);
+          const recomputedTotalDeductions = siteEmpRows.reduce((sum, e) => sum + e.deduction, 0);
+          const recomputedTotalAdvances = siteEmpRows.reduce((sum, e) => sum + e.advance, 0);
+          return {
+            id: s.site.id,
+            name: s.site.name,
+            clientName: s.site.clientName,
+            projectName: s.site.projectName,
+            branchId: s.site.branchId || null,
+            branch: s.site.branch || null,
+            employeeCount: s.employeeCount,
+            totalHours: recomputedTotalHours,
+            totalSalary: recomputedTotalSalary,
+            totalDeductions: recomputedTotalDeductions,
+            totalAdvances: recomputedTotalAdvances,
+            totalBalanceSalary: recomputedTotalBalance,
+          };
+        });
+        setSites(mappedSites);
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to load data', variant: 'destructive' });
       }

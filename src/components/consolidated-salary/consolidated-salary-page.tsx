@@ -267,13 +267,12 @@ function mergeApiEntries(
     const campHours = campEntry?.salaryRecord?.totalHours ?? 0;
     const totalHours = lowRateHours + highRateHours + campHours;
 
-    // Gross salary = sum of ALL salary record totals (standard + premium + camp_sitting).
-    // Camp_sitting hours are at the low rate (not threshold-split).
-    const standardSalary =
-      standardEntry?.salaryRecord?.totalSalary ?? lowRateHours * lowRate;
-    const premiumSalary =
-      premiumEntry?.salaryRecord?.totalSalary ?? highRateHours * highRate;
-    const campSalary = campEntry?.salaryRecord?.totalSalary ?? 0;
+    // ALWAYS recompute salary from hours × rate using the live rates.
+    // Do NOT use salaryRecord.totalSalary from the DB — it may be stale
+    // (computed with an old rate before the trade was changed).
+    const standardSalary = lowRateHours * lowRate;
+    const premiumSalary = highRateHours * highRate;
+    const campSalary = campHours * lowRate; // camp_sitting uses the low rate
     const totalSalary = standardSalary + premiumSalary + campSalary;
 
     const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
