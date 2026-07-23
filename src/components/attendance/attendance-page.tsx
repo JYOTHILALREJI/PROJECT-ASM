@@ -138,7 +138,8 @@ function isFutureDate(day: number, month: number, year: number): boolean {
 }
 
 function isFriday(year: number, month: number, day: number): boolean {
-  return new Date(year, month - 1, day).getDay() === 5;
+  // Red shade is applied to SUNDAYS (getDay() === 0) per project owner.
+  return new Date(year, month - 1, day).getDay() === 0;
 }
 
 // Hours credited per status per day
