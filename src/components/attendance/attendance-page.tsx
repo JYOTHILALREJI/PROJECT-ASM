@@ -301,6 +301,35 @@ const ExcelCell = React.memo(function ExcelCell({
   );
 });
 
+/* ───────── Merged Site Cell ───────── */
+// A wide non-editable cell that spans multiple day columns, showing the
+// site name where the employee moved TO (nextSite) or came FROM (previousSite).
+// Used when an employee moved between sites mid-month: the out-of-range
+// days are merged into this single wide cell with the site name.
+function MergedSiteCell({
+  label,
+  dayCount,
+}: {
+  label: string;
+  dayCount: number;
+}) {
+  const widthPx = dayCount * 32; // w-8 = 32px per day
+  return (
+    <div
+      className="flex items-center justify-center border-r border-slate-700/30 bg-slate-700/40 select-none shrink-0"
+      style={{ width: `${widthPx}px`, minWidth: `${widthPx}px` }}
+      title={label}
+    >
+      <span
+        className="text-[10px] font-semibold text-slate-300 truncate px-1 uppercase tracking-wide text-center"
+        style={{ maxWidth: `${widthPx - 4}px` }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 /* ───────── Site List View (Excel-style grid) ───────── */
 interface SiteListViewProps {
   site: SiteOption;
@@ -917,52 +946,25 @@ function SiteListView({
                       {/* Day cells area */}
                       <div className="flex-1 flex items-stretch">
                         {/* Out-of-range days at the start (previous site) —
-                            show faded attendance if a record exists, otherwise
-                            show a faded empty cell. If there's a previousSite
-                            label, show it as a small overlay on the first cell. */}
-                        {displayDays.slice(0, layout.startMergedDays).map((day, i) => {
-                          const dateStr = dateStrFor(day);
-                          const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-                          const status: StatusOption = record?.status || 'not_marked';
-                          const isFri = isFriday(year, month, day);
-                          const showLabel = i === 0 && layout.startMergedLabel;
-                          return (
+                            MERGED into a single wide cell showing the previous
+                            site name. Non-editable. Only shown when the
+                            employee moved TO this site mid-month. */}
+                        {layout.startMergedDays > 0 && layout.startMergedLabel && (
+                          <MergedSiteCell
+                            label={layout.startMergedLabel}
+                            dayCount={layout.startMergedDays}
+                          />
+                        )}
+                        {layout.startMergedDays > 0 && !layout.startMergedLabel && (
+                          Array.from({ length: layout.startMergedDays }).map((_, i) => (
                             <div
-                              key={`start-${day}`}
-                              className={cn(
-                                'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30 relative',
-                                isFri && 'bg-red-500/5',
-                                'bg-slate-800/20',
-                              )}
+                              key={`start-empty-${i}`}
+                              className="w-8 shrink-0 border-r border-slate-700/30 bg-slate-800/20 flex items-center justify-center"
                             >
-                              {showLabel && (
-                                <span
-                                  className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-slate-500 uppercase truncate px-0.5 pointer-events-none"
-                                  title={`Was at: ${layout.startMergedLabel}`}
-                                >
-                                  {layout.startMergedLabel}
-                                </span>
-                              )}
-                              {record && (
-                                <span
-                                  className={cn(
-                                    'relative z-10 text-[10px] font-bold opacity-40',
-                                    status === 'present' && 'text-green-400',
-                                    status === 'absent' && 'text-red-400',
-                                    status === 'camp_sitting' && 'text-orange-400',
-                                    status === 'overtime' && 'text-blue-400',
-                                  )}
-                                  title={`${status} (faded — out of range)`}
-                                >
-                                  {status === 'present' ? '10' : status === 'absent' ? 'A' : status === 'camp_sitting' ? 'C' : status === 'overtime' ? 'O' : ''}
-                                </span>
-                              )}
-                              {!record && !showLabel && (
-                                <span className="text-slate-700 text-[10px]">·</span>
-                              )}
+                              <span className="text-slate-700 text-[10px]">·</span>
                             </div>
-                          );
-                        })}
+                          ))
+                        )}
                         {/* In-range day cells */}
                         {layout.inRangeDays.map((day) => {
                           const dateStr = dateStrFor(day);
@@ -998,53 +1000,25 @@ function SiteListView({
                           );
                         })}
                         {/* Out-of-range days at the end (next site) —
-                            show faded attendance if a record exists, otherwise
-                            show a faded empty cell. If there's a nextSite
-                            label, show it as a small overlay on the last cell. */}
-                        {displayDays.slice(displayDays.length - layout.endMergedDays).map((day, i) => {
-                          const dateStr = dateStrFor(day);
-                          const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-                          const status: StatusOption = record?.status || 'not_marked';
-                          const isFri = isFriday(year, month, day);
-                          const isLast = i === layout.endMergedDays - 1;
-                          const showLabel = isLast && layout.endMergedLabel;
-                          return (
+                            MERGED into a single wide cell showing the next
+                            site name. Non-editable. Only shown when the
+                            employee moved AWAY from this site mid-month. */}
+                        {layout.endMergedDays > 0 && layout.endMergedLabel && (
+                          <MergedSiteCell
+                            label={layout.endMergedLabel}
+                            dayCount={layout.endMergedDays}
+                          />
+                        )}
+                        {layout.endMergedDays > 0 && !layout.endMergedLabel && (
+                          Array.from({ length: layout.endMergedDays }).map((_, i) => (
                             <div
-                              key={`end-${day}`}
-                              className={cn(
-                                'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30 relative',
-                                isFri && 'bg-red-500/5',
-                                'bg-slate-800/20',
-                              )}
+                              key={`end-empty-${i}`}
+                              className="w-8 shrink-0 border-r border-slate-700/30 bg-slate-800/20 flex items-center justify-center"
                             >
-                              {showLabel && (
-                                <span
-                                  className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-slate-500 uppercase truncate px-0.5 pointer-events-none"
-                                  title={`Moved to: ${layout.endMergedLabel}`}
-                                >
-                                  {layout.endMergedLabel}
-                                </span>
-                              )}
-                              {record && (
-                                <span
-                                  className={cn(
-                                    'relative z-10 text-[10px] font-bold opacity-40',
-                                    status === 'present' && 'text-green-400',
-                                    status === 'absent' && 'text-red-400',
-                                    status === 'camp_sitting' && 'text-orange-400',
-                                    status === 'overtime' && 'text-blue-400',
-                                  )}
-                                  title={`${status} (faded — out of range)`}
-                                >
-                                  {status === 'present' ? '10' : status === 'absent' ? 'A' : status === 'camp_sitting' ? 'C' : status === 'overtime' ? 'O' : ''}
-                                </span>
-                              )}
-                              {!record && !showLabel && (
-                                <span className="text-slate-700 text-[10px]">·</span>
-                              )}
+                              <span className="text-slate-700 text-[10px]">·</span>
                             </div>
-                          );
-                        })}
+                          ))
+                        )}
                       </div>
                       {/* Total hours */}
                       <div className="w-16 shrink-0 text-center py-0 px-1 bg-emerald-900/10 border-l border-slate-700/40 flex items-center justify-center">
