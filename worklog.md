@@ -77,3 +77,32 @@ Stage Summary:
 - Net delta: +377 / -777 lines
 - Commit: fbb9b20
 - Pushed to origin/main
+
+---
+Task ID: attendance-excel-grid-v2
+Agent: main
+Task: Excel attendance grid improvements — plain dates, camp_sitting, undo, merged site cells
+
+Work Log:
+- Replaced Today/Yesterday labels with plain day numbers (1..31)
+- Changed day order from reversed (today first) to sequential (1 first, left-to-right)
+- Changed P/A auto-advance from RIGHT (next day) to DOWN (next employee, same day)
+- If last in-range employee after marking, STAY in current cell (re-focus)
+- Tightened row height: cells w-8 h-6, no vertical padding on row containers
+- Added Ctrl+Z undo (100-entry stack, Undo button in header with count)
+- Removed Overtime badge from bottom legend
+- Added 'C' key → camp_sitting status (solid orange, 8h, not in lifetime)
+- Added MergedSiteCell component for site-move merged cells
+- Added nextSite/nextSiteDays computation in employeesBySite
+- Out-of-range cells now merge into a single wide non-editable cell showing
+  the exact DB site name (previousSite at start, nextSite at end)
+- Back-end: computeMonthlyHoursFromAttendance returns {regularHours, campSittingHours}
+- Back-end: syncEmployeeSalaryFromAttendance creates separate rateTier='camp_sitting' SalaryRecord
+- Back-end: allocation-engine excludes camp_sitting from previousCumulative + siteMap
+- Accounts + Consolidated Salary: mergeApiEntries includes camp_sitting in totals
+
+Stage Summary:
+- Files: attendance-page.tsx, attendance-sync.ts, allocation-engine.ts,
+  accounts-page.tsx, consolidated-salary-page.tsx
+- Commit: 2d201d6
+- Pushed to origin/main
