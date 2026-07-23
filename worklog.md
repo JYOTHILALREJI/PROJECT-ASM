@@ -106,3 +106,26 @@ Stage Summary:
   accounts-page.tsx, consolidated-salary-page.tsx
 - Commit: 2d201d6
 - Pushed to origin/main
+
+---
+Task ID: attendance-grid-v3
+Agent: main
+Task: Fix camp_sitting error, weekdays, faded moved attendance, camp hrs, Ctrl+Z, edit trade
+
+Work Log:
+- API: added 'camp_sitting' to validStatuses in /api/attendance, /api/attendance/[id], /api/attendance/bulk-mark
+- Header: shows weekday (SU/MO/TU/WE/TH/FR/SA) below each day number
+- Moved-away employees: out-of-range cells show faded attendance (P=10/A/C) if record exists
+- Site name shown as overlay label on first/last out-of-range cell (not merged cell)
+- Removed MergedSiteCell component
+- Added 'Camp Hrs' column (C × 8) to the right of 'Total Hrs'
+- Added computeCampSittingHours helper
+- Fixed Ctrl+Z: capture phase + e.code='KeyZ' + uppercase Z + stopPropagation
+- Sites page: Edit Trade dropdown in employee table (select from /api/trade-rates)
+- Sites page: POST /api/employee-trades on save, DELETE on clear, refresh on success
+
+Stage Summary:
+- Files: attendance/route.ts, attendance/[id]/route.ts, attendance/bulk-mark/route.ts,
+  attendance-page.tsx, sites-page.tsx
+- Commit: c7ca6d0
+- Pushed to origin/main
