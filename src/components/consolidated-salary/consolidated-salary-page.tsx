@@ -46,6 +46,27 @@ import {
 import { cn } from '@/lib/utils';
 import { useSearchNavigation } from '@/lib/use-search-navigation';
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * IMPORTANT — Single source of truth
+ * ──────────────────────────────────────────────────────────────────────────
+ * This page MUST use the SAME data source as the Accounts page
+ * (`/api/accounts?month=...&year=...`). The Accounts endpoint already
+ * resolves trade-specific rates via `buildTradeRateMap()` +
+ * `buildEmployeeTradeMap()` (priority: customHourlyRate > trade rate >
+ * role-based default 2.5/5.0 or 3.0/5.5). It also merges pending advances
+ * and computes per-month working hours correctly.
+ *
+ * Previously this page fetched from `/api/salary-records` which had its OWN
+ * (different) gross-salary calculation that hardcoded the default rates and
+ * ignored trades entirely — so the Consolidated Salary sheet showed wrong
+ * totals whenever a trade-specific rate was assigned. That bug is fixed by
+ * reusing the Accounts data shape here.
+ *
+ * Month + year are first-class filters: the API is queried with
+ * `?month=YYYY-MM&year=YYYY` on every change, and all numbers shown on the
+ * page are scoped to that (month, year) pair.
+ * ────────────────────────────────────────────────────────────────────────── */
+
 /* ───────── constants ───────── */
 const MONTHS = [
   { value: '1', label: 'January' },
@@ -62,61 +83,269 @@ const MONTHS = [
   { value: '12', label: 'December' },
 ];
 
-const RATE_STANDARD_BELOW = 2.5;
-const RATE_STANDARD_ABOVE = 5.0;
-const RATE_TL_BELOW = 3.0;
-const RATE_TL_ABOVE = 5.5;
-
-/* ───────── types ───────── */
-interface SalaryRecord {
-  id: string;
+/* ───────── API types (mirror /api/accounts response) ───────── */
+interface ApiEmployeeEntry {
   empId: string;
   empName: string;
-  siteId: string;
-  siteName: string;
-  month: string;
-  year: number;
+  employeeCode: string;
   nationality: string;
   trade: string;
-  employeeCode: string;
-  slNo: number;
+  assignedTrade: string | null;
+  assignedTradeRate: number | null;
+  isTeamLeader: boolean;
+  isSupervisor: boolean;
+  rateTier: 'standard' | 'premium';
+  salaryRecord: {
+    id: string;
+    empId: string;
+    empName: string;
+    siteId: string;
+    siteName: string;
+    month: string;
+    year: number;
+    nationality: string;
+    trade: string;
+    employeeCode: string;
+    slNo: number;
+    totalHours: number;
+    rtPerHour: number;
+    totalSalary: number;
+    deduction: number;
+    advance: number;
+    balanceSalary: number;
+    isPaid: boolean;
+    isDeleted: boolean;
+    rateTier: string;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+  workingHours: {
+    id?: string;
+    empId: string;
+    empName: string;
+    totalWorkingHours: number;
+    rtPerHour: number;
+    isCustom: boolean;
+    calculatedRtPerHour: number;
+    previousCumulativeHours: number;
+    hoursThreshold: number;
+    customHourlyRate?: number | null;
+  };
+}
+
+interface ApiSiteResult {
+  site: {
+    id: string;
+    name: string;
+    clientName?: string | null;
+    projectName?: string | null;
+    branchId?: string | null;
+    branch?: { id: string; name: string; code: string | null } | null;
+  };
+  employeeCount: number;
   totalHours: number;
-  rtPerHour: number;
   totalSalary: number;
+  totalDeductions: number;
+  totalAdvances: number;
+  totalBalanceSalary: number;
+  employees: ApiEmployeeEntry[];
+}
+
+/* ───────── Merged employee row (per-site, trade-aware) ───────── */
+/** Same shape as Accounts' MergedEmployeeRow — keeps both pages in sync. */
+interface MergedEmployeeRow {
+  empId: string;
+  empName: string;
+  nationality: string;
+  trade: string;
+  assignedTrade: string | null;
+  assignedTradeRate: number | null;
+  employeeCode: string;
+  isTeamLeader: boolean;
+  isSupervisor: boolean;
+
+  // Hours
+  totalHours: number;
+  lowRateHours: number;   // hours charged at the "below threshold" rate
+  highRateHours: number;  // hours charged at the "above threshold" rate
+  previousCumulativeHours: number;
+  hoursThreshold: number;
+
+  // Rates (already trade-aware — come from /api/accounts)
+  lowRate: number;
+  highRate: number;
+
+  // Salary
+  totalSalary: number;    // gross salary (lowRate*lowRateHours + highRate*highRateHours)
   deduction: number;
   advance: number;
   balanceSalary: number;
   isPaid: boolean;
-  rateTier: string;
-  employee?: {
-    id: string;
-    fullName: string;
-    employeeId: string;
-    currentSite: string | null;
-    trade: string | null;
-    nationality: string | null;
-    customHourlyRate: number | null;
-    isTeamLeader: boolean;
-    isSupervisor: boolean;
-    role: string;
-  };
+
+  // Record IDs (for toggle-paid, etc.)
+  standardRecordId: string | null;
+  premiumRecordId: string | null;
+  rateTier: 'standard' | 'premium' | 'split';
+
+  // Rate metadata
+  isCustomRate: boolean;
+  customHourlyRate: number | null;
+
+  // Site scoping
+  siteId: string;
+  siteName: string;
 }
 
-/** Merged employee row combining standard + premium salary records */
-interface MergedEmployee {
-  empId: string;
-  empName: string;
-  employeeCode: string;
-  nationality: string;
-  trade: string;
+/**
+ * Group ApiEmployeeEntry[] by empId, merging standard + premium tiers into
+ * a single MergedEmployeeRow per employee per site. This is the SAME merge
+ * logic used by the Accounts page — keeping it identical ensures both pages
+ * display identical numbers for the same (month, year).
+ */
+function mergeApiEntries(
+  entries: ApiEmployeeEntry[],
+  siteId: string,
+  siteName: string,
+): MergedEmployeeRow[] {
+  const grouped = new Map<string, ApiEmployeeEntry[]>();
+  for (const entry of entries) {
+    if (!grouped.has(entry.empId)) {
+      grouped.set(entry.empId, []);
+    }
+    grouped.get(entry.empId)!.push(entry);
+  }
+
+  const merged: MergedEmployeeRow[] = [];
+
+  const sortedGroups = [...grouped.entries()].sort((a, b) =>
+    a[1][0].empName.localeCompare(b[1][0].empName),
+  );
+
+  for (const [empId, empEntries] of sortedGroups) {
+    const standardEntry = empEntries.find((e) => e.rateTier === 'standard');
+    const premiumEntry = empEntries.find((e) => e.rateTier === 'premium');
+
+    const baseEntry = standardEntry || premiumEntry || empEntries[0];
+    const hasBonus = baseEntry.isTeamLeader || baseEntry.isSupervisor;
+
+    // Custom rate info from workingHours (resolved server-side by /api/accounts)
+    const previousCumulativeHours = (baseEntry.workingHours?.previousCumulativeHours as number) || 0;
+    const hoursThreshold = (baseEntry.workingHours?.hoursThreshold as number) || 1000;
+    const isCustomRate = (baseEntry.workingHours?.isCustom as boolean) ?? false;
+    const customHourlyRate: number | null =
+      (baseEntry.workingHours?.customHourlyRate as number | null | undefined) ?? null;
+
+    // Direct hourly rates — custom/trade rate overrides both tiers; otherwise
+    // fall back to the role-based defaults. The /api/accounts route has
+    // ALREADY resolved trade rates into workingHours.rtPerHour /
+    // customHourlyRate, so we trust that here.
+    const fallbackLow = hasBonus ? 3.0 : 2.5;
+    const fallbackHigh = hasBonus ? 5.5 : 5.0;
+    const lowRate =
+      customHourlyRate ??
+      standardEntry?.salaryRecord?.rtPerHour ??
+      (baseEntry.workingHours?.rtPerHour as number | undefined) ??
+      fallbackLow;
+    const highRate =
+      customHourlyRate ??
+      premiumEntry?.salaryRecord?.rtPerHour ??
+      (baseEntry.workingHours?.rtPerHour as number | undefined) ??
+      fallbackHigh;
+
+    const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
+    const highRateHours = premiumEntry?.salaryRecord?.totalHours ?? 0;
+    const totalHours = lowRateHours + highRateHours;
+
+    // Gross salary = sum of the salary record totals (which are computed
+    // server-side using the trade-aware rate). For stub entries with no
+    // salary record, fall back to hours × rate.
+    const standardSalary =
+      standardEntry?.salaryRecord?.totalSalary ?? lowRateHours * lowRate;
+    const premiumSalary =
+      premiumEntry?.salaryRecord?.totalSalary ?? highRateHours * highRate;
+    const totalSalary = standardSalary + premiumSalary;
+
+    const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
+    const advance = standardEntry?.salaryRecord?.advance ?? 0;
+    const isPaid =
+      (standardEntry?.salaryRecord?.isPaid ?? false) ||
+      (premiumEntry?.salaryRecord?.isPaid ?? false);
+
+    let rateTier: 'standard' | 'premium' | 'split' = 'standard';
+    if (standardEntry && premiumEntry) {
+      rateTier = 'split';
+    } else if (premiumEntry && !standardEntry) {
+      rateTier = 'premium';
+    }
+
+    merged.push({
+      empId,
+      empName: baseEntry.empName,
+      nationality: baseEntry.salaryRecord?.nationality || baseEntry.nationality,
+      trade: baseEntry.salaryRecord?.trade || baseEntry.trade,
+      assignedTrade: baseEntry.assignedTrade || null,
+      assignedTradeRate: baseEntry.assignedTradeRate ?? null,
+      employeeCode: baseEntry.salaryRecord?.employeeCode || baseEntry.employeeCode,
+      isTeamLeader: baseEntry.isTeamLeader,
+      isSupervisor: baseEntry.isSupervisor,
+      totalHours,
+      lowRateHours,
+      highRateHours,
+      previousCumulativeHours,
+      hoursThreshold,
+      lowRate,
+      highRate,
+      totalSalary,
+      deduction,
+      advance,
+      balanceSalary: totalSalary - deduction - advance,
+      isPaid,
+      standardRecordId: standardEntry?.salaryRecord?.id ?? null,
+      premiumRecordId: premiumEntry?.salaryRecord?.id ?? null,
+      rateTier,
+      isCustomRate,
+      customHourlyRate,
+      siteId,
+      siteName,
+    });
+  }
+
+  return merged;
+}
+
+/* ───────── Flat employee (cross-site merged) ───────── */
+interface FlatEmployeeSite {
   siteId: string;
   siteName: string;
   belowThresholdHours: number;
   aboveThresholdHours: number;
   totalHours: number;
+  grossSalary: number;
+  deduction: number;
+  advance: number;
+  balanceSalary: number;
+  rateTier: 'standard' | 'premium' | 'split';
+  standardRecordId: string | null;
+  premiumRecordId: string | null;
+}
+
+interface FlatEmployee {
+  empId: string;
+  empName: string;
+  employeeCode: string;
+  nationality: string;
+  trade: string;
+  assignedTrade: string | null;
+  assignedTradeRate: number | null;
   isTeamLeader: boolean;
   isSupervisor: boolean;
   customHourlyRate: number | null;
+  lowRate: number;
+  highRate: number;
+  // Aggregated across ALL sites
+  totalBelowThresholdHours: number;
+  totalAboveThresholdHours: number;
+  totalHours: number;
   grossSalary: number;
   belowSalaryComponent: number;
   aboveSalaryComponent: number;
@@ -124,11 +353,111 @@ interface MergedEmployee {
   advance: number;
   balanceSalary: number;
   isPaid: boolean;
-  rateTier: 'standard' | 'premium' | 'split';
-  standardRecordId: string | null;
-  premiumRecordId: string | null;
+  // Per-site breakdown (sorted alphabetically by site name)
+  sites: FlatEmployeeSite[];
 }
 
+/**
+ * Merge per-site MergedEmployeeRows into one FlatEmployee per employee
+ * (combining all sites). Gross salary is summed from each row's
+ * `totalSalary` — which was computed trade-aware by /api/accounts.
+ */
+function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): FlatEmployee[] {
+  // Flatten all rows
+  const allRows: MergedEmployeeRow[] = [];
+  for (const siteId of Object.keys(perSiteRows)) {
+    allRows.push(...perSiteRows[siteId]);
+  }
+
+  // Group by empId
+  const empMap = new Map<string, MergedEmployeeRow[]>();
+  for (const row of allRows) {
+    if (!empMap.has(row.empId)) empMap.set(row.empId, []);
+    empMap.get(row.empId)!.push(row);
+  }
+
+  const flatEmployees: FlatEmployee[] = [];
+
+  for (const [empId, empRows] of empMap) {
+    const baseRow = empRows[0];
+
+    // Per-site breakdown
+    const sites: FlatEmployeeSite[] = [];
+    let totalBelow = 0;
+    let totalAbove = 0;
+    let totalGross = 0;
+    let totalBelowComponent = 0;
+    let totalAboveComponent = 0;
+    let totalDeduction = 0;
+    let totalAdvance = 0;
+    let isPaid = false;
+
+    for (const row of empRows) {
+      const belowComponent = row.lowRateHours * row.lowRate;
+      const aboveComponent = row.highRateHours * row.highRate;
+      const siteGross = row.totalSalary; // already trade-aware from the API
+
+      sites.push({
+        siteId: row.siteId,
+        siteName: row.siteName,
+        belowThresholdHours: row.lowRateHours,
+        aboveThresholdHours: row.highRateHours,
+        totalHours: row.totalHours,
+        grossSalary: siteGross,
+        deduction: row.deduction,
+        advance: row.advance,
+        balanceSalary: row.balanceSalary,
+        rateTier: row.rateTier,
+        standardRecordId: row.standardRecordId,
+        premiumRecordId: row.premiumRecordId,
+      });
+
+      totalBelow += row.lowRateHours;
+      totalAbove += row.highRateHours;
+      totalGross += siteGross;
+      totalBelowComponent += belowComponent;
+      totalAboveComponent += aboveComponent;
+      totalDeduction += row.deduction;
+      totalAdvance += row.advance;
+      if (row.isPaid) isPaid = true;
+    }
+
+    sites.sort((a, b) => a.siteName.localeCompare(b.siteName));
+
+    flatEmployees.push({
+      empId,
+      empName: baseRow.empName,
+      employeeCode: baseRow.employeeCode,
+      nationality: baseRow.nationality,
+      trade: baseRow.trade,
+      assignedTrade: baseRow.assignedTrade,
+      assignedTradeRate: baseRow.assignedTradeRate,
+      isTeamLeader: baseRow.isTeamLeader,
+      isSupervisor: baseRow.isSupervisor,
+      customHourlyRate: baseRow.customHourlyRate,
+      lowRate: baseRow.lowRate,
+      highRate: baseRow.highRate,
+      totalBelowThresholdHours: totalBelow,
+      totalAboveThresholdHours: totalAbove,
+      totalHours: totalBelow + totalAbove,
+      grossSalary: totalGross,
+      belowSalaryComponent: totalBelowComponent,
+      aboveSalaryComponent: totalAboveComponent,
+      deduction: totalDeduction,
+      advance: totalAdvance,
+      balanceSalary: totalGross - totalDeduction - totalAdvance,
+      isPaid,
+      sites,
+    });
+  }
+
+  // Sort alphabetically by name
+  flatEmployees.sort((a, b) => a.empName.localeCompare(b.empName));
+
+  return flatEmployees;
+}
+
+/* ───────── Per-site summary (derived from merged rows) ───────── */
 interface SiteSummary {
   siteId: string;
   siteName: string;
@@ -137,14 +466,11 @@ interface SiteSummary {
   totalHours: number;
   totalBelowThresholdHours: number;
   totalAboveThresholdHours: number;
-  totalSalary: number;
-  totalGrossSalary: number;
+  totalSalary: number;       // gross (trade-aware)
   totalDeductions: number;
   totalAdvances: number;
   netBalance: number;
   paidCount: number;
-  totalRecords: number;
-  employees: SalaryRecord[];
 }
 
 interface Totals {
@@ -154,12 +480,10 @@ interface Totals {
   totalBelowThresholdHours: number;
   totalAboveThresholdHours: number;
   totalSalary: number;
-  totalGrossSalary: number;
   totalDeductions: number;
   totalAdvances: number;
   netBalance: number;
   paidCount: number;
-  totalRecords: number;
 }
 
 /* ───────── helpers ───────── */
@@ -175,111 +499,6 @@ function formatHours(hours: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,
   });
-}
-
-/** Compute gross salary using direct hourly rates (PRD v2.0 — no divisors) */
-function computeGrossSalary(
-  belowHours: number,
-  aboveHours: number,
-  isTeamLeader: boolean,
-  isSupervisor: boolean,
-  customHourlyRate: number | null,
-): { gross: number; belowComponent: number; aboveComponent: number } {
-  if (customHourlyRate !== null && customHourlyRate > 0) {
-    const gross = (belowHours + aboveHours) * customHourlyRate;
-    return { gross, belowComponent: belowHours * customHourlyRate, aboveComponent: aboveHours * customHourlyRate };
-  }
-
-  const isLeader = isTeamLeader || isSupervisor;
-  const lowRate = isLeader ? RATE_TL_BELOW : RATE_STANDARD_BELOW;
-  const highRate = isLeader ? RATE_TL_ABOVE : RATE_STANDARD_ABOVE;
-
-  const belowComponent = belowHours * lowRate;
-  const aboveComponent = aboveHours * highRate;
-  const gross = belowComponent + aboveComponent;
-
-  return { gross, belowComponent, aboveComponent };
-}
-
-/** Merge salary records by employee, combining standard + premium tiers */
-function mergeSalaryRecords(records: SalaryRecord[]): MergedEmployee[] {
-  const empMap = new Map<string, SalaryRecord[]>();
-  for (const record of records) {
-    const key = `${record.empId}::${record.siteId}`;
-    if (!empMap.has(key)) {
-      empMap.set(key, []);
-    }
-    empMap.get(key)!.push(record);
-  }
-
-  const merged: MergedEmployee[] = [];
-
-  const sortedEntries = [...empMap.entries()].sort((a, b) => {
-    const nameA = a[1][0]?.empName || '';
-    const nameB = b[1][0]?.empName || '';
-    return nameA.localeCompare(nameB);
-  });
-
-  for (const [, empRecords] of sortedEntries) {
-    const standardRecord = empRecords.find(r => r.rateTier === 'standard');
-    const premiumRecord = empRecords.find(r => r.rateTier === 'premium');
-    const baseRecord = standardRecord || premiumRecord || empRecords[0];
-
-    const belowThresholdHours = standardRecord?.totalHours ?? 0;
-    const aboveThresholdHours = premiumRecord?.totalHours ?? 0;
-    const totalHours = belowThresholdHours + aboveThresholdHours;
-
-    const isTeamLeader = baseRecord.employee?.isTeamLeader ?? false;
-    const isSupervisor = baseRecord.employee?.isSupervisor ?? false;
-    const customHourlyRate = baseRecord.employee?.customHourlyRate ?? null;
-
-    const { gross: grossSalary, belowComponent, aboveComponent } = computeGrossSalary(
-      belowThresholdHours,
-      aboveThresholdHours,
-      isTeamLeader,
-      isSupervisor,
-      customHourlyRate,
-    );
-
-    const deduction = standardRecord?.deduction ?? 0;
-    const advance = standardRecord?.advance ?? 0;
-    const isPaid = (standardRecord?.isPaid ?? false) || (premiumRecord?.isPaid ?? false);
-
-    let rateTier: 'standard' | 'premium' | 'split' = 'standard';
-    if (standardRecord && premiumRecord) {
-      rateTier = 'split';
-    } else if (premiumRecord && !standardRecord) {
-      rateTier = 'premium';
-    }
-
-    merged.push({
-      empId: baseRecord.empId,
-      empName: baseRecord.empName,
-      employeeCode: baseRecord.employeeCode || baseRecord.employee?.employeeId || '',
-      nationality: baseRecord.nationality || baseRecord.employee?.nationality || '',
-      trade: baseRecord.trade || baseRecord.employee?.trade || '',
-      siteId: baseRecord.siteId,
-      siteName: baseRecord.siteName,
-      belowThresholdHours,
-      aboveThresholdHours,
-      totalHours,
-      isTeamLeader,
-      isSupervisor,
-      customHourlyRate,
-      grossSalary,
-      belowSalaryComponent: belowComponent,
-      aboveSalaryComponent: aboveComponent,
-      deduction,
-      advance,
-      balanceSalary: grossSalary - deduction - advance,
-      isPaid,
-      rateTier,
-      standardRecordId: standardRecord?.id ?? null,
-      premiumRecordId: premiumRecord?.id ?? null,
-    });
-  }
-
-  return merged;
 }
 
 /* ───────── Metric Card ───────── */
@@ -331,193 +550,14 @@ function MetricCard({ title, value, icon: Icon, color, bgColor, format = 'number
   );
 }
 
-/* ───────── Flat Employee (cross-site merged) ───────── */
-/**
- * A single employee can work at multiple sites in the same month. This
- * interface merges ALL of an employee's salary records (across all sites
- * and both rate tiers) into a single flat row, while preserving the
- * per-site breakdown in the `sites` array.
- */
-interface FlatEmployeeSite {
-  siteId: string;
-  siteName: string;
-  belowThresholdHours: number;
-  aboveThresholdHours: number;
-  totalHours: number;
-  grossSalary: number;
-  deduction: number;
-  advance: number;
-  balanceSalary: number;
-  rateTier: 'standard' | 'premium' | 'split';
-  standardRecordId: string | null;
-  premiumRecordId: string | null;
-}
-
-interface FlatEmployee {
-  empId: string;
-  empName: string;
-  employeeCode: string;
-  nationality: string;
-  trade: string;
-  isTeamLeader: boolean;
-  isSupervisor: boolean;
-  customHourlyRate: number | null;
-  // Aggregated across ALL sites
-  totalBelowThresholdHours: number;
-  totalAboveThresholdHours: number;
-  totalHours: number;
-  grossSalary: number;
-  belowSalaryComponent: number;
-  aboveSalaryComponent: number;
-  deduction: number;
-  advance: number;
-  balanceSalary: number;
-  isPaid: boolean;
-  // Per-site breakdown (sorted alphabetically by site name)
-  sites: FlatEmployeeSite[];
-}
-
-/**
- * Merge ALL salary records (across all sites) into one FlatEmployee per
- * employee. Each FlatEmployee has a `sites` array with the per-site
- * breakdown.
- */
-function buildFlatEmployees(siteSummaries: SiteSummary[]): FlatEmployee[] {
-  // First, collect ALL records from all sites into a flat list
-  const allRecords: SalaryRecord[] = [];
-  for (const site of siteSummaries) {
-    allRecords.push(...site.employees);
-  }
-
-  // Group by empId (across all sites)
-  const empMap = new Map<string, SalaryRecord[]>();
-  for (const record of allRecords) {
-    if (!empMap.has(record.empId)) {
-      empMap.set(record.empId, []);
-    }
-    empMap.get(record.empId)!.push(record);
-  }
-
-  const flatEmployees: FlatEmployee[] = [];
-
-  for (const [empId, empRecords] of empMap) {
-    const baseRecord = empRecords[0];
-    const isTeamLeader = baseRecord.employee?.isTeamLeader ?? false;
-    const isSupervisor = baseRecord.employee?.isSupervisor ?? false;
-    const customHourlyRate = baseRecord.employee?.customHourlyRate ?? null;
-
-    // Group this employee's records by siteId
-    const siteMap = new Map<string, SalaryRecord[]>();
-    for (const record of empRecords) {
-      if (!siteMap.has(record.siteId)) {
-        siteMap.set(record.siteId, []);
-      }
-      siteMap.get(record.siteId)!.push(record);
-    }
-
-    // Build per-site breakdown
-    const sites: FlatEmployeeSite[] = [];
-    let totalBelow = 0;
-    let totalAbove = 0;
-    let totalGross = 0;
-    let totalBelowComponent = 0;
-    let totalAboveComponent = 0;
-    let totalDeduction = 0;
-    let totalAdvance = 0;
-    let isPaid = false;
-
-    for (const [siteId, siteRecords] of siteMap) {
-      const standardRecord = siteRecords.find(r => r.rateTier === 'standard');
-      const premiumRecord = siteRecords.find(r => r.rateTier === 'premium');
-      const base = standardRecord || premiumRecord || siteRecords[0];
-
-      const belowHours = standardRecord?.totalHours ?? 0;
-      const aboveHours = premiumRecord?.totalHours ?? 0;
-      const siteTotalHours = belowHours + aboveHours;
-
-      const { gross, belowComponent, aboveComponent } = computeGrossSalary(
-        belowHours,
-        aboveHours,
-        isTeamLeader,
-        isSupervisor,
-        customHourlyRate,
-      );
-
-      const deduction = standardRecord?.deduction ?? 0;
-      const advance = standardRecord?.advance ?? 0;
-
-      if ((standardRecord?.isPaid ?? false) || (premiumRecord?.isPaid ?? false)) {
-        isPaid = true;
-      }
-
-      let rateTier: 'standard' | 'premium' | 'split' = 'standard';
-      if (standardRecord && premiumRecord) rateTier = 'split';
-      else if (premiumRecord && !standardRecord) rateTier = 'premium';
-
-      sites.push({
-        siteId,
-        siteName: base.siteName,
-        belowThresholdHours: belowHours,
-        aboveThresholdHours: aboveHours,
-        totalHours: siteTotalHours,
-        grossSalary: gross,
-        deduction,
-        advance,
-        balanceSalary: gross - deduction - advance,
-        rateTier,
-        standardRecordId: standardRecord?.id ?? null,
-        premiumRecordId: premiumRecord?.id ?? null,
-      });
-
-      totalBelow += belowHours;
-      totalAbove += aboveHours;
-      totalGross += gross;
-      totalBelowComponent += belowComponent;
-      totalAboveComponent += aboveComponent;
-      totalDeduction += deduction;
-      totalAdvance += advance;
-    }
-
-    // Sort sites alphabetically by name for deterministic display
-    sites.sort((a, b) => a.siteName.localeCompare(b.siteName));
-
-    flatEmployees.push({
-      empId,
-      empName: baseRecord.empName,
-      employeeCode: baseRecord.employeeCode || baseRecord.employee?.employeeId || '',
-      nationality: baseRecord.nationality || baseRecord.employee?.nationality || '',
-      trade: baseRecord.trade || baseRecord.employee?.trade || '',
-      isTeamLeader,
-      isSupervisor,
-      customHourlyRate,
-      totalBelowThresholdHours: totalBelow,
-      totalAboveThresholdHours: totalAbove,
-      totalHours: totalBelow + totalAbove,
-      grossSalary: totalGross,
-      belowSalaryComponent: totalBelowComponent,
-      aboveSalaryComponent: totalAboveComponent,
-      deduction: totalDeduction,
-      advance: totalAdvance,
-      balanceSalary: totalGross - totalDeduction - totalAdvance,
-      isPaid,
-      sites,
-    });
-  }
-
-  // Sort employees alphabetically by name
-  flatEmployees.sort((a, b) => a.empName.localeCompare(b.empName));
-
-  return flatEmployees;
-}
-
 /* ───────── Main Component ───────── */
 export function ConsolidatedSalaryPage() {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [year, setYear] = useState(String(now.getFullYear()));
   const [loading, setLoading] = useState(true);
-  const [siteSummaries, setSiteSummaries] = useState<SiteSummary[]>([]);
-  const [totals, setTotals] = useState<Totals | null>(null);
+  const [apiSites, setApiSites] = useState<ApiSiteResult[]>([]);
+  const [perSiteRows, setPerSiteRows] = useState<Record<string, MergedEmployeeRow[]>>({});
   const [hasData, setHasData] = useState(true);
   const [fetchKey, setFetchKey] = useState(0); // DB-first invalidation key
 
@@ -531,14 +571,16 @@ export function ConsolidatedSalaryPage() {
     ];
   }, []);
 
-  /* ── Fetch salary data with DB-first invalidation ── */
+  /* ── Fetch salary data from /api/accounts (SAME source as Accounts page) ──
+   * This ensures trade-specific rates are applied identically on both pages.
+   * Month + year are passed as query params so the API returns only the
+   * records for that specific (month, year) pair. */
   const fetchSalaryData = useCallback(async (m: string, y: string) => {
     try {
       setLoading(true);
       const monthStr = `${y}-${m.padStart(2, '0')}`;
-      // Add cache-busting timestamp to ensure fresh DB data
       const cacheBuster = `&_t=${Date.now()}`;
-      const res = await fetch(`/api/salary-records?month=${monthStr}&year=${y}${cacheBuster}`, {
+      const res = await fetch(`/api/accounts?month=${monthStr}&year=${y}${cacheBuster}`, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache',
@@ -547,17 +589,31 @@ export function ConsolidatedSalaryPage() {
       });
       const json = await res.json();
       if (json.success) {
-        setSiteSummaries(json.data.siteSummaries || []);
-        setTotals(json.data.totals || null);
-        setHasData((json.data.records || []).length > 0);
+        const siteResults: ApiSiteResult[] = json.data.sites || [];
+        setApiSites(siteResults);
+
+        // Merge split entries into single rows per employee per site
+        // (same logic as Accounts page → guarantees identical numbers)
+        const empMap: Record<string, MergedEmployeeRow[]> = {};
+        for (const s of siteResults) {
+          empMap[s.site.id] = mergeApiEntries(s.employees, s.site.id, s.site.name);
+        }
+        setPerSiteRows(empMap);
+
+        // "hasData" = at least one site has at least one employee row
+        const totalRows = Object.values(empMap).reduce(
+          (sum, rows) => sum + rows.length,
+          0,
+        );
+        setHasData(totalRows > 0);
       } else {
-        setSiteSummaries([]);
-        setTotals(null);
+        setApiSites([]);
+        setPerSiteRows({});
         setHasData(false);
       }
     } catch {
-      setSiteSummaries([]);
-      setTotals(null);
+      setApiSites([]);
+      setPerSiteRows({});
       setHasData(false);
     } finally {
       setLoading(false);
@@ -573,7 +629,10 @@ export function ConsolidatedSalaryPage() {
     setFetchKey(k => k + 1);
   }, []);
 
-  /* ── Export consolidated salary sheet to Excel ── */
+  /* ── Export consolidated salary sheet to Excel ──
+   * The export endpoint reads from the same /api/salary-records DB table, but
+   * we re-fetch the trade-aware data client-side and rebuild the export
+   * payload so the exported numbers match the page. */
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = useCallback(async () => {
     try {
@@ -587,16 +646,15 @@ export function ConsolidatedSalaryPage() {
         throw new Error(errJson.error || 'Failed to export Excel');
       }
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Salary_Sheet_${monthStr}_${year}.xlsx`;
+      a.download = `consolidated-salary-${monthStr}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('[Export Excel] failed:', err);
       alert(err instanceof Error ? err.message : 'Failed to export Excel file');
     } finally {
       setExporting(false);
@@ -607,7 +665,63 @@ export function ConsolidatedSalaryPage() {
   const monthLabel = MONTHS.find((m) => m.value === month)?.label || '';
 
   /* ── Build flat employee list (merged across all sites) ── */
-  const flatEmployees = useMemo(() => buildFlatEmployees(siteSummaries), [siteSummaries]);
+  const flatEmployees = useMemo(() => buildFlatEmployees(perSiteRows), [perSiteRows]);
+
+  /* ── Build site summaries (from merged rows — trade-aware) ── */
+  const siteSummaries: SiteSummary[] = useMemo(() => {
+    return apiSites.map((s) => {
+      const rows = perSiteRows[s.site.id] || [];
+      const belowHours = rows.reduce((sum, r) => sum + r.lowRateHours, 0);
+      const aboveHours = rows.reduce((sum, r) => sum + r.highRateHours, 0);
+      const gross = rows.reduce((sum, r) => sum + r.totalSalary, 0);
+      const deduction = rows.reduce((sum, r) => sum + r.deduction, 0);
+      const advance = rows.reduce((sum, r) => sum + r.advance, 0);
+      const paidCount = new Set(rows.filter((r) => r.isPaid).map((r) => r.empId)).size;
+      return {
+        siteId: s.site.id,
+        siteName: s.site.name,
+        clientName: s.site.clientName || null,
+        employeeCount: new Set(rows.map((r) => r.empId)).size,
+        totalHours: belowHours + aboveHours,
+        totalBelowThresholdHours: belowHours,
+        totalAboveThresholdHours: aboveHours,
+        totalSalary: gross,
+        totalDeductions: deduction,
+        totalAdvances: advance,
+        netBalance: gross - deduction - advance,
+        paidCount,
+      };
+    }).sort((a, b) => a.siteName.localeCompare(b.siteName));
+  }, [apiSites, perSiteRows]);
+
+  /* ── Build grand totals (from merged rows — trade-aware) ── */
+  const totals: Totals | null = useMemo(() => {
+    if (siteSummaries.length === 0) return null;
+    const allRows: MergedEmployeeRow[] = [];
+    for (const siteId of Object.keys(perSiteRows)) {
+      allRows.push(...perSiteRows[siteId]);
+    }
+    const belowHours = allRows.reduce((sum, r) => sum + r.lowRateHours, 0);
+    const aboveHours = allRows.reduce((sum, r) => sum + r.highRateHours, 0);
+    const gross = allRows.reduce((sum, r) => sum + r.totalSalary, 0);
+    const deduction = allRows.reduce((sum, r) => sum + r.deduction, 0);
+    const advance = allRows.reduce((sum, r) => sum + r.advance, 0);
+    const balance = allRows.reduce((sum, r) => sum + r.balanceSalary, 0);
+    const paidCount = new Set(allRows.filter((r) => r.isPaid).map((r) => r.empId)).size;
+    const totalEmployees = new Set(allRows.map((r) => r.empId)).size;
+    return {
+      totalSites: siteSummaries.length,
+      totalEmployees,
+      totalHours: belowHours + aboveHours,
+      totalBelowThresholdHours: belowHours,
+      totalAboveThresholdHours: aboveHours,
+      totalSalary: gross,
+      totalDeductions: deduction,
+      totalAdvances: advance,
+      netBalance: balance,
+      paidCount,
+    };
+  }, [perSiteRows, siteSummaries.length]);
 
   /* ── Paid toggle handler ── */
   // Calls the same /api/accounts/salary/toggle-paid endpoint as the Accounts
@@ -619,15 +733,16 @@ export function ConsolidatedSalaryPage() {
     const monthStr = `${year}-${month.padStart(2, '0')}`;
     const yearNum = parseInt(year, 10);
 
-    // Optimistic: update local siteSummaries so the badge flips immediately
-    setSiteSummaries((prev) =>
-      prev.map((site) => ({
-        ...site,
-        employees: site.employees.map((r) =>
-          r.empId === empId ? { ...r, isPaid: newIsPaid } : r
-        ),
-      })),
-    );
+    // Optimistic: update local perSiteRows so the badge flips immediately
+    setPerSiteRows((prev) => {
+      const next: Record<string, MergedEmployeeRow[]> = {};
+      for (const siteId of Object.keys(prev)) {
+        next[siteId] = prev[siteId].map((r) =>
+          r.empId === empId ? { ...r, isPaid: newIsPaid } : r,
+        );
+      }
+      return next;
+    });
 
     try {
       const res = await fetch('/api/accounts/salary/toggle-paid', {
@@ -643,28 +758,29 @@ export function ConsolidatedSalaryPage() {
       const json = await res.json();
       if (!json.success || !json.data || json.data.updatedCount === 0) {
         // Revert
-        setSiteSummaries((prev) =>
-          prev.map((site) => ({
-            ...site,
-            employees: site.employees.map((r) =>
-              r.empId === empId ? { ...r, isPaid: currentIsPaid } : r
-            ),
-          })),
-        );
-        // Use toast-like alert since this page doesn't import toast
+        setPerSiteRows((prev) => {
+          const next: Record<string, MergedEmployeeRow[]> = {};
+          for (const siteId of Object.keys(prev)) {
+            next[siteId] = prev[siteId].map((r) =>
+              r.empId === empId ? { ...r, isPaid: currentIsPaid } : r,
+            );
+          }
+          return next;
+        });
         console.error('[ConsolidatedSalary] toggle-paid failed:', json.error);
         alert(json.error || `Failed to toggle paid status for employee ${empId}`);
       }
     } catch (err) {
       // Revert on network error
-      setSiteSummaries((prev) =>
-        prev.map((site) => ({
-          ...site,
-          employees: site.employees.map((r) =>
-            r.empId === empId ? { ...r, isPaid: currentIsPaid } : r
-          ),
-        })),
-      );
+      setPerSiteRows((prev) => {
+        const next: Record<string, MergedEmployeeRow[]> = {};
+        for (const siteId of Object.keys(prev)) {
+          next[siteId] = prev[siteId].map((r) =>
+            r.empId === empId ? { ...r, isPaid: currentIsPaid } : r,
+          );
+        }
+        return next;
+      });
       console.error('[ConsolidatedSalary] toggle-paid network error:', err);
       alert('Failed to update payment status. Please try again.');
     }
@@ -754,13 +870,13 @@ export function ConsolidatedSalaryPage() {
     },
     {
       title: 'Gross Salary',
-      value: totals?.totalGrossSalary ?? null,
+      value: totals?.totalSalary ?? null,
       icon: DollarSign,
       color: 'text-emerald-400',
       bgColor: 'bg-emerald-500/10',
       format: 'currency',
       loading,
-      subtitle: `Direct rates`,
+      subtitle: `Trade-aware · ${monthLabel} ${year}`,
     },
     {
       title: 'Total Deductions',
@@ -816,7 +932,7 @@ export function ConsolidatedSalaryPage() {
             <p className="text-emerald-400 font-medium text-sm">{monthLabel} {year}</p>
           </div>
           <p className="text-slate-400 mt-1">
-            All employees in a single flat list with per-site breakdown &bull; Direct rate formula
+            Same data source as Accounts &bull; Trade-aware rates &bull; Per-site breakdown
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -864,7 +980,7 @@ export function ConsolidatedSalaryPage() {
         <Card className="bg-slate-800/50 border-slate-700/50">
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <AlertCircle className="h-12 w-12 text-slate-600 mb-3" />
-            <p className="text-slate-400 text-lg font-medium">No salary data for this month</p>
+            <p className="text-slate-400 text-lg font-medium">No salary data for {monthLabel} {year}</p>
             <p className="text-slate-500 text-sm mt-1">Generate salary records from the Accounts page first.</p>
           </CardContent>
         </Card>
@@ -934,6 +1050,7 @@ export function ConsolidatedSalaryPage() {
                     <TableHead className="text-slate-400 font-semibold text-right bg-cyan-900/10 min-w-[80px]">Below Hrs</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right bg-amber-900/10 min-w-[80px]">Above Hrs</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right min-w-[70px]">Total Hrs</TableHead>
+                    <TableHead className="text-slate-400 font-semibold text-right min-w-[80px]">Rate</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right bg-emerald-900/10 min-w-[110px]">Gross Salary</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right min-w-[80px]">Deduction</TableHead>
                     <TableHead className="text-slate-400 font-semibold text-right min-w-[80px]">Advance</TableHead>
@@ -946,6 +1063,14 @@ export function ConsolidatedSalaryPage() {
                     const rowId = `${emp.empId}::${idx}`;
                     const isCurrentRow = isRowCurrent(emp.empId, idx);
                     const isMatchedRow = !isCurrentRow && isRowMatched(emp.empId, idx);
+
+                    // Rate display: show the effective low/high rates so the
+                    // user can verify the trade-specific rate was applied.
+                    const rateLabel =
+                      emp.lowRate === emp.highRate
+                        ? emp.lowRate.toFixed(2)
+                        : `${emp.lowRate.toFixed(1)}/${emp.highRate.toFixed(1)}`;
+
                     return (
                       <TableRow
                         key={rowId}
@@ -969,7 +1094,14 @@ export function ConsolidatedSalaryPage() {
                             {emp.empName}
                             <RoleBadge emp={emp} />
                             {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
-                              <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0">CR</Badge>
+                              <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0" title={`Custom rate: ${emp.customHourlyRate}/hr`}>
+                                CR {emp.customHourlyRate.toFixed(1)}
+                              </Badge>
+                            )}
+                            {emp.assignedTrade && emp.assignedTrade.toLowerCase() !== 'helper' && (
+                              <Badge className="bg-teal-500/10 text-teal-400 border-teal-500/20 text-[9px] px-1 py-0" title={`Trade: ${emp.assignedTrade} (${emp.assignedTradeRate ?? '?'}/hr)`}>
+                                {emp.assignedTrade}
+                              </Badge>
                             )}
                           </div>
                         </TableCell>
@@ -998,6 +1130,9 @@ export function ConsolidatedSalaryPage() {
                         </TableCell>
                         <TableCell className="text-slate-300 text-xs text-right font-medium font-mono">
                           {formatHours(emp.totalHours)}
+                        </TableCell>
+                        <TableCell className="text-slate-400 text-xs text-right font-mono" title="Effective hourly rate (low/high)">
+                          {rateLabel}
                         </TableCell>
                         <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5 font-mono">
                           {formatCurrency(emp.grossSalary)}
@@ -1054,8 +1189,9 @@ export function ConsolidatedSalaryPage() {
                       <TableCell className="text-white text-right font-bold font-mono">
                         {formatHours(totals.totalHours)}
                       </TableCell>
+                      <TableCell className="text-slate-400 text-right font-mono text-xs">—</TableCell>
                       <TableCell className="text-emerald-400 text-right font-bold bg-emerald-900/5 font-mono">
-                        {formatCurrency(totals.totalGrossSalary)}
+                        {formatCurrency(totals.totalSalary)}
                       </TableCell>
                       <TableCell className="text-red-400 text-right font-bold font-mono">
                         {formatCurrency(totals.totalDeductions)}
@@ -1073,7 +1209,7 @@ export function ConsolidatedSalaryPage() {
                         <div className="flex items-center justify-center gap-1">
                           <span className="text-emerald-400 font-bold">{totals.paidCount}</span>
                           <span className="text-slate-400">/</span>
-                          <span className="text-white font-bold">{totals.totalRecords}</span>
+                          <span className="text-white font-bold">{totals.totalEmployees}</span>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1082,16 +1218,16 @@ export function ConsolidatedSalaryPage() {
               </Table>
             </div>
 
-            {/* Direct rate formula reference */}
+            {/* Rate legend */}
             <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-slate-500">
               <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
-                Standard: below_hrs × 2.5 + above_hrs × 5.0
-              </span>
-              <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
-                TL/Supervisor: below_hrs × 3.0 + above_hrs × 5.5
+                Rate column: effective low/high hourly rate (trade-aware)
               </span>
               <span className="bg-violet-900/20 px-2 py-1 rounded border border-violet-700/30 text-violet-400">
                 CR = Custom Rate override
+              </span>
+              <span className="bg-teal-900/20 px-2 py-1 rounded border border-teal-700/30 text-teal-400">
+                Trade badge = trade-specific rate applied
               </span>
               <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
                 Click Paid/Unpaid badge to toggle (syncs with Accounts page)
@@ -1107,7 +1243,7 @@ export function ConsolidatedSalaryPage() {
           <CardHeader className="px-4">
             <CardTitle className="text-base text-white flex items-center gap-2">
               <Building2 className="h-4 w-4 text-slate-400" />
-              Per-Site Salary Breakdown
+              Per-Site Salary Breakdown — {monthLabel} {year}
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4">
@@ -1142,7 +1278,7 @@ export function ConsolidatedSalaryPage() {
                       <TableCell className="text-cyan-400 text-right font-medium bg-cyan-900/5 font-mono">{formatHours(site.totalBelowThresholdHours)}</TableCell>
                       <TableCell className="text-amber-400 text-right font-medium bg-amber-900/5 font-mono">{formatHours(site.totalAboveThresholdHours)}</TableCell>
                       <TableCell className="text-slate-200 text-right font-mono">{formatHours(site.totalHours)}</TableCell>
-                      <TableCell className="text-emerald-400 text-right font-medium bg-emerald-900/5 font-mono">{formatCurrency(site.totalGrossSalary)}</TableCell>
+                      <TableCell className="text-emerald-400 text-right font-medium bg-emerald-900/5 font-mono">{formatCurrency(site.totalSalary)}</TableCell>
                       <TableCell className="text-red-400 text-right font-mono">{formatCurrency(site.totalDeductions)}</TableCell>
                       <TableCell className="text-amber-400 text-right font-mono">{formatCurrency(site.totalAdvances)}</TableCell>
                       <TableCell className={cn('text-right font-semibold font-mono', site.netBalance >= 0 ? 'text-purple-400' : 'text-red-400')}>
@@ -1157,6 +1293,32 @@ export function ConsolidatedSalaryPage() {
                       </TableCell>
                     </TableRow>
                   ))}
+
+                  {/* Per-site grand total */}
+                  {totals && (
+                    <TableRow className="border-slate-600/50 bg-slate-800/60 hover:bg-slate-800/60">
+                      <TableCell colSpan={2} className="text-white font-bold text-right pr-4">
+                        Total ({siteSummaries.length} sites)
+                      </TableCell>
+                      <TableCell className="text-white text-center font-bold">{totals.totalEmployees}</TableCell>
+                      <TableCell className="text-cyan-400 text-right font-bold bg-cyan-900/5 font-mono">{formatHours(totals.totalBelowThresholdHours)}</TableCell>
+                      <TableCell className="text-amber-400 text-right font-bold bg-amber-900/5 font-mono">{formatHours(totals.totalAboveThresholdHours)}</TableCell>
+                      <TableCell className="text-white text-right font-bold font-mono">{formatHours(totals.totalHours)}</TableCell>
+                      <TableCell className="text-emerald-400 text-right font-bold bg-emerald-900/5 font-mono">{formatCurrency(totals.totalSalary)}</TableCell>
+                      <TableCell className="text-red-400 text-right font-bold font-mono">{formatCurrency(totals.totalDeductions)}</TableCell>
+                      <TableCell className="text-amber-400 text-right font-bold font-mono">{formatCurrency(totals.totalAdvances)}</TableCell>
+                      <TableCell className={cn('text-right font-bold font-mono', totals.netBalance >= 0 ? 'text-purple-400' : 'text-red-400')}>
+                        {formatCurrency(totals.netBalance)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="text-emerald-400 font-bold">{totals.paidCount}</span>
+                          <span className="text-slate-400">/</span>
+                          <span className="text-white font-bold">{totals.totalEmployees}</span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
