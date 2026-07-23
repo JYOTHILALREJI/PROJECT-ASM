@@ -129,3 +129,30 @@ Stage Summary:
   attendance-page.tsx, sites-page.tsx
 - Commit: c7ca6d0
 - Pushed to origin/main
+
+---
+Task ID: attendance-moved-away-fix
+Agent: main
+Task: Moved-away rows show S1 attendance faded + merged S2 label; site-aware salary sync
+
+Work Log:
+- Brought back MergedSiteCell component for out-of-range merged cells
+- Moved-away employee rows: in-range cells show S1 attendance (faded, read-only)
+  Out-of-range cells at end: MERGED with next-site name (e.g. "SITE S2")
+  Out-of-range cells at start: MERGED with previous-site name
+- Whole row has opacity-40 (faded) for moved-away employees
+- Removed per-day faded attendance in out-of-range cells (was showing wrong site's data)
+- New helper: computeMonthlyHoursPerSite() — splits hours across sites using
+  EmpCountSitePerMonth date ranges
+- syncEmployeeSalaryFromAttendance rewritten to be site-aware:
+  * Creates separate SalaryRecord (standard + camp_sitting) for EACH site
+  * Soft-deletes records for sites with no hours
+  * Grand total → TotalEmployeeWorkingHours
+  * EmpCountSitePerMonth + WorkLog upserted per site
+- Ensures NO hour is missed: S1 days → S1 salary record, S2 days → S2 salary record
+- Falls back to legacy behaviour when no EmpCountSitePerMonth records exist
+
+Stage Summary:
+- Files: attendance-page.tsx, attendance-sync.ts
+- Commit: 0dd679d
+- Pushed to origin/main
