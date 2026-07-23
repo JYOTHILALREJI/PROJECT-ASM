@@ -236,22 +236,31 @@ function mergeApiEntries(
     const customHourlyRate: number | null =
       (baseEntry.workingHours?.customHourlyRate as number | null | undefined) ?? null;
 
-    // Direct hourly rates — custom/trade rate overrides both tiers; otherwise
-    // fall back to the role-based defaults. The /api/accounts route has
-    // ALREADY resolved trade rates into workingHours.rtPerHour /
-    // customHourlyRate, so we trust that here.
-    const fallbackLow = hasBonus ? 3.0 : 2.5;
-    const fallbackHigh = hasBonus ? 5.5 : 5.0;
-    const lowRate =
-      customHourlyRate ??
-      standardEntry?.salaryRecord?.rtPerHour ??
-      (baseEntry.workingHours?.rtPerHour as number | undefined) ??
-      fallbackLow;
-    const highRate =
-      customHourlyRate ??
-      premiumEntry?.salaryRecord?.rtPerHour ??
-      (baseEntry.workingHours?.rtPerHour as number | undefined) ??
-      fallbackHigh;
+    // ── NEW rate priority (per project owner) ──
+    //   1) customHourlyRate (from Hours Ledger) → ONLY this rate
+    //   2) assignedTradeRate (from EmployeeTrade junction, set via Sites page)
+    //      → +0.5 if TL/Supervisor
+    //   3) Helper default → 2.5/3.0 (below) or 5.0/5.5 (above)
+    const assignedTradeRate: number | null = baseEntry.assignedTradeRate ?? null;
+    const hasTradeRate = assignedTradeRate !== null && assignedTradeRate > 0;
+
+    let lowRate: number;
+    let highRate: number;
+
+    if (customHourlyRate !== null) {
+      // Priority 1: Custom rate → only this rate, no bonus
+      lowRate = customHourlyRate;
+      highRate = customHourlyRate;
+    } else if (hasTradeRate) {
+      // Priority 2: Trade rate → +0.5 if TL/Sup
+      const bonusAdjustedRate = hasBonus ? assignedTradeRate! + 0.5 : assignedTradeRate!;
+      lowRate = bonusAdjustedRate;
+      highRate = bonusAdjustedRate;
+    } else {
+      // Priority 3: Helper default
+      lowRate = hasBonus ? 3.0 : 2.5;
+      highRate = hasBonus ? 5.5 : 5.0;
+    }
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
     const highRateHours = premiumEntry?.salaryRecord?.totalHours ?? 0;
