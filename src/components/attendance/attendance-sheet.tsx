@@ -53,7 +53,10 @@ function resolveTrade(emp: {
 /* ───────── Constants ───────── */
 const A4_WIDTH_MM = 210;
 const A4_HEIGHT_MM = 297;
-const ROWS_PER_PAGE = 24;
+// Reduced rows per page so the content fits comfortably on one A4 page
+// with equal border spacing on all sides.
+const ROWS_PER_PAGE = 20;
+const FIRST_PAGE_ROWS_COUNT = 16; // first page has the header, so fewer rows
 const EXTRA_ROWS = 5;
 const HEADER_BG = '#bbbcbd';
 const HEADER_TEXT = '#000';
@@ -123,11 +126,11 @@ function chunkRows<T>(items: T[], perPage: number): T[][] {
 function tableHeaderHtml(): string {
   return `
     <tr>
-      <th style="width:40px;">SL. NO</th>
-      <th style="text-align:left;">NAME</th>
-      <th style="width:99px;">EMP. CODE</th>
-      <th style="width:159px; text-align:left;">TRADE</th>
-      <th style="width:140px;">SIGNATURE</th>
+      <th style="width:50px;">SL. NO</th>
+      <th style="text-align:left; width:auto;">NAME</th>
+      <th style="width:110px;">EMP. CODE</th>
+      <th style="width:130px; text-align:left;">TRADE</th>
+      <th style="width:130px;">SIGNATURE</th>
     </tr>
   `;
 }
@@ -157,43 +160,43 @@ function buildPageHtml(params: {
   // Header - Light gray bordered box
   if (isFirstPage) {
     html += `
-      <div style="position:relative; border:1px solid #000; background:#E8E8E8; padding:8px 12px; margin-bottom:8px; -webkit-print-color-adjust:exact; print-color-adjust:exact; display:flex; align-items:center; justify-content:space-between; min-height:52px;">
+      <div style="position:relative; border:1px solid #000; background:#E8E8E8; padding:6px 10px; margin-bottom:6px; -webkit-print-color-adjust:exact; print-color-adjust:exact; display:flex; align-items:center; justify-content:space-between; min-height:44px;">
         <div style="flex:1;"></div>
         <div style="flex:0 0 auto; text-align:center;">
-          <div style="font-size:16px; font-weight:bold; text-align:center; text-transform:uppercase; letter-spacing:0.08em; color:#000;">ARABIAN SHIELD MANPOWER</div>
-          <div style="background:${HEADER_BG}; color:${HEADER_TEXT}; text-align:center; padding:5px; font-size:13px; font-weight:bold; letter-spacing:0.15em; text-transform:uppercase; margin-top:6px; -webkit-print-color-adjust:exact; print-color-adjust:exact;">DAILY ATTENDANCE</div>
+          <div style="font-size:14px; font-weight:bold; text-align:center; text-transform:uppercase; letter-spacing:0.08em; color:#000;">ARABIAN SHIELD MANPOWER</div>
+          <div style="background:${HEADER_BG}; color:${HEADER_TEXT}; text-align:center; padding:4px; font-size:11px; font-weight:bold; letter-spacing:0.15em; text-transform:uppercase; margin-top:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact;">DAILY ATTENDANCE</div>
         </div>
         <div style="flex:1; display:flex; justify-content:flex-end; align-items:center;">
-          <img src="/logo_asm.png" alt="ASM" style="height:48px; width:auto;" />
+          <img src="/logo_asm.png" alt="ASM" style="height:40px; width:auto;" />
         </div>
       </div>
     `;
 
-    // Info Section
+    // Info Section — tighter spacing
     html += `
-      <div style="font-size:12px; text-transform:uppercase; margin-bottom:8px; line-height:1.8; padding:0 4px;">
-        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
-          <span style="font-weight:bold; width:130px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; CLIENT NAME :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:16px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(clientName)}</span>
+      <div style="font-size:10px; text-transform:uppercase; margin-bottom:6px; line-height:1.6; padding:0 2px;">
+        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
+          <span style="font-weight:bold; width:110px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; CLIENT NAME :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(clientName)}</span>
         </div>
-        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
-          <span style="font-weight:bold; width:130px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; PROJECT NAME :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:16px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(projectName)}</span>
+        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
+          <span style="font-weight:bold; width:110px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; PROJECT NAME :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(projectName)}</span>
         </div>
-        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
-          <span style="font-weight:bold; width:130px; flex-shrink:0;">&#8226; DATE :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:16px;">${upper(dateInput)}</span>
+        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
+          <span style="font-weight:bold; width:110px; flex-shrink:0;">&#8226; DATE :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px;">${upper(dateInput)}</span>
         </div>
-        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
-          <span style="font-weight:bold; width:130px; flex-shrink:0;">&#8226; STRENGTH :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:16px; font-weight:bold;">${upper(strengthInput || String(sortedEmployees.length))}</span>
+        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
+          <span style="font-weight:bold; width:110px; flex-shrink:0;">&#8226; STRENGTH :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px; font-weight:bold;">${upper(strengthInput || String(sortedEmployees.length))}</span>
         </div>
       </div>
     `;
   } else {
     // Subsequent pages: just the date at the top, then the table continues
     html += `
-      <div style="display:flex; justify-content:flex-end; font-size:12px; margin-bottom:6px; text-transform:uppercase; color:#374151;">
+      <div style="display:flex; justify-content:flex-end; font-size:10px; margin-bottom:4px; text-transform:uppercase; color:#374151;">
         <span><strong>DATE:</strong> ${upper(dateInput)}</span>
       </div>
     `;
@@ -238,7 +241,7 @@ function buildPageHtml(params: {
   if (isLastPage && extraRows.length > 0) {
     const extraStartNo = sortedEmployees.length + 1;
     html += `
-      <div style="margin-top:12px; margin-bottom:4px; font-size:12px; font-weight:bold; text-transform:uppercase; letter-spacing:0.05em; color:#000;">EXTRA EMPLOYEES(IF ANY)</div>
+      <div style="margin-top:8px; margin-bottom:3px; font-size:10px; font-weight:bold; text-transform:uppercase; letter-spacing:0.05em; color:#000;">EXTRA EMPLOYEES(IF ANY)</div>
       <table>
         <thead>
           ${tableHeaderHtml()}
@@ -281,10 +284,12 @@ function getPrintCSS(): string {
       page-break-after: always;
       page-break-inside: avoid;
       position: relative;
-      width: 794px;
-      min-height: 1123px;
-      padding: 38px;
+      width: 210mm;
+      min-height: 297mm;
+      max-height: 297mm;
+      padding: 12mm;
       box-sizing: border-box;
+      overflow: hidden;
     }
     .page:last-child {
       page-break-after: auto;
@@ -292,8 +297,9 @@ function getPrintCSS(): string {
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 13px;
+      font-size: 12px;
       text-transform: uppercase;
+      table-layout: fixed;
     }
     thead tr {
       background: ${HEADER_BG} !important;
@@ -303,21 +309,35 @@ function getPrintCSS(): string {
     }
     th, td {
       border: 1px solid #000;
-      padding: 8px 6px;
+      padding: 5px 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     th {
       font-weight: bold;
       text-align: center;
-      font-size: 14px;
+      font-size: 12px;
     }
     td {
       font-weight: bold;
+    }
+    /* Name column: bigger font, left-aligned, fits content */
+    td:nth-child(2), th:nth-child(2) {
+      font-size: 13px;
+      text-align: left;
+    }
+    /* Emp code: nowrap to fit on one line */
+    td:nth-child(3), th:nth-child(3) {
+      font-size: 11px;
+      text-align: center;
+      white-space: nowrap;
     }
     .even-row { background: #f3f4f6; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .team-leader { background: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .supervisor { background: #eff6ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-    .page-info { text-align: right; font-size: 10px; color: #6b7280; margin-top: 4px; }
+    .page-info { text-align: right; font-size: 9px; color: #6b7280; margin-top: 4px; }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
@@ -404,11 +424,13 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
   }, []);
 
   // Chunk employee rows into pages
-  const FIRST_PAGE_ROWS = ROWS_PER_PAGE - 6;
+  // First page has the header (company name + info section), so fewer rows.
+  // Subsequent pages have more room. The row counts are tuned so the
+  // content fits on one A4 page with 12mm equal borders on all sides.
   const pages = useMemo(() => {
-    if (employeeRows.length <= FIRST_PAGE_ROWS) return [employeeRows];
-    const result: typeof employeeRows[] = [employeeRows.slice(0, FIRST_PAGE_ROWS)];
-    const remaining = employeeRows.slice(FIRST_PAGE_ROWS);
+    if (employeeRows.length <= FIRST_PAGE_ROWS_COUNT) return [employeeRows];
+    const result: typeof employeeRows[] = [employeeRows.slice(0, FIRST_PAGE_ROWS_COUNT)];
+    const remaining = employeeRows.slice(FIRST_PAGE_ROWS_COUNT);
     result.push(...chunkRows(remaining, ROWS_PER_PAGE));
     return result;
   }, [employeeRows]);
@@ -432,8 +454,8 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
         strengthInput,
         sortedEmployees,
         getDisplayTrade,
-        contentWidth: '794px',
-        contentPadding: '38px',
+        contentWidth: '210mm',
+        contentPadding: '12mm',
         isFirstPage,
         isLastPage,
         serialOffset,
@@ -774,8 +796,8 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 key={pageIdx}
                 id={pageIdx === 0 ? 'attendance-sheet-printable' : undefined}
                 ref={(el) => { pageRefs.current[pageIdx] = el; }}
-                className="bg-white shadow-xl border border-gray-300 w-full p-[10mm]"
-                style={{ maxWidth: `${A4_WIDTH_MM}mm`, minHeight: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box' }}
+                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm]"
+                style={{ maxWidth: `${A4_WIDTH_MM}mm`, minHeight: `${A4_HEIGHT_MM}mm`, maxHeight: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box', overflow: 'hidden' }}
               >
                 {/* Header Section */}
                 {isFirstPage ? (
