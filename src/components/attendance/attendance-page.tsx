@@ -218,23 +218,26 @@ const ExcelCell = React.memo(function ExcelCell({
     cellClass = 'bg-slate-800/30 text-slate-700 cursor-not-allowed';
     cellContent = '·';
   } else if (movedAway) {
+    // Moved-away employees: faded but STILL EDITABLE (admin can fix
+    // past attendance at any site). The row has opacity-40 from the
+    // parent, so the colors are naturally dimmed.
     if (status === 'present') {
-      cellClass = 'bg-green-500/30 text-green-300/60 cursor-not-allowed';
+      cellClass = 'bg-green-700/80 text-green-50 hover:bg-green-600/80';
       cellContent = '10';
     } else if (status === 'absent') {
-      cellClass = 'bg-red-500/30 text-red-300/60 cursor-not-allowed';
+      cellClass = 'bg-red-700/80 text-red-50 hover:bg-red-600/80';
       cellContent = 'A';
     } else if (status === 'camp_sitting') {
-      cellClass = 'bg-orange-500/30 text-orange-300/60 cursor-not-allowed';
+      cellClass = 'bg-orange-700/80 text-orange-50 hover:bg-orange-600/80';
       cellContent = 'C';
     } else if (status === 'overtime') {
-      cellClass = 'bg-blue-500/30 text-blue-300/60 cursor-not-allowed';
+      cellClass = 'bg-blue-700/80 text-blue-50 hover:bg-blue-600/80';
       cellContent = 'O';
     } else if (status === 'no_site') {
-      cellClass = 'bg-amber-500/30 text-amber-300/60 cursor-not-allowed';
+      cellClass = 'bg-amber-700/80 text-amber-50 hover:bg-amber-600/80';
       cellContent = 'NS';
     } else {
-      cellClass = 'bg-slate-800/30 text-slate-700/50 cursor-not-allowed';
+      cellClass = 'bg-slate-800/40 text-slate-600 hover:bg-slate-700/60';
       cellContent = '';
     }
   } else if (status === 'present') {
@@ -261,7 +264,8 @@ const ExcelCell = React.memo(function ExcelCell({
   }
 
   const activeRing = isActive ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-900 z-10' : '';
-  const interactive = inRange && !movedAway;
+  // Moved-away employees are now editable too (admin can fix past attendance)
+  const interactive = inRange;
 
   return (
     <button
@@ -475,7 +479,6 @@ function SiteListView({
 
         for (let i = empIdx + 1; i < sortedEmployees.length; i++) {
           const cand = sortedEmployees[i];
-          if (cand.movedAway) continue;
           if (!isInRange(cand, dateStr)) continue;
           const key = `${cand.id}::${dateStr}`;
           const el = cellRefs.current.get(key);
@@ -560,16 +563,10 @@ function SiteListView({
       if (nextEmpIdx < 0 || nextEmpIdx >= sortedEmployees.length) return;
       if (nextDayIdx < 0 || nextDayIdx >= displayDays.length) return;
 
-      // Skip moved-away employees and out-of-range cells
+      // Skip out-of-range cells (moved-away employees are now editable)
       let safeEmpIdx = nextEmpIdx;
       while (safeEmpIdx >= 0 && safeEmpIdx < sortedEmployees.length) {
         const candEmp = sortedEmployees[safeEmpIdx];
-        if (candEmp.movedAway) {
-          if (k === 'ArrowDown' || k === 'Enter') safeEmpIdx++;
-          else if (k === 'ArrowUp') safeEmpIdx--;
-          else break;
-          continue;
-        }
         const ds = dateStrFor(displayDays[nextDayIdx]);
         if (isInRange(candEmp, ds)) break;
         if (k === 'ArrowDown' || k === 'Enter') safeEmpIdx++;
@@ -978,10 +975,6 @@ function SiteListView({
                         {layout.inRangeDays.map((day) => {
                           const dateStr = dateStrFor(day);
                           const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-                          const status: StatusOption = record?.status || 'not_marked';
-                          const isFri = isFriday(year, month, day);
-                          const key = `${emp.id}::${dateStr}`;
-                          const isActive = activeCell === key;
 
                           // Check if this day is blocked (has P/A/C/O at another site)
                           const blockedSite = emp.blockedDates?.get(dateStr);
@@ -999,6 +992,21 @@ function SiteListView({
                               </div>
                             );
                           }
+
+                          // If the record exists but belongs to another site,
+                          // don't show its status here (treat as not_marked)
+                          let status: StatusOption = 'not_marked';
+                          if (record) {
+                            // If the record has a siteId and it matches this site,
+                            // show the status. If siteId is null (legacy), show it.
+                            // If siteId doesn't match, treat as not_marked.
+                            if (!record.siteId || record.siteId === site.id) {
+                              status = record.status;
+                            }
+                          }
+                          const isFri = isFriday(year, month, day);
+                          const key = `${emp.id}::${dateStr}`;
+                          const isActive = activeCell === key;
 
                           return (
                             <div
