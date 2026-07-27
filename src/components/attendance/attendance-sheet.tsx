@@ -204,7 +204,7 @@ function buildPageHtml(params: {
 
   // Main Employee Table
   html += `
-    <table>
+    <table class="main-table">
       <thead>
         ${tableHeaderHtml()}
       </thead>
@@ -285,11 +285,12 @@ function getPrintCSS(): string {
       page-break-inside: avoid;
       position: relative;
       width: 210mm;
-      min-height: 297mm;
-      max-height: 297mm;
+      height: 297mm;
       padding: 12mm;
       box-sizing: border-box;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     .page:last-child {
       page-break-after: auto;
@@ -301,6 +302,21 @@ function getPrintCSS(): string {
       text-transform: uppercase;
       table-layout: fixed;
     }
+    /* Main table fills the remaining vertical space on the page */
+    .main-table {
+      flex: 1 1 auto;
+      height: 100%;
+    }
+    .main-table tbody {
+      height: 100%;
+    }
+    /* Make rows expand to fill the available height */
+    .main-table tr {
+      height: 100%;
+    }
+    .main-table tbody tr {
+      height: 2.5em;
+    }
     thead tr {
       background: ${HEADER_BG} !important;
       color: ${HEADER_TEXT} !important;
@@ -309,7 +325,7 @@ function getPrintCSS(): string {
     }
     th, td {
       border: 1px solid #000;
-      padding: 5px 4px;
+      padding: 6px 5px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -337,7 +353,7 @@ function getPrintCSS(): string {
     .team-leader { background: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .supervisor { background: #eff6ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-    .page-info { text-align: right; font-size: 9px; color: #6b7280; margin-top: 4px; }
+    .page-info { text-align: right; font-size: 9px; color: #6b7280; margin-top: 4px; flex-shrink: 0; }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
@@ -796,8 +812,8 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 key={pageIdx}
                 id={pageIdx === 0 ? 'attendance-sheet-printable' : undefined}
                 ref={(el) => { pageRefs.current[pageIdx] = el; }}
-                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm]"
-                style={{ maxWidth: `${A4_WIDTH_MM}mm`, minHeight: `${A4_HEIGHT_MM}mm`, maxHeight: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box', overflow: 'hidden' }}
+                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm] flex flex-col"
+                style={{ maxWidth: `${A4_WIDTH_MM}mm`, height: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box', overflow: 'hidden' }}
               >
                 {/* Header Section */}
                 {isFirstPage ? (
@@ -862,9 +878,9 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                   </>
                 )}
 
-                {/* Main Employee Table */}
-                <div className={isFirstPage ? 'mt-4 pb-2' : 'mt-1 pb-2'}>
-                  <table className="w-full border-collapse text-[13px] uppercase">
+                {/* Main Employee Table — fills the remaining vertical space */}
+                <div className={cn('flex-1 flex flex-col overflow-hidden', isFirstPage ? 'mt-4' : 'mt-1')}>
+                  <table className="w-full border-collapse text-[13px] uppercase h-full">
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
                         <th className="border border-black px-2 py-2 text-center font-bold w-12 text-[14px] uppercase">SL. NO</th>
@@ -874,7 +890,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                         <th className="border border-black px-2 py-2 text-center font-bold w-40 text-[14px] uppercase">SIGNATURE</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="h-full">
                       {pageEmployeeRows.map((row, idx) => {
                         const serialNo = serialOffset + idx + 1;
                         const isEven = idx % 2 === 1;
@@ -883,6 +899,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                           <tr
                             key={row.id || `emp-${idx}`}
                             className={cn(
+                              'h-10',
                               isEven ? 'bg-gray-50' : 'bg-white',
                               row.isTeamLeader && 'bg-amber-50',
                               row.isSupervisor && !row.isTeamLeader && 'bg-blue-50'
