@@ -230,19 +230,19 @@ const ExcelCell = React.memo(function ExcelCell({
       cellContent = '';
     }
   } else if (status === 'present') {
-    cellClass = 'bg-green-500 text-white hover:bg-green-400';
+    cellClass = 'bg-green-700/80 text-green-50 hover:bg-green-600/80';
     cellContent = '10';
   } else if (status === 'absent') {
-    cellClass = 'bg-red-500 text-white hover:bg-red-400';
+    cellClass = 'bg-red-700/80 text-red-50 hover:bg-red-600/80';
     cellContent = 'A';
   } else if (status === 'camp_sitting') {
-    cellClass = 'bg-orange-500 text-white hover:bg-orange-400';
+    cellClass = 'bg-orange-700/80 text-orange-50 hover:bg-orange-600/80';
     cellContent = 'C';
   } else if (status === 'overtime') {
-    cellClass = 'bg-blue-500 text-white hover:bg-blue-400';
+    cellClass = 'bg-blue-700/80 text-blue-50 hover:bg-blue-600/80';
     cellContent = 'O';
   } else if (status === 'no_site') {
-    cellClass = 'bg-amber-500 text-white hover:bg-amber-400';
+    cellClass = 'bg-amber-700/80 text-amber-50 hover:bg-amber-600/80';
     cellContent = 'NS';
   } else {
     cellClass = cn(
@@ -801,7 +801,7 @@ function SiteListView({
               className={cn(
                 'flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors',
                 bulkMarkStatus === 'present'
-                  ? 'bg-emerald-500 text-white'
+                  ? 'bg-green-700/80 text-green-50'
                   : 'text-slate-400 hover:text-white'
               )}
             >
@@ -814,7 +814,7 @@ function SiteListView({
               className={cn(
                 'flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors',
                 bulkMarkStatus === 'absent'
-                  ? 'bg-red-500 text-white'
+                  ? 'bg-red-700/80 text-red-50'
                   : 'text-slate-400 hover:text-white'
               )}
             >
@@ -829,8 +829,8 @@ function SiteListView({
             className={cn(
               'h-7 text-[11px] gap-1.5',
               bulkMarkStatus === 'present'
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                : 'bg-red-600 hover:bg-red-700 text-white',
+                ? 'bg-green-700/80 hover:bg-green-600/80 text-green-50'
+                : 'bg-red-700/80 hover:bg-red-600/80 text-red-50',
             )}
             title={`Mark all eligible employees as ${bulkMarkStatus} on ${bulkMarkDate}`}
           >
@@ -1053,15 +1053,15 @@ function SiteListView({
       {!isCollapsed && (
         <div className="flex flex-wrap gap-3 px-4 py-3 border-t border-slate-700/50">
           <div className="flex items-center gap-1.5">
-            <span className="h-4 w-4 rounded bg-green-500" />
+            <span className="h-4 w-4 rounded bg-green-700/80" />
             <span className="text-[11px] text-slate-400">P = Present (10h)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-4 w-4 rounded bg-red-500" />
+            <span className="h-4 w-4 rounded bg-red-700/80" />
             <span className="text-[11px] text-slate-400">A = Absent (0h)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-4 w-4 rounded bg-orange-500" />
+            <span className="h-4 w-4 rounded bg-orange-700/80" />
             <span className="text-[11px] text-slate-400">C = Camp Sitting (8h, not in lifetime)</span>
           </div>
           <div className="flex items-center gap-1.5">

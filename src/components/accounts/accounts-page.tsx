@@ -1670,6 +1670,8 @@ export function AccountsPage() {
                                       isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-white'
                                     )}>
                                       {emp.empName || '-'}
+                                      {emp.isTeamLeader && <span className="text-amber-400 font-bold ml-1">(TL)</span>}
+                                      {emp.isSupervisor && !emp.isTeamLeader && <span className="text-blue-400 font-bold ml-1">(SUP)</span>}
                                     </span>
                                   )}
                                 </td>
