@@ -285,12 +285,9 @@ function getPrintCSS(): string {
       page-break-inside: avoid;
       position: relative;
       width: 210mm;
-      height: 297mm;
+      min-height: 297mm;
       padding: 12mm;
       box-sizing: border-box;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
     }
     .page:last-child {
       page-break-after: auto;
@@ -301,21 +298,6 @@ function getPrintCSS(): string {
       font-size: 12px;
       text-transform: uppercase;
       table-layout: fixed;
-    }
-    /* Main table fills the remaining vertical space on the page */
-    .main-table {
-      flex: 1 1 auto;
-      height: 100%;
-    }
-    .main-table tbody {
-      height: 100%;
-    }
-    /* Make rows expand to fill the available height */
-    .main-table tr {
-      height: 100%;
-    }
-    .main-table tbody tr {
-      height: 2.5em;
     }
     thead tr {
       background: ${HEADER_BG} !important;
@@ -338,7 +320,7 @@ function getPrintCSS(): string {
     td {
       font-weight: bold;
     }
-    /* Name column: bigger font, left-aligned, fits content */
+    /* Name column: bigger font, left-aligned */
     td:nth-child(2), th:nth-child(2) {
       font-size: 13px;
       text-align: left;
@@ -353,7 +335,7 @@ function getPrintCSS(): string {
     .team-leader { background: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .supervisor { background: #eff6ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-    .page-info { text-align: right; font-size: 9px; color: #6b7280; margin-top: 4px; flex-shrink: 0; }
+    .page-info { text-align: right; font-size: 9px; color: #6b7280; margin-top: 4px; }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
@@ -812,13 +794,13 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 key={pageIdx}
                 id={pageIdx === 0 ? 'attendance-sheet-printable' : undefined}
                 ref={(el) => { pageRefs.current[pageIdx] = el; }}
-                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm] flex flex-col"
-                style={{ maxWidth: `${A4_WIDTH_MM}mm`, height: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box', overflow: 'hidden' }}
+                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm]"
+                style={{ maxWidth: `${A4_WIDTH_MM}mm`, minHeight: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box' }}
               >
                 {/* Header Section */}
                 {isFirstPage ? (
                   <>
-                    <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between shrink-0" style={{ minHeight: '52px' }}>
+                    <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between" style={{ minHeight: '52px' }}>
                       {/* Left spacer for centering */}
                       <div className="flex-1" />
                       {/* Center content */}
@@ -842,7 +824,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                     </div>
 
                     {/* Info Section — bigger font for print readability */}
-                    <div className="mt-3 text-[14px] uppercase shrink-0">
+                    <div className="mt-3 text-[14px] uppercase">
                       <div className="flex items-baseline mb-1.5">
                         <span className="font-bold text-gray-900 w-40 shrink-0 text-[14px]" style={{ fontFamily: "'Times New Roman', Times, serif" }}>&#8226; CLIENT NAME :</span>
                         <span className="flex-1 border-b border-gray-500" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }}>
@@ -872,22 +854,22 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 ) : (
                   <>
                     {/* Subsequent pages: just the date at top, then table continues */}
-                    <div className="flex justify-end text-[14px] uppercase text-gray-600 pb-1 shrink-0">
+                    <div className="flex justify-end text-[14px] uppercase text-gray-600 pb-1">
                       <span><strong>DATE:</strong> {upper(dateInput)}</span>
                     </div>
                   </>
                 )}
 
-                {/* Main Employee Table — fills the remaining vertical space */}
-                <div className={cn('flex-1 min-h-0 overflow-hidden', isFirstPage ? 'mt-3' : 'mt-1')}>
-                  <table className="w-full border-collapse text-[13px] uppercase" style={{ height: '100%' }}>
+                {/* Main Employee Table */}
+                <div className={isFirstPage ? 'mt-3' : 'mt-1'}>
+                  <table className="w-full border-collapse text-[13px] uppercase table-fixed">
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
-                        <th className="border border-black px-2 py-2 text-center font-bold w-12 text-[14px] uppercase">SL. NO</th>
+                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '50px' }}>SL. NO</th>
                         <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase">NAME</th>
-                        <th className="border border-black px-2 py-2 text-center font-bold w-[115px] text-[14px] uppercase">EMP. CODE</th>
-                        <th className="border border-black px-2 py-2 text-left font-bold w-[179px] text-[14px] uppercase">TRADE</th>
-                        <th className="border border-black px-2 py-2 text-center font-bold w-40 text-[14px] uppercase">SIGNATURE</th>
+                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '110px' }}>EMP. CODE</th>
+                        <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '130px' }}>TRADE</th>
+                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '130px' }}>SIGNATURE</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -921,7 +903,6 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                         );
                       })}
                     </tbody>
-
                   </table>
                 </div>
 
