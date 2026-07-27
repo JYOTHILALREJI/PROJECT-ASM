@@ -101,6 +101,7 @@ interface SiteOption {
 interface AttendanceRecord {
   id: string;
   employeeId: string;
+  siteId?: string | null;
   date: string;
   status: 'present' | 'absent' | 'no_site' | 'overtime' | 'camp_sitting' | 'not_marked';
   overtimeHours: number | null;
@@ -351,7 +352,7 @@ interface SiteListViewProps {
   isCurrentMonthView: boolean;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
-  onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void;
+  onStatusChange: (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null, siteId?: string) => void;
   onBulkMark: (siteId: string, siteName: string, date: string, status: 'present' | 'absent', employeeIds: string[]) => Promise<void>;
   onShare: () => void;
   onAttendanceSheet: () => void;
@@ -464,7 +465,7 @@ function SiteListView({
         prevOvertime: prev?.overtimeHours || null,
       });
 
-      onStatusChange(empId, dateStr, status);
+      onStatusChange(empId, dateStr, status, undefined, site.id);
 
       // Auto-advance DOWN to the next in-range employee (same day).
       // If no next employee, STAY in the current cell.
@@ -506,7 +507,7 @@ function SiteListView({
         prevStatus: prev?.status || 'not_marked',
         prevOvertime: prev?.overtimeHours || null,
       });
-      onStatusChange(empId, dateStr, 'not_marked');
+      onStatusChange(empId, dateStr, 'not_marked', undefined, site.id);
     },
     [onStatusChange, onPushUndo, attendanceMap]
   );
@@ -1233,7 +1234,7 @@ export function AttendancePage() {
 
   // Keep a ref to handleStatusChange so handleUndo can call it without
   // being stale (handleStatusChange is defined later via useCallback).
-  const handleStatusChangeRef = useRef<(employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => void>(() => {});
+  const handleStatusChangeRef = useRef<(employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null, siteId?: string) => void>(() => {});
 
   // ── Ctrl+Z listener ──
   // Uses capture phase (true) so it fires BEFORE the cell's onKeyDown handler,
@@ -1480,43 +1481,28 @@ export function AttendancePage() {
           ? clampToMonth(assignment.removedDate.split('T')[0])
           : null;
 
-        // ── Compute blockedDates: specific days with P/A/C/O attendance ──
-        // at ANOTHER site that fall within THIS site's active range.
-        // These days are NOT editable (merged cells showing the other site).
-        // Unlike activeFrom/activeUntil (which are contiguous ranges),
-        // blockedDates can be non-contiguous — e.g. only day 27 is blocked
-        // if that's the only day with attendance at another site.
+        // ── Compute blockedDates: days with P/A/C/O attendance at ANOTHER site ──
+        // Now that attendance records have siteId, we can directly check if an
+        // attendance record belongs to this site or another site. If it belongs
+        // to another site (siteId != this site's id), block it here.
         const blockedDates = new Map<string, string>(); // dateStr -> other site name
         {
-          // Build date ranges for ALL OTHER site assignments for this employee
-          const otherSiteRanges: Array<{ siteName: string; start: string; end: string }> = [];
-          for (const other of siteAssignments) {
-            if (other.empId !== assignment.empId) continue;
-            if (other.siteName === siteName) continue;
-            const otherStart = clampToMonth(other.createdDate.split('T')[0]);
-            const otherEnd = other.removedDate
-              ? clampToMonth(other.removedDate.split('T')[0])
-              : monthEndStr;
-            otherSiteRanges.push({ siteName: other.siteName, start: otherStart, end: otherEnd });
+          // Build a map of siteId -> siteName for lookup
+          const siteNameMap = new Map<string, string>();
+          for (const sa of siteAssignments) {
+            siteNameMap.set(sa.siteId, sa.siteName);
           }
 
-          // For each attendance record (P/A/C/O) that belongs to ANOTHER site,
-          // mark it as blocked in THIS site. We check ALL attendance records
-          // for this employee (not just those within this site's active range)
-          // because the attendance might have been marked when the employee
-          // was at another site, and the date ranges might overlap.
+          // For each attendance record (P/A/C/O) for this employee in this month
           for (const att of attendanceRecords) {
             if (att.employeeId !== emp.id) continue;
             if (!att.date.startsWith(monthPrefix)) continue;
             if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
 
-            // Check if this attendance date falls within any OTHER site's range
-            for (const range of otherSiteRanges) {
-              if (att.date >= range.start && att.date <= range.end) {
-                // This attendance belongs to another site — block it here
-                blockedDates.set(att.date, range.siteName);
-                break;
-              }
+            // If the attendance has a siteId and it's NOT this site, block it
+            if (att.siteId && att.siteId !== assignment.siteId) {
+              const otherSiteName = siteNameMap.get(att.siteId) || 'Other Site';
+              blockedDates.set(att.date, otherSiteName);
             }
           }
         }
@@ -1671,9 +1657,10 @@ export function AttendancePage() {
 
   // Handle status change
   const handleStatusChange = useCallback(
-    async (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null) => {
+    async (employeeId: string, date: string, status: StatusOption, overtimeHours?: number | null, siteId?: string) => {
       try {
         const body: Record<string, unknown> = { employeeId, date, status };
+        if (siteId) body.siteId = siteId;
         if (status === 'overtime' && overtimeHours !== undefined && overtimeHours !== null) {
           body.overtimeHours = overtimeHours;
         }

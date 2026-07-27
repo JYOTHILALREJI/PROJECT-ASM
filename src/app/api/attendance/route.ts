@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { employeeId, date, status, overtimeHours, actorUserId, actorDisplayName } = body;
+    const { employeeId, date, status, overtimeHours, siteId, actorUserId, actorDisplayName } = body;
 
     if (!employeeId || !date || !status) {
       return NextResponse.json(
@@ -159,6 +159,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Resolve siteId: use the provided siteId, or look up from employee's currentSiteId
+    let resolvedSiteId = siteId || null;
+    if (!resolvedSiteId && employee.currentSiteId) {
+      resolvedSiteId = employee.currentSiteId;
+    }
+    // If still null, try to find by currentSite name
+    if (!resolvedSiteId && employee.currentSite) {
+      const site = await db.site.findFirst({
+        where: { name: employee.currentSite, deletedAt: null },
+        select: { id: true },
+      });
+      resolvedSiteId = site?.id || null;
+    }
+
     // Get existing attendance record to handle overtime rating adjustment
     const existingRecord = await db.attendance.findUnique({
       where: {
@@ -166,7 +180,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Upsert attendance record
+    // Upsert attendance record — now includes siteId
     const attendance = await db.attendance.upsert({
       where: {
         employeeId_date: {
@@ -176,11 +190,13 @@ export async function POST(request: NextRequest) {
       },
       create: {
         employeeId,
+        siteId: resolvedSiteId,
         date,
         status,
         overtimeHours: overtimeHours || null,
       },
       update: {
+        siteId: resolvedSiteId,
         status,
         overtimeHours: overtimeHours || null,
       },

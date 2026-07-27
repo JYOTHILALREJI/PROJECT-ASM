@@ -275,10 +275,12 @@ export async function POST(
           },
           create: {
             employeeId: entry.employeeId,
+            siteId: share.siteId,
             date,
             status: entry.status,
           },
           update: {
+            siteId: share.siteId,
             status: entry.status,
             overtimeHours: null,
           },

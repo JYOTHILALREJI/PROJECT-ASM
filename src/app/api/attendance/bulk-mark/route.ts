@@ -71,11 +71,13 @@ export async function POST(request: NextRequest) {
           where: { employeeId_date: { employeeId: emp.id, date } },
           create: {
             employeeId: emp.id,
+            siteId: emp.currentSiteId || null,
             date,
             status,
             overtimeHours: status === 'overtime' ? (body.overtimeHours || 2) : null,
           },
           update: {
+            siteId: emp.currentSiteId || null,
             status,
             overtimeHours: status === 'overtime' ? (body.overtimeHours || 2) : null,
           },

@@ -175,13 +175,15 @@ model Site {
   salaryRecords     SalaryRecord[]
   attendanceShares  AttendanceShare[]
   attendanceVersions AttendanceVersion[]
+  attendanceRecords  Attendance[]
 }
 
 model Attendance {
   id            String   @id @default(cuid())
   employeeId    String
+  siteId        String?  // FK to Site — which site this attendance belongs to
   date          String // YYYY-MM-DD format
-  status        String   @default("present") // "present", "absent", "no_site", "overtime", "not_marked"
+  status        String   @default("present") // "present", "absent", "no_site", "overtime", "camp_sitting", "not_marked"
   overtimeHours Float?
   isHidden      Boolean  @default(false) // Legacy soft-hide when employee is deleted
   createdAt     DateTime @default(now())
@@ -189,9 +191,11 @@ model Attendance {
   deletedAt     DateTime?
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  site     Site?    @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, date])
   @@index([employeeId])
+  @@index([siteId])
   @@index([date])
   @@index([isHidden])
   @@index([deletedAt])
