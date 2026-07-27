@@ -1500,20 +1500,20 @@ export function AttendancePage() {
             otherSiteRanges.push({ siteName: other.siteName, start: otherStart, end: otherEnd });
           }
 
-          // For each attendance record (P/A/C/O) that belongs to ANOTHER site
-          // AND falls within this site's active range, mark it as blocked.
+          // For each attendance record (P/A/C/O) that belongs to ANOTHER site,
+          // mark it as blocked in THIS site. We check ALL attendance records
+          // for this employee (not just those within this site's active range)
+          // because the attendance might have been marked when the employee
+          // was at another site, and the date ranges might overlap.
           for (const att of attendanceRecords) {
             if (att.employeeId !== emp.id) continue;
             if (!att.date.startsWith(monthPrefix)) continue;
             if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
 
-            // Check if this attendance date falls within this site's active range
-            if (att.date < activeFrom) continue;
-            if (activeUntil && att.date > activeUntil) continue;
-
             // Check if this attendance date falls within any OTHER site's range
             for (const range of otherSiteRanges) {
               if (att.date >= range.start && att.date <= range.end) {
+                // This attendance belongs to another site — block it here
                 blockedDates.set(att.date, range.siteName);
                 break;
               }
