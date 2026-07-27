@@ -419,15 +419,19 @@ function SiteListView({
     return true;
   }, []);
 
-  // Total working hours = P×10 + C×8 + overtime(10+ot)
+  // Total working hours = P×10 + C×8 + overtime(10+ot) — ONLY for THIS site
   const computeTotalHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
       for (const day of displayDays) {
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
+        // Skip blocked dates (attendance at another site)
+        if (emp.blockedDates?.has(dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
+        // Only count if the record belongs to this site (or is legacy null)
+        if (rec.siteId && rec.siteId !== site.id) continue;
         if (rec.status === 'present') total += HOURS_PER_PRESENT;
         else if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
         else if (rec.status === 'overtime') {
@@ -436,23 +440,25 @@ function SiteListView({
       }
       return total;
     },
-    [displayDays, dateStrFor, isInRange, attendanceMap]
+    [displayDays, dateStrFor, isInRange, attendanceMap, site.id]
   );
 
-  // Total camp sitting hours = C×8 (only camp_sitting days)
+  // Total camp sitting hours = C×8 (only camp_sitting days at THIS site)
   const computeCampSittingHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
       for (const day of displayDays) {
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
+        if (emp.blockedDates?.has(dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
+        if (rec.siteId && rec.siteId !== site.id) continue;
         if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
       }
       return total;
     },
-    [displayDays, dateStrFor, isInRange, attendanceMap]
+    [displayDays, dateStrFor, isInRange, attendanceMap, site.id]
   );
 
   // ── Mark handler: save + push undo + auto-advance DOWN ──
@@ -994,15 +1000,23 @@ function SiteListView({
                           }
 
                           // If the record exists but belongs to another site,
-                          // don't show its status here (treat as not_marked)
+                          // don't show its status here (treat as not_marked).
+                          // For legacy records (siteId = null), the blockedDates
+                          // check above already handles the merge. If the date
+                          // isn't blocked, it means the record either belongs to
+                          // this site or the site couldn't be determined — in
+                          // either case, show the status.
                           let status: StatusOption = 'not_marked';
                           if (record) {
-                            // If the record has a siteId and it matches this site,
-                            // show the status. If siteId is null (legacy), show it.
-                            // If siteId doesn't match, treat as not_marked.
-                            if (!record.siteId || record.siteId === site.id) {
+                            if (!record.siteId) {
+                              // Legacy record (no siteId) — show it (blockedDates
+                              // already handled the merge if it belongs to another site)
+                              status = record.status;
+                            } else if (record.siteId === site.id) {
+                              // Record belongs to this site — show it
                               status = record.status;
                             }
+                            // else: record belongs to another site — don't show
                           }
                           const isFri = isFriday(year, month, day);
                           const key = `${emp.id}::${dateStr}`;
@@ -1490,9 +1504,9 @@ export function AttendancePage() {
           : null;
 
         // ── Compute blockedDates: days with P/A/C/O attendance at ANOTHER site ──
-        // Now that attendance records have siteId, we can directly check if an
-        // attendance record belongs to this site or another site. If it belongs
-        // to another site (siteId != this site's id), block it here.
+        // Each attendance record now has a siteId. If the record's siteId doesn't
+        // match this site, block it. For legacy records (siteId = null), infer
+        // the site from the EmpCountSitePerMonth date ranges.
         const blockedDates = new Map<string, string>(); // dateStr -> other site name
         {
           // Build a map of siteId -> siteName for lookup
@@ -1501,16 +1515,39 @@ export function AttendancePage() {
             siteNameMap.set(sa.siteId, sa.siteName);
           }
 
+          // Build date ranges for ALL OTHER site assignments for this employee
+          // (used for legacy records with null siteId)
+          const otherSiteRanges: Array<{ siteName: string; siteId: string; start: string; end: string }> = [];
+          for (const other of siteAssignments) {
+            if (other.empId !== assignment.empId) continue;
+            if (other.siteName === siteName) continue;
+            const otherStart = clampToMonth(other.createdDate.split('T')[0]);
+            const otherEnd = other.removedDate
+              ? clampToMonth(other.removedDate.split('T')[0])
+              : monthEndStr;
+            otherSiteRanges.push({ siteName: other.siteName, siteId: other.siteId, start: otherStart, end: otherEnd });
+          }
+
           // For each attendance record (P/A/C/O) for this employee in this month
           for (const att of attendanceRecords) {
             if (att.employeeId !== emp.id) continue;
             if (!att.date.startsWith(monthPrefix)) continue;
             if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
 
-            // If the attendance has a siteId and it's NOT this site, block it
-            if (att.siteId && att.siteId !== assignment.siteId) {
-              const otherSiteName = siteNameMap.get(att.siteId) || 'Other Site';
-              blockedDates.set(att.date, otherSiteName);
+            if (att.siteId) {
+              // Record has siteId — directly compare
+              if (att.siteId !== assignment.siteId) {
+                const otherSiteName = siteNameMap.get(att.siteId) || 'Other Site';
+                blockedDates.set(att.date, otherSiteName);
+              }
+            } else {
+              // Legacy record (siteId = null) — infer from date ranges
+              for (const range of otherSiteRanges) {
+                if (att.date >= range.start && att.date <= range.end) {
+                  blockedDates.set(att.date, range.siteName);
+                  break;
+                }
+              }
             }
           }
         }
