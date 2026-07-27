@@ -100,11 +100,12 @@ export function AdvancePage() {
   const { user } = useAuthStore();
   const { setCurrentView } = useAppStore();
 
-  // Default effective month = next month from today
+  // Default effective month = current month (so advances show immediately in
+  // the Accounts page for the current month). The user can still change it
+  // to next month if they want the advance deducted from next month's salary.
   const now = new Date();
-  const next = getNextMonth(now.getFullYear(), now.getMonth());
-  const [selectedYear, setSelectedYear] = useState(next.year);
-  const [selectedMonth, setSelectedMonth] = useState(next.month); // 0-indexed
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth()); // 0-indexed
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -319,7 +320,7 @@ export function AdvancePage() {
       if (data.success) {
         toast({
           title: 'Advances saved',
-          description: `${data.data.count} advance(s) saved for ${MONTH_FULL[selectedMonth]} ${selectedYear}. They will be deducted from the next salary.`,
+          description: `${data.data.count} advance(s) saved for ${MONTH_FULL[selectedMonth]} ${selectedYear}. They will be deducted from the ${MONTH_FULL[selectedMonth]} ${selectedYear} salary.`,
         });
         setBucket(new Map());
         fetchPendingAdvances();

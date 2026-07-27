@@ -103,6 +103,10 @@ export async function GET(request: NextRequest) {
     // IMPORTANT: This must match the logic in /api/salary-records and the
     // bulk-save route so all three views (Accounts, Consolidated, and saved
     // salary records) agree on the advance amount.
+    //
+    // The pendingByEmp map is also used later for stub entries (employees
+    // with no salary records yet) so their advance amount shows up too.
+    const pendingByEmp = new Map<string, number>();
     {
       const pendingAdvances = await db.advance.findMany({
         where: {
@@ -113,13 +117,13 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      if (pendingAdvances.length > 0 && allSalaryRecords.length > 0) {
-        // Group pending advances by empId
-        const pendingByEmp = new Map<string, number>();
+      if (pendingAdvances.length > 0) {
+        // Group pending advances by empId (into the outer pendingByEmp map)
         for (const a of pendingAdvances) {
           pendingByEmp.set(a.empId, (pendingByEmp.get(a.empId) || 0) + a.amount);
         }
 
+        if (allSalaryRecords.length > 0) {
         // Apply to standard-tier records first (one per empId)
         const appliedEmps = new Set<string>();
         for (let i = 0; i < allSalaryRecords.length; i++) {
@@ -155,8 +159,9 @@ export async function GET(request: NextRequest) {
           };
           appliedEmps.add(r.empId);
         }
+        } // end if (allSalaryRecords.length > 0)
       }
-    }
+    } // end pending advances block
 
     // Get all unique empIds from salary records
     const empIds = [...new Set(allSalaryRecords.map((r) => r.empId))];
@@ -644,6 +649,9 @@ export async function GET(request: NextRequest) {
 
         const totalWorkingHours = currentMonthWh?.totalWorkingHours ?? 0;
 
+        // Check if this stub employee has a pending advance for this month
+        const stubPendingAdvance = pendingByEmp.get(stub.empId) || 0;
+
         employeeEntries.push({
           empId: stub.empId,
           empName: stub.empName,
@@ -655,7 +663,35 @@ export async function GET(request: NextRequest) {
           isTeamLeader: emp?.isTeamLeader ?? false,
           isSupervisor: emp?.isSupervisor ?? false,
           rateTier: 'standard',
-          salaryRecord: null,
+          // If there's a pending advance, include it in a partial salary record
+          // so the front-end mergeApiEntries picks it up. The advance field is
+          // the only field that matters here — the rest will be computed from
+          // working hours.
+          salaryRecord: stubPendingAdvance > 0 ? {
+            id: '',
+            empId: stub.empId,
+            empName: stub.empName,
+            siteId: sId,
+            siteName: sData.siteName,
+            month,
+            year: yearNum,
+            nationality: emp?.nationality || '',
+            trade: 'Helper',
+            employeeCode: emp?.employeeId || '',
+            slNo: 0,
+            totalHours: 0,
+            rtPerHour: isCustom ? customRtPerHour : calculatedRtPerHour,
+            totalSalary: 0,
+            deduction: 0,
+            advance: stubPendingAdvance,
+            balanceSalary: -stubPendingAdvance,
+            isPaid: false,
+            isDeleted: false,
+            rateTier: 'standard',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            deletedAt: null,
+          } as any : null,
           workingHours: {
             id: currentMonthWh?.id,
             empId: stub.empId,
