@@ -172,31 +172,31 @@ function buildPageHtml(params: {
       </div>
     `;
 
-    // Info Section — tighter spacing
+    // Info Section — bigger font for print readability
     html += `
-      <div style="font-size:10px; text-transform:uppercase; margin-bottom:6px; line-height:1.6; padding:0 2px;">
-        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
-          <span style="font-weight:bold; width:110px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; CLIENT NAME :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(clientName)}</span>
+      <div style="font-size:14px; text-transform:uppercase; margin-bottom:6px; line-height:1.8; padding:0 2px;">
+        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
+          <span style="font-weight:bold; width:150px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; CLIENT NAME :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:18px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(clientName)}</span>
         </div>
-        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
-          <span style="font-weight:bold; width:110px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; PROJECT NAME :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(projectName)}</span>
+        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
+          <span style="font-weight:bold; width:150px; flex-shrink:0; font-family:'Times New Roman', Times, serif;">&#8226; PROJECT NAME :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:18px; font-family:'Times New Roman', Times, serif; font-weight:bold;">${upper(projectName)}</span>
         </div>
-        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
-          <span style="font-weight:bold; width:110px; flex-shrink:0;">&#8226; DATE :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px;">${upper(dateInput)}</span>
+        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
+          <span style="font-weight:bold; width:150px; flex-shrink:0;">&#8226; DATE :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:18px;">${upper(dateInput)}</span>
         </div>
-        <div style="display:flex; align-items:baseline; margin-bottom:1px;">
-          <span style="font-weight:bold; width:110px; flex-shrink:0;">&#8226; STRENGTH :</span>
-          <span style="flex:1; border-bottom:1px solid #555; padding:0 3px; min-height:14px; font-weight:bold;">${upper(strengthInput || String(sortedEmployees.length))}</span>
+        <div style="display:flex; align-items:baseline; margin-bottom:2px;">
+          <span style="font-weight:bold; width:150px; flex-shrink:0;">&#8226; STRENGTH :</span>
+          <span style="flex:1; border-bottom:1px solid #555; padding:0 4px; min-height:18px; font-weight:bold;">${upper(strengthInput || String(sortedEmployees.length))}</span>
         </div>
       </div>
     `;
   } else {
     // Subsequent pages: just the date at the top, then the table continues
     html += `
-      <div style="display:flex; justify-content:flex-end; font-size:10px; margin-bottom:4px; text-transform:uppercase; color:#374151;">
+      <div style="display:flex; justify-content:flex-end; font-size:14px; margin-bottom:4px; text-transform:uppercase; color:#374151;">
         <span><strong>DATE:</strong> ${upper(dateInput)}</span>
       </div>
     `;
@@ -818,7 +818,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 {/* Header Section */}
                 {isFirstPage ? (
                   <>
-                    <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between" style={{ minHeight: '52px' }}>
+                    <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between shrink-0" style={{ minHeight: '52px' }}>
                       {/* Left spacer for centering */}
                       <div className="flex-1" />
                       {/* Center content */}
@@ -841,30 +841,30 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                       </div>
                     </div>
 
-                    {/* Info Section */}
-                    <div className="mt-4 text-[12px] uppercase">
+                    {/* Info Section — bigger font for print readability */}
+                    <div className="mt-3 text-[14px] uppercase shrink-0">
                       <div className="flex items-baseline mb-1.5">
-                        <span className="font-bold text-gray-900 w-36 shrink-0" style={{ fontFamily: "'Times New Roman', Times, serif" }}>&#8226; CLIENT NAME :</span>
+                        <span className="font-bold text-gray-900 w-40 shrink-0 text-[14px]" style={{ fontFamily: "'Times New Roman', Times, serif" }}>&#8226; CLIENT NAME :</span>
                         <span className="flex-1 border-b border-gray-500" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }}>
-                          <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[12px] uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }} />
+                          <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[14px] uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }} />
                         </span>
                       </div>
                       <div className="flex items-baseline mb-1.5">
-                        <span className="font-bold text-gray-900 w-36 shrink-0" style={{ fontFamily: "'Times New Roman', Times, serif" }}>&#8226; PROJECT NAME :</span>
+                        <span className="font-bold text-gray-900 w-40 shrink-0 text-[14px]" style={{ fontFamily: "'Times New Roman', Times, serif" }}>&#8226; PROJECT NAME :</span>
                         <span className="flex-1 border-b border-gray-500" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }}>
-                          <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[12px] uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }} />
+                          <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[14px] uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }} />
                         </span>
                       </div>
                       <div className="flex items-baseline mb-1.5">
-                        <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; DATE :</span>
+                        <span className="font-bold text-gray-900 w-40 shrink-0 text-[14px]">&#8226; DATE :</span>
                         <span className="flex-1 border-b border-gray-500">
-                          <input type="text" value={dateInput} onChange={(e) => handleDateChange(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[12px] font-mono uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" />
+                          <input type="text" value={dateInput} onChange={(e) => handleDateChange(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[14px] font-mono uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" />
                         </span>
                       </div>
                       <div className="flex items-baseline mb-1.5">
-                        <span className="font-bold text-gray-900 w-36 shrink-0">&#8226; STRENGTH :</span>
+                        <span className="font-bold text-gray-900 w-40 shrink-0 text-[14px]">&#8226; STRENGTH :</span>
                         <span className="flex-1 border-b border-gray-500">
-                          <input type="text" value={strengthInput} onChange={(e) => setStrengthInput(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[12px] font-semibold uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" />
+                          <input type="text" value={strengthInput} onChange={(e) => setStrengthInput(e.target.value.toUpperCase())} className="w-full bg-transparent border-none outline-none text-gray-800 text-[14px] font-semibold uppercase hover:bg-blue-50/60 focus:bg-blue-50/80 focus:outline-1 focus:outline-blue-300 transition-colors rounded px-1 -mx-1 cursor-text py-0.5" />
                         </span>
                       </div>
                     </div>
@@ -872,15 +872,15 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 ) : (
                   <>
                     {/* Subsequent pages: just the date at top, then table continues */}
-                    <div className="flex justify-end text-[12px] uppercase text-gray-600 pb-1">
+                    <div className="flex justify-end text-[14px] uppercase text-gray-600 pb-1 shrink-0">
                       <span><strong>DATE:</strong> {upper(dateInput)}</span>
                     </div>
                   </>
                 )}
 
                 {/* Main Employee Table — fills the remaining vertical space */}
-                <div className={cn('flex-1 flex flex-col overflow-hidden', isFirstPage ? 'mt-4' : 'mt-1')}>
-                  <table className="w-full border-collapse text-[13px] uppercase h-full">
+                <div className={cn('flex-1 min-h-0 overflow-hidden', isFirstPage ? 'mt-3' : 'mt-1')}>
+                  <table className="w-full border-collapse text-[13px] uppercase" style={{ height: '100%' }}>
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
                         <th className="border border-black px-2 py-2 text-center font-bold w-12 text-[14px] uppercase">SL. NO</th>
@@ -890,7 +890,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                         <th className="border border-black px-2 py-2 text-center font-bold w-40 text-[14px] uppercase">SIGNATURE</th>
                       </tr>
                     </thead>
-                    <tbody className="h-full">
+                    <tbody>
                       {pageEmployeeRows.map((row, idx) => {
                         const serialNo = serialOffset + idx + 1;
                         const isEven = idx % 2 === 1;
@@ -899,7 +899,6 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                           <tr
                             key={row.id || `emp-${idx}`}
                             className={cn(
-                              'h-10',
                               isEven ? 'bg-gray-50' : 'bg-white',
                               row.isTeamLeader && 'bg-amber-50',
                               row.isSupervisor && !row.isTeamLeader && 'bg-blue-50'
