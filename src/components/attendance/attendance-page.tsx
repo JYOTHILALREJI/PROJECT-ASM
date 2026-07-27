@@ -977,76 +977,89 @@ function SiteListView({
                             </div>
                           ))
                         )}
-                        {/* In-range day cells */}
-                        {layout.inRangeDays.map((day) => {
-                          const dateStr = dateStrFor(day);
-                          const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-
-                          // Check if this day is blocked (has P/A/C/O at another site)
-                          const blockedSite = emp.blockedDates?.get(dateStr);
-                          if (blockedSite) {
-                            // Render a merged cell showing the other site name
-                            return (
-                              <div
-                                key={day}
-                                className="w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30 bg-slate-700/40 select-none"
-                                title={`Attendance at: ${blockedSite}`}
-                              >
-                                <span className="text-[8px] font-semibold text-slate-300 uppercase truncate px-0.5 text-center rotate-90 origin-center whitespace-nowrap">
-                                  {blockedSite}
-                                </span>
-                              </div>
-                            );
-                          }
-
-                          // If the record exists but belongs to another site,
-                          // don't show its status here (treat as not_marked).
-                          // For legacy records (siteId = null), the blockedDates
-                          // check above already handles the merge. If the date
-                          // isn't blocked, it means the record either belongs to
-                          // this site or the site couldn't be determined — in
-                          // either case, show the status.
-                          let status: StatusOption = 'not_marked';
-                          if (record) {
-                            if (!record.siteId) {
-                              // Legacy record (no siteId) — show it (blockedDates
-                              // already handled the merge if it belongs to another site)
-                              status = record.status;
-                            } else if (record.siteId === site.id) {
-                              // Record belongs to this site — show it
-                              status = record.status;
+                        {/* In-range day cells — grouped into segments so
+                            consecutive blocked days merge into one wide cell */}
+                        {(() => {
+                          // Build segments: each segment is either {type:'blocked',
+                          // label, days:[]} or {type:'editable', days:[]}
+                          type Segment =
+                            | { type: 'blocked'; label: string; days: number[] }
+                            | { type: 'editable'; days: number[] };
+                          const segments: Segment[] = [];
+                          for (const day of layout.inRangeDays) {
+                            const dateStr = dateStrFor(day);
+                            const blockedSite = emp.blockedDates?.get(dateStr);
+                            const lastSeg = segments[segments.length - 1];
+                            if (blockedSite) {
+                              if (lastSeg && lastSeg.type === 'blocked' && lastSeg.label === blockedSite) {
+                                lastSeg.days.push(day);
+                              } else {
+                                segments.push({ type: 'blocked', label: blockedSite, days: [day] });
+                              }
+                            } else {
+                              if (lastSeg && lastSeg.type === 'editable') {
+                                lastSeg.days.push(day);
+                              } else {
+                                segments.push({ type: 'editable', days: [day] });
+                              }
                             }
-                            // else: record belongs to another site — don't show
                           }
-                          const isFri = isFriday(year, month, day);
-                          const key = `${emp.id}::${dateStr}`;
-                          const isActive = activeCell === key;
 
-                          return (
-                            <div
-                              key={day}
-                              className={cn(
-                                'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30',
-                                isFri && 'bg-red-500/5',
-                              )}
-                            >
-                              <ExcelCell
-                                employeeId={emp.id}
-                                date={dateStr}
-                                status={status}
-                                overtimeHours={record?.overtimeHours || null}
-                                inRange={true}
-                                movedAway={!!emp.movedAway}
-                                isFriday={isFri}
-                                onMark={(s) => handleMark(emp.id, dateStr, s)}
-                                onClear={() => handleClear(emp.id, dateStr)}
-                                isActive={isActive}
-                                registerRef={registerCell(key)}
-                                onSelect={() => setActiveCell(key)}
-                              />
-                            </div>
-                          );
-                        })}
+                          return segments.map((seg, segIdx) => {
+                            if (seg.type === 'blocked') {
+                              // Render a merged cell spanning all blocked days
+                              return (
+                                <MergedSiteCell
+                                  key={`seg-${segIdx}`}
+                                  label={seg.label}
+                                  dayCount={seg.days.length}
+                                />
+                              );
+                            }
+                            // Render individual editable cells
+                            return seg.days.map((day) => {
+                              const dateStr = dateStrFor(day);
+                              const record = attendanceMap.get(`${emp.id}-${dateStr}`);
+
+                              let status: StatusOption = 'not_marked';
+                              if (record) {
+                                if (!record.siteId) {
+                                  status = record.status;
+                                } else if (record.siteId === site.id) {
+                                  status = record.status;
+                                }
+                              }
+                              const isFri = isFriday(year, month, day);
+                              const key = `${emp.id}::${dateStr}`;
+                              const isActive = activeCell === key;
+
+                              return (
+                                <div
+                                  key={day}
+                                  className={cn(
+                                    'w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30',
+                                    isFri && 'bg-red-500/5',
+                                  )}
+                                >
+                                  <ExcelCell
+                                    employeeId={emp.id}
+                                    date={dateStr}
+                                    status={status}
+                                    overtimeHours={record?.overtimeHours || null}
+                                    inRange={true}
+                                    movedAway={!!emp.movedAway}
+                                    isFriday={isFri}
+                                    onMark={(s) => handleMark(emp.id, dateStr, s)}
+                                    onClear={() => handleClear(emp.id, dateStr)}
+                                    isActive={isActive}
+                                    registerRef={registerCell(key)}
+                                    onSelect={() => setActiveCell(key)}
+                                  />
+                                </div>
+                              );
+                            });
+                          });
+                        })()}
                         {/* Out-of-range days at the end (next site) —
                             MERGED into a single wide cell showing the next
                             site name. Non-editable. Only shown when the
