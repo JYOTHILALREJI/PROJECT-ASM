@@ -803,13 +803,13 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 key={pageIdx}
                 id={pageIdx === 0 ? 'attendance-sheet-printable' : undefined}
                 ref={(el) => { pageRefs.current[pageIdx] = el; }}
-                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm] flex flex-col"
-                style={{ maxWidth: `${A4_WIDTH_MM}mm`, height: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box', overflow: 'hidden' }}
+                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm]"
+                style={{ maxWidth: `${A4_WIDTH_MM}mm`, minHeight: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box' }}
               >
                 {/* Header Section */}
                 {isFirstPage ? (
                   <>
-                    <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between shrink-0" style={{ minHeight: '52px' }}>
+                    <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between" style={{ minHeight: '52px' }}>
                       {/* Left spacer for centering */}
                       <div className="flex-1" />
                       {/* Center content */}
@@ -833,7 +833,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                     </div>
 
                     {/* Info Section — bigger font for print readability */}
-                    <div className="mt-3 text-[14px] uppercase shrink-0">
+                    <div className="mt-3 text-[14px] uppercase">
                       <div className="flex items-baseline mb-1.5">
                         <span className="font-bold text-gray-900 w-40 shrink-0 text-[14px]" style={{ fontFamily: "'Times New Roman', Times, serif" }}>&#8226; CLIENT NAME :</span>
                         <span className="flex-1 border-b border-gray-500" style={{ fontFamily: "'Times New Roman', Times, serif", fontWeight: 'bold' }}>
@@ -863,15 +863,15 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                 ) : (
                   <>
                     {/* Subsequent pages: just the date at top, then table continues */}
-                    <div className="flex justify-end text-[14px] uppercase text-gray-600 pb-1 shrink-0">
+                    <div className="flex justify-end text-[14px] uppercase text-gray-600 pb-1">
                       <span><strong>DATE:</strong> {upper(dateInput)}</span>
                     </div>
                   </>
                 )}
 
-                {/* Main Employee Table — fills the remaining vertical space */}
-                <div className={cn('flex-1 min-h-0 overflow-hidden', isFirstPage ? 'mt-3' : 'mt-1')}>
-                  <table className="w-full border-collapse text-[13px] uppercase" style={{ height: '100%', tableLayout: 'auto' }}>
+                {/* Main Employee Table */}
+                <div className={isFirstPage ? 'mt-3' : 'mt-1'}>
+                  <table className="w-full border-collapse text-[13px] uppercase" style={{ tableLayout: 'auto' }}>
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
                         <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '8%' }}>SL. NO</th>
@@ -917,7 +917,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
 
                 {/* Extra Employees Table (only on last page) */}
                 {isLastPage && (
-                  <div className="mt-3 pb-4 shrink-0">
+                  <div className="mt-3 pb-4">
                     <div className="text-[13px] font-bold uppercase tracking-[0.05em] text-black mb-1">
                       EXTRA EMPLOYEES(IF ANY)
                     </div>
@@ -949,7 +949,7 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                   </div>
                 )}
 
-                <div className="text-right text-[10px] text-gray-400 mt-2 pb-4 uppercase shrink-0">
+                <div className="text-right text-[10px] text-gray-400 mt-2 pb-4 uppercase">
                   PAGE {pageIdx + 1} OF {pages.length}
                 </div>
               </div>
