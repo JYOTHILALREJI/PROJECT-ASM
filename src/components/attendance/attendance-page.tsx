@@ -81,6 +81,13 @@ interface Employee {
   // in the merged non-editable cells after activeUntil.
   nextSite?: string | null;
   nextSiteDays?: number;
+  // ── Blocked dates (days with P/A/C/O attendance at ANOTHER site) ──
+  // These specific days within the active range are NOT editable — they're
+  // merged cells showing the other site's name. This handles the case where
+  // an employee has attendance at Site 1 on day 27 and moves to Site 2 on
+  // the same day: day 27 in Site 2 is blocked (merged showing "Site 1"),
+  // but days 1-26 and 28-31 are still editable.
+  blockedDates?: Map<string, string>; // dateStr -> other site name
 }
 
 interface SiteOption {
@@ -975,6 +982,23 @@ function SiteListView({
                           const key = `${emp.id}::${dateStr}`;
                           const isActive = activeCell === key;
 
+                          // Check if this day is blocked (has P/A/C/O at another site)
+                          const blockedSite = emp.blockedDates?.get(dateStr);
+                          if (blockedSite) {
+                            // Render a merged cell showing the other site name
+                            return (
+                              <div
+                                key={day}
+                                className="w-8 shrink-0 flex items-center justify-center border-r border-slate-700/30 bg-slate-700/40 select-none"
+                                title={`Attendance at: ${blockedSite}`}
+                              >
+                                <span className="text-[8px] font-semibold text-slate-300 uppercase truncate px-0.5 text-center rotate-90 origin-center whitespace-nowrap">
+                                  {blockedSite}
+                                </span>
+                              </div>
+                            );
+                          }
+
                           return (
                             <div
                               key={day}
@@ -1447,33 +1471,22 @@ export function AttendancePage() {
         // createdDate is when the EmpCountSitePerMonth record was created,
         // which could be a previous month if the employee was assigned
         // before this month. Clamp to month start.
-        let activeFrom = clampToMonth(assignment.createdDate.split('T')[0]);
+        const activeFrom = clampToMonth(assignment.createdDate.split('T')[0]);
 
         // removedDate is when the employee left the site. Clamp to month end.
         // If null, the employee is still at the site (activeUntil = null).
         // If this is the employee's current site, ignore removedDate (stale).
-        let activeUntil = !isCurrentSite && assignment.removedDate
+        const activeUntil = !isCurrentSite && assignment.removedDate
           ? clampToMonth(assignment.removedDate.split('T')[0])
           : null;
 
-        // Variables to track which other site has attendance that overlaps
-        // with this site's active range (used for previousSite/nextSite labels)
-        let otherSiteNameForStart = '';
-        let otherSiteNameForEnd = '';
-
-        // ── Adjust activeFrom/activeUntil based on ACTUAL attendance ──
-        // The EmpCountSitePerMonth date ranges might not perfectly align
-        // with when attendance was actually marked. If the employee has
-        // P/A/C/O attendance at ANOTHER site on dates that overlap with
-        // this site's active range, adjust the range so those dates are
-        // merged (not editable in both sites):
-        //   - If attendance at another site is ON/AFTER activeFrom: extend
-        //     activeFrom to the day after the last such attendance.
-        //   - If attendance at another site is ON/BEFORE activeUntil (or
-        //     the employee is currentSite with no activeUntil): shrink
-        //     activeUntil to the day before the first such attendance.
-        // This ensures attendance is never editable in two sites for the
-        // same date, and the merged cells show the correct site name.
+        // ── Compute blockedDates: specific days with P/A/C/O attendance ──
+        // at ANOTHER site that fall within THIS site's active range.
+        // These days are NOT editable (merged cells showing the other site).
+        // Unlike activeFrom/activeUntil (which are contiguous ranges),
+        // blockedDates can be non-contiguous — e.g. only day 27 is blocked
+        // if that's the only day with attendance at another site.
+        const blockedDates = new Map<string, string>(); // dateStr -> other site name
         {
           // Build date ranges for ALL OTHER site assignments for this employee
           const otherSiteRanges: Array<{ siteName: string; start: string; end: string }> = [];
@@ -1487,54 +1500,23 @@ export function AttendancePage() {
             otherSiteRanges.push({ siteName: other.siteName, start: otherStart, end: otherEnd });
           }
 
-          // Find attendance records (P/A/C/O) that belong to OTHER sites
-          let latestOtherAttDate = '';
-          let earliestOtherAttDate = '';
+          // For each attendance record (P/A/C/O) that belongs to ANOTHER site
+          // AND falls within this site's active range, mark it as blocked.
           for (const att of attendanceRecords) {
             if (att.employeeId !== emp.id) continue;
             if (!att.date.startsWith(monthPrefix)) continue;
             if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
 
+            // Check if this attendance date falls within this site's active range
+            if (att.date < activeFrom) continue;
+            if (activeUntil && att.date > activeUntil) continue;
+
             // Check if this attendance date falls within any OTHER site's range
             for (const range of otherSiteRanges) {
               if (att.date >= range.start && att.date <= range.end) {
-                // This attendance belongs to another site
-                // Check if it overlaps with this site's active range
-                if (att.date >= activeFrom && (!latestOtherAttDate || att.date > latestOtherAttDate)) {
-                  latestOtherAttDate = att.date;
-                  otherSiteNameForStart = range.siteName;
-                }
-                if ((!activeUntil || att.date <= activeUntil) && (!earliestOtherAttDate || att.date < earliestOtherAttDate)) {
-                  earliestOtherAttDate = att.date;
-                  otherSiteNameForEnd = range.siteName;
-                }
+                blockedDates.set(att.date, range.siteName);
                 break;
               }
-            }
-          }
-
-          // Extend activeFrom if there's attendance at another site on/after activeFrom
-          if (latestOtherAttDate && latestOtherAttDate >= activeFrom) {
-            const [yy, mm, dd] = latestOtherAttDate.split('-').map(Number);
-            const nextDay = new Date(yy, mm - 1, dd + 1);
-            const nextDayStr = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, '0')}-${String(nextDay.getDate()).padStart(2, '0')}`;
-            activeFrom = nextDayStr > monthEndStr ? monthEndStr : nextDayStr;
-          }
-
-          // Shrink/set activeUntil if there's attendance at another site
-          // This handles both:
-          //   1. Employee moved away (activeUntil was set) — shrink it
-          //   2. Employee moved back (activeUntil was null because isCurrentSite)
-          //      — set it so those dates are merged showing the other site
-          if (earliestOtherAttDate) {
-            const [yy, mm, dd] = earliestOtherAttDate.split('-').map(Number);
-            const prevDay = new Date(yy, mm - 1, dd - 1);
-            const prevDayStr = `${prevDay.getFullYear()}-${String(prevDay.getMonth() + 1).padStart(2, '0')}-${String(prevDay.getDate()).padStart(2, '0')}`;
-            const newActiveUntil = prevDayStr < monthStartStr ? monthStartStr : prevDayStr;
-            // Only set if it creates a valid range (activeUntil >= activeFrom - 1)
-            // or if the employee has attendance at this site before the other site
-            if (newActiveUntil >= activeFrom || newActiveUntil >= monthStartStr) {
-              activeUntil = newActiveUntil;
             }
           }
         }
@@ -1567,35 +1549,19 @@ export function AttendancePage() {
         if (activeFrom > monthStartStr) {
           // Employee started here after month start — they were somewhere else
           // before. Find the previous-site assignment.
-          // First, check if we already identified the site from attendance
-          // records (otherSiteNameForStart). If so, use that.
-          if (otherSiteNameForStart) {
-            previousSite = otherSiteNameForStart;
-            // Find the assignment to get the days
-            for (const other of siteAssignments) {
-              if (other.empId !== assignment.empId) continue;
-              if (other.siteName === otherSiteNameForStart) {
-                const otherCreatedStr = clampToMonth(other.createdDate.split('T')[0]);
-                const otherRemovedStr = other.removedDate
-                  ? clampToMonth(other.removedDate.split('T')[0])
-                  : monthEndStr;
-                previousSiteDays = daysBetween(otherCreatedStr, otherRemovedStr);
-                break;
-              }
-            }
-          } else {
-            // Fallback: find by date range matching
-            for (const other of siteAssignments) {
-              if (other.empId !== assignment.empId) continue;
-              if (other.siteName === siteName) continue; // same site — skip
-              if (!other.removedDate) continue; // still there — not a "previous" site
-              const otherRemovedStr = clampToMonth(other.removedDate.split('T')[0]);
-              if (otherRemovedStr <= activeFrom) {
-                const otherCreatedStr = clampToMonth(other.createdDate.split('T')[0]);
-                previousSite = other.siteName;
-                previousSiteDays = daysBetween(otherCreatedStr, otherRemovedStr);
-                break; // take the first match (closest by createdDate)
-              }
+          for (const other of siteAssignments) {
+            if (other.empId !== assignment.empId) continue;
+            if (other.siteName === siteName) continue; // same site — skip
+            if (!other.removedDate) continue; // still there — not a "previous" site
+            const otherRemovedStr = clampToMonth(other.removedDate.split('T')[0]);
+            // The other site's removedDate should be on or after this site's
+            // activeFrom (they left the old site when/before starting here).
+            // Use a small window (±1 day) to handle same-day moves.
+            if (otherRemovedStr <= activeFrom) {
+              const otherCreatedStr = clampToMonth(other.createdDate.split('T')[0]);
+              previousSite = other.siteName;
+              previousSiteDays = daysBetween(otherCreatedStr, otherRemovedStr);
+              break; // take the first match (closest by createdDate)
             }
           }
         }
@@ -1616,13 +1582,10 @@ export function AttendancePage() {
             if (other.empId !== assignment.empId) continue;
             if (other.siteName === siteName) continue; // same site — skip
             const otherCreatedStr = clampToMonth(other.createdDate.split('T')[0]);
-            const otherRemovedStr = other.removedDate
-              ? clampToMonth(other.removedDate.split('T')[0])
-              : monthEndStr;
-            // Match if the other site's range starts on/after activeUntil,
-            // OR if the other site has attendance that caused activeUntil
-            // to be set (otherSiteNameForEnd).
-            if (otherCreatedStr >= activeUntil || other.siteName === otherSiteNameForEnd) {
+            if (otherCreatedStr >= activeUntil) {
+              const otherRemovedStr = other.removedDate
+                ? clampToMonth(other.removedDate.split('T')[0])
+                : monthEndStr;
               nextSite = other.siteName;
               nextSiteDays = daysBetween(otherCreatedStr, otherRemovedStr);
               break; // take the first match
@@ -1663,6 +1626,7 @@ export function AttendancePage() {
           previousSiteDays,
           nextSite,
           nextSiteDays,
+          blockedDates,
         });
       }
     }
