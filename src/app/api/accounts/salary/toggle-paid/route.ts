@@ -82,6 +82,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── If marking as PAID, check for pending advances that were deducted ──
+    // When salary is marked as paid, any pending advances for this month/year
+    // that have already been deducted (the advance amount is in the salary
+    // record's `advance` field) should be marked as 'applied' so they're
+    // removed from the pending list in the Advance Management screen.
+    let appliedAdvanceCount = 0;
+    let appliedAdvanceAmount = 0;
+    if (isPaid) {
+      // Fetch the salary records to check if any advance was deducted
+      const salaryRecords = await db.salaryRecord.findMany({
+        where: {
+          empId,
+          month,
+          year: yearNum,
+          isDeleted: false,
+        },
+        select: {
+          id: true,
+          advance: true,
+        },
+      });
+
+      // Check if there's any advance deducted in the salary records
+      const totalAdvanceDeducted = salaryRecords.reduce((sum, r) => sum + r.advance, 0);
+
+      if (totalAdvanceDeducted > 0) {
+        // Find all pending advances for this employee+month+year
+        const pendingAdvances = await db.advance.findMany({
+          where: {
+            empId,
+            effectiveMonth: month,
+            effectiveYear: yearNum,
+            status: 'pending',
+            deletedAt: null,
+          },
+        });
+
+        // Mark them as 'applied' and link to the first salary record
+        // (the advance has been deducted from the salary that was just paid)
+        const firstSalaryRecordId = salaryRecords[0]?.id || null;
+
+        for (const adv of pendingAdvances) {
+          await db.advance.update({
+            where: { id: adv.id },
+            data: {
+              status: 'applied',
+              appliedToSalaryRecordId: firstSalaryRecordId,
+            },
+          });
+          appliedAdvanceCount++;
+          appliedAdvanceAmount += adv.amount;
+        }
+      }
+    }
+
     // Fetch the updated records to return to the caller for verification
     const updatedRecords = await db.salaryRecord.findMany({
       where: {
@@ -111,8 +166,12 @@ export async function POST(request: NextRequest) {
         isPaid,
         records: updatedRecords.map((r) => ({
           ...r,
-          // Spread to ensure plain object (no Date serialization issues)
         })),
+        // Info about advances that were marked as applied
+        appliedAdvances: {
+          count: appliedAdvanceCount,
+          totalAmount: appliedAdvanceAmount,
+        },
       },
     });
   } catch (error: unknown) {
