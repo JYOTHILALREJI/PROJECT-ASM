@@ -1512,9 +1512,28 @@ export function AttendancePage() {
         // removedDate is when the employee left the site. Clamp to month end.
         // If null, the employee is still at the site (activeUntil = null).
         // If this is the employee's current site, ignore removedDate (stale).
-        const activeUntil = !isCurrentSite && assignment.removedDate
+        let activeUntil = !isCurrentSite && assignment.removedDate
           ? clampToMonth(assignment.removedDate.split('T')[0])
           : null;
+
+        // ── Extend activeUntil to include all attendance dates at this site ──
+        // The removedDate might be BEFORE the last attendance mark (e.g. the
+        // admin marked attendance on days 27-28 but the removedDate is day 26).
+        // We need to extend activeUntil to cover all P/A/C/O marks so they're
+        // all visible (faded) in the active range — not hidden in the merged
+        // out-of-range region.
+        if (activeUntil) {
+          for (const att of attendanceRecords) {
+            if (att.employeeId !== emp.id) continue;
+            if (!att.date.startsWith(monthPrefix)) continue;
+            if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
+            // Only consider records that belong to this site (or legacy null)
+            if (att.siteId && att.siteId !== assignment.siteId) continue;
+            if (att.date > activeUntil) {
+              activeUntil = att.date;
+            }
+          }
+        }
 
         // ── Compute blockedDates: days with P/A/C/O attendance at ANOTHER site ──
         // Each attendance record now has a siteId. If the record's siteId doesn't
@@ -1553,13 +1572,28 @@ export function AttendancePage() {
                 const otherSiteName = siteNameMap.get(att.siteId) || 'Other Site';
                 blockedDates.set(att.date, otherSiteName);
               }
+            } else {
+              // Legacy record (siteId = null) — infer from date ranges.
+              // Only block if the attendance falls within ANOTHER site's range
+              // AND that other site has a removedDate set (meaning the employee
+              // left that site). This prevents blocking at the original site
+              // (where the attendance was marked) while correctly blocking at
+              // the new site (where the employee moved to).
+              for (const range of otherSiteRanges) {
+                if (att.date >= range.start && att.date <= range.end) {
+                  // Check if this other site has a removedDate (employee left it)
+                  const otherAssignment = siteAssignments.find(
+                    (sa) => sa.empId === assignment.empId && sa.siteId === range.siteId
+                  );
+                  if (otherAssignment && otherAssignment.removedDate) {
+                    // The employee left this other site — the attendance likely
+                    // belongs to that site, not this one. Block it here.
+                    blockedDates.set(att.date, range.siteName);
+                  }
+                  break;
+                }
+              }
             }
-            // For legacy records (siteId = null): do NOT block based on date
-            // ranges. The attendance was marked at whichever site the employee
-            // was at when it was marked. Without siteId, we can't reliably
-            // determine which site it belongs to, so we show it at all sites
-            // where the employee was active on that date. This is better than
-            // incorrectly blocking attendance at the original site.
           }
         }
 
