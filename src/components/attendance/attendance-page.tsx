@@ -273,7 +273,22 @@ const ExcelCell = React.memo(function ExcelCell({
       data-cell="1"
       tabIndex={interactive ? 0 : -1}
       onFocus={interactive ? onSelect : undefined}
-      onClick={interactive ? onSelect : undefined}
+      onClick={interactive ? () => {
+        onSelect();
+        // Click cycles: not_marked → present → absent → camp_sitting → not_marked
+        if (status === 'not_marked' || status === 'no_site') {
+          onMark('present');
+        } else if (status === 'present') {
+          onMark('absent');
+        } else if (status === 'absent') {
+          onMark('camp_sitting');
+        } else if (status === 'camp_sitting') {
+          onClear();
+        } else {
+          // overtime → clear to not_marked
+          onClear();
+        }
+      } : undefined}
       onKeyDown={(e) => {
         if (!interactive) return;
         const k = e.key;
