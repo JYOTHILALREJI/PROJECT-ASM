@@ -1553,15 +1553,13 @@ export function AttendancePage() {
                 const otherSiteName = siteNameMap.get(att.siteId) || 'Other Site';
                 blockedDates.set(att.date, otherSiteName);
               }
-            } else {
-              // Legacy record (siteId = null) — infer from date ranges
-              for (const range of otherSiteRanges) {
-                if (att.date >= range.start && att.date <= range.end) {
-                  blockedDates.set(att.date, range.siteName);
-                  break;
-                }
-              }
             }
+            // For legacy records (siteId = null): do NOT block based on date
+            // ranges. The attendance was marked at whichever site the employee
+            // was at when it was marked. Without siteId, we can't reliably
+            // determine which site it belongs to, so we show it at all sites
+            // where the employee was active on that date. This is better than
+            // incorrectly blocking attendance at the original site.
           }
         }
 
@@ -1646,6 +1644,10 @@ export function AttendancePage() {
         // records are 'not_marked' / 'no_site'), they should disappear
         // from the old site entirely.
         if (movedAway) {
+          // Only keep the employee at this site if they have P/A/C/O marks
+          // that belong to THIS site (siteId matches or is null for legacy).
+          // This prevents an employee from showing at a site where they have
+          // no attendance (their marks are at a different site).
           const hasMarkedAttendance = attendanceRecords.some(
             (r) =>
               r.employeeId === emp.id &&
@@ -1653,7 +1655,9 @@ export function AttendancePage() {
               (r.status === 'present' ||
                 r.status === 'absent' ||
                 r.status === 'camp_sitting' ||
-                r.status === 'overtime'),
+                r.status === 'overtime') &&
+              // Site check: record belongs to this site, or is legacy (null)
+              (!r.siteId || r.siteId === assignment.siteId),
           );
           if (!hasMarkedAttendance) {
             // No P/A/C/O at this site — skip entirely
