@@ -218,26 +218,25 @@ const ExcelCell = React.memo(function ExcelCell({
     cellClass = 'bg-slate-800/30 text-slate-700 cursor-not-allowed';
     cellContent = '·';
   } else if (movedAway) {
-    // Moved-away employees: faded but STILL EDITABLE (admin can fix
-    // past attendance at any site). The row has opacity-40 from the
-    // parent, so the colors are naturally dimmed.
+    // Moved-away employees: faded and read-only. The row also has
+    // opacity-40 from the parent for the overall faded effect.
     if (status === 'present') {
-      cellClass = 'bg-green-700/80 text-green-50 hover:bg-green-600/80';
+      cellClass = 'bg-green-700/40 text-green-100/70 cursor-not-allowed';
       cellContent = '10';
     } else if (status === 'absent') {
-      cellClass = 'bg-red-700/80 text-red-50 hover:bg-red-600/80';
+      cellClass = 'bg-red-700/40 text-red-100/70 cursor-not-allowed';
       cellContent = 'A';
     } else if (status === 'camp_sitting') {
-      cellClass = 'bg-orange-700/80 text-orange-50 hover:bg-orange-600/80';
+      cellClass = 'bg-orange-700/40 text-orange-100/70 cursor-not-allowed';
       cellContent = 'C';
     } else if (status === 'overtime') {
-      cellClass = 'bg-blue-700/80 text-blue-50 hover:bg-blue-600/80';
+      cellClass = 'bg-blue-700/40 text-blue-100/70 cursor-not-allowed';
       cellContent = 'O';
     } else if (status === 'no_site') {
-      cellClass = 'bg-amber-700/80 text-amber-50 hover:bg-amber-600/80';
+      cellClass = 'bg-amber-700/40 text-amber-100/70 cursor-not-allowed';
       cellContent = 'NS';
     } else {
-      cellClass = 'bg-slate-800/40 text-slate-600 hover:bg-slate-700/60';
+      cellClass = 'bg-slate-800/30 text-slate-700/50 cursor-not-allowed';
       cellContent = '';
     }
   } else if (status === 'present') {
@@ -264,8 +263,8 @@ const ExcelCell = React.memo(function ExcelCell({
   }
 
   const activeRing = isActive ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-900 z-10' : '';
-  // Moved-away employees are now editable too (admin can fix past attendance)
-  const interactive = inRange;
+  // Moved-away employees are read-only (faded, inaccessible)
+  const interactive = inRange && !movedAway;
 
   return (
     <button
@@ -419,7 +418,7 @@ function SiteListView({
     return true;
   }, []);
 
-  // Total working hours = P×10 + C×8 + overtime(10+ot) — ONLY for THIS site
+  // Total working hours = P×10 + C×8 + overtime(10+ot) — only for THIS site
   const computeTotalHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
@@ -430,8 +429,6 @@ function SiteListView({
         if (emp.blockedDates?.has(dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
-        // Only count if the record belongs to this site (or is legacy null)
-        if (rec.siteId && rec.siteId !== site.id) continue;
         if (rec.status === 'present') total += HOURS_PER_PRESENT;
         else if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
         else if (rec.status === 'overtime') {
@@ -440,7 +437,7 @@ function SiteListView({
       }
       return total;
     },
-    [displayDays, dateStrFor, isInRange, attendanceMap, site.id]
+    [displayDays, dateStrFor, isInRange, attendanceMap]
   );
 
   // Total camp sitting hours = C×8 (only camp_sitting days at THIS site)
@@ -453,12 +450,11 @@ function SiteListView({
         if (emp.blockedDates?.has(dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
-        if (rec.siteId && rec.siteId !== site.id) continue;
         if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
       }
       return total;
     },
-    [displayDays, dateStrFor, isInRange, attendanceMap, site.id]
+    [displayDays, dateStrFor, isInRange, attendanceMap]
   );
 
   // ── Mark handler: save + push undo + auto-advance DOWN ──
@@ -1016,19 +1012,16 @@ function SiteListView({
                                 />
                               );
                             }
-                            // Render individual editable cells
+                            // Render individual cells
                             return seg.days.map((day) => {
                               const dateStr = dateStrFor(day);
                               const record = attendanceMap.get(`${emp.id}-${dateStr}`);
-
-                              let status: StatusOption = 'not_marked';
-                              if (record) {
-                                if (!record.siteId) {
-                                  status = record.status;
-                                } else if (record.siteId === site.id) {
-                                  status = record.status;
-                                }
-                              }
+                              // Always show the attendance status — the record
+                              // belongs to whichever site the employee was at
+                              // when it was marked. The blockedDates check above
+                              // already handles merging days that belong to
+                              // another site.
+                              const status: StatusOption = record?.status || 'not_marked';
                               const isFri = isFriday(year, month, day);
                               const key = `${emp.id}::${dateStr}`;
                               const isActive = activeCell === key;
@@ -1679,9 +1672,8 @@ export function AttendancePage() {
         // from the old site entirely.
         if (movedAway) {
           // Only keep the employee at this site if they have P/A/C/O marks
-          // that belong to THIS site (siteId matches or is null for legacy).
-          // This prevents an employee from showing at a site where they have
-          // no attendance (their marks are at a different site).
+          // for this month. We don't filter by siteId here because the
+          // blockedDates check handles which days are blocked/merged.
           const hasMarkedAttendance = attendanceRecords.some(
             (r) =>
               r.employeeId === emp.id &&
@@ -1689,9 +1681,7 @@ export function AttendancePage() {
               (r.status === 'present' ||
                 r.status === 'absent' ||
                 r.status === 'camp_sitting' ||
-                r.status === 'overtime') &&
-              // Site check: record belongs to this site, or is legacy (null)
-              (!r.siteId || r.siteId === assignment.siteId),
+                r.status === 'overtime'),
           );
           if (!hasMarkedAttendance) {
             // No P/A/C/O at this site — skip entirely
