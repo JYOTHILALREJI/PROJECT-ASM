@@ -1505,31 +1505,15 @@ export function AttendancePage() {
           ? monthStartStr
           : clampToMonth(assignment.createdDate.split('T')[0]);
 
-        // removedDate is when the employee left the site. Clamp to month end.
-        // If null, the employee is still at the site (activeUntil = null).
+        // removedDate is when the employee left the site.
         // If this is the employee's current site, ignore removedDate (stale).
-        let activeUntil = !isCurrentSite && assignment.removedDate
+        // For moved-away employees, set activeUntil = null (full month range)
+        // so ALL attendance marks are visible — nothing is hidden in merged
+        // out-of-range cells.
+        const movedAway = !isCurrentSite && !!assignment.removedDate;
+        const activeUntil = movedAway ? null : (!isCurrentSite && assignment.removedDate
           ? clampToMonth(assignment.removedDate.split('T')[0])
-          : null;
-
-        // ── Extend activeUntil to include all attendance dates at this site ──
-        // The removedDate might be BEFORE the last attendance mark (e.g. the
-        // admin marked attendance on days 27-28 but the removedDate is day 26).
-        // We need to extend activeUntil to cover all P/A/C/O marks so they're
-        // all visible (faded) in the active range — not hidden in the merged
-        // out-of-range region.
-        if (activeUntil) {
-          for (const att of attendanceRecords) {
-            if (att.employeeId !== emp.id) continue;
-            if (!att.date.startsWith(monthPrefix)) continue;
-            if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
-            // Only consider records that belong to this site (or legacy null)
-            if (att.siteId && att.siteId !== assignment.siteId) continue;
-            if (att.date > activeUntil) {
-              activeUntil = att.date;
-            }
-          }
-        }
+          : null);
 
         // ── Compute blockedDates: days with P/A/C/O attendance at ANOTHER site ──
         // Each attendance record now has a siteId. If the record's siteId doesn't
@@ -1591,7 +1575,6 @@ export function AttendancePage() {
         // employees to remain visible at their old site if they actually
         // have attendance data there. If they were moved without ever
         // marking attendance, they should disappear from the old site.
-        const movedAway = !isCurrentSite && !!assignment.removedDate;
 
         // ── Compute previousSite info ──
         // If the employee moved TO this site mid-month (activeFrom > monthStart),
