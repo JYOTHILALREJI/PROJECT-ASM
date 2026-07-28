@@ -1569,26 +1569,34 @@ export function AttendancePage() {
                 blockedDates.set(att.date, otherSiteName);
               }
             } else {
-              // Legacy record (siteId = null) — infer from date ranges.
-              // Only block if the attendance falls within ANOTHER site's range
-              // AND that other site has a removedDate set (meaning the employee
-              // left that site). This prevents blocking at the original site
-              // (where the attendance was marked) while correctly blocking at
-              // the new site (where the employee moved to).
-              for (const range of otherSiteRanges) {
-                if (att.date >= range.start && att.date <= range.end) {
-                  // Check if this other site has a removedDate (employee left it)
-                  const otherAssignment = siteAssignments.find(
-                    (sa) => sa.empId === assignment.empId && sa.siteId === range.siteId
-                  );
-                  if (otherAssignment && otherAssignment.removedDate) {
-                    // The employee left this other site — the attendance likely
-                    // belongs to that site, not this one. Block it here.
-                    blockedDates.set(att.date, range.siteName);
+              // Legacy record (siteId = null).
+              // ONLY block at the NEW site (where movedAway = false and the
+              // employee moved TO this site). At the OLD site (movedAway = true),
+              // NEVER block legacy records — the attendance was marked there
+              // and should always be visible.
+              //
+              // We determine "new site" by checking: this is the current site
+              // AND the employee has another site assignment with a removedDate
+              // (meaning they moved FROM that other site TO this one).
+              if (isCurrentSite) {
+                for (const range of otherSiteRanges) {
+                  if (att.date >= range.start && att.date <= range.end) {
+                    // Check if this other site has a removedDate (employee left it)
+                    const otherAssignment = siteAssignments.find(
+                      (sa) => sa.empId === assignment.empId && sa.siteId === range.siteId
+                    );
+                    if (otherAssignment && otherAssignment.removedDate) {
+                      // The employee left this other site — the attendance likely
+                      // belongs to that site, not this one. Block it here.
+                      blockedDates.set(att.date, range.siteName);
+                    }
+                    break;
                   }
-                  break;
                 }
               }
+              // At the OLD site (movedAway = true): legacy records are NEVER
+              // blocked. The attendance was marked at this site and should
+              // always be visible and counted.
             }
           }
         }
