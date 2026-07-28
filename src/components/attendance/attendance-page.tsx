@@ -1563,41 +1563,21 @@ export function AttendancePage() {
             if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
 
             if (att.siteId) {
-              // Record has siteId — directly compare
+              // Record has an explicit siteId — block at other sites
               if (att.siteId !== assignment.siteId) {
                 const otherSiteName = siteNameMap.get(att.siteId) || 'Other Site';
                 blockedDates.set(att.date, otherSiteName);
               }
-            } else {
-              // Legacy record (siteId = null).
-              // ONLY block at the NEW site (where movedAway = false and the
-              // employee moved TO this site). At the OLD site (movedAway = true),
-              // NEVER block legacy records — the attendance was marked there
-              // and should always be visible.
-              //
-              // We determine "new site" by checking: this is the current site
-              // AND the employee has another site assignment with a removedDate
-              // (meaning they moved FROM that other site TO this one).
-              if (isCurrentSite) {
-                for (const range of otherSiteRanges) {
-                  if (att.date >= range.start && att.date <= range.end) {
-                    // Check if this other site has a removedDate (employee left it)
-                    const otherAssignment = siteAssignments.find(
-                      (sa) => sa.empId === assignment.empId && sa.siteId === range.siteId
-                    );
-                    if (otherAssignment && otherAssignment.removedDate) {
-                      // The employee left this other site — the attendance likely
-                      // belongs to that site, not this one. Block it here.
-                      blockedDates.set(att.date, range.siteName);
-                    }
-                    break;
-                  }
-                }
-              }
-              // At the OLD site (movedAway = true): legacy records are NEVER
-              // blocked. The attendance was marked at this site and should
-              // always be visible and counted.
             }
+            // For legacy records (siteId = null): NEVER block at ANY site.
+            // We can't reliably determine which site the attendance belongs to
+            // without a siteId, so we show it at all sites where the employee
+            // was active. This ensures attendance is never hidden at the site
+            // where it was actually marked.
+            //
+            // Once the DB is migrated and new attendance records have siteId
+            // set, the explicit siteId comparison above handles cross-site
+            // blocking correctly.
           }
         }
 
