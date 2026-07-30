@@ -418,15 +418,15 @@ function SiteListView({
     return true;
   }, []);
 
-  // Total working hours = P×10 + C×8 + overtime(10+ot) — only for THIS site
+  // Total working hours = P×10 + C×8 + overtime(10+ot)
+  // Counts ALL attendance records in the active range — blockedDates only
+  // affects visual rendering (merged cells), NOT the hour calculation.
   const computeTotalHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
       for (const day of displayDays) {
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
-        // Skip blocked dates (attendance at another site)
-        if (emp.blockedDates?.has(dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
         if (rec.status === 'present') total += HOURS_PER_PRESENT;
@@ -440,14 +440,13 @@ function SiteListView({
     [displayDays, dateStrFor, isInRange, attendanceMap]
   );
 
-  // Total camp sitting hours = C×8 (only camp_sitting days at THIS site)
+  // Total camp sitting hours = C×8
   const computeCampSittingHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
       for (const day of displayDays) {
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
-        if (emp.blockedDates?.has(dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
         if (!rec) continue;
         if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
