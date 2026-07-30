@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { getBaseRates } from '@/lib/base-rates';
 
 // ---------------------------------------------------------------------------
 // Cross-Site Monthly Hour Allocation Engine (Shared Module)
@@ -88,10 +89,11 @@ export async function allocateEmployeeHours(
   year: number,
 ): Promise<AllocationResult> {
   // ------------------------------------------------------------------
-  // 0. Build trade rate map + employee trade map
+  // 0. Build trade rate map + employee trade map + base rates
   // ------------------------------------------------------------------
   const tradeRateMap = await buildTradeRateMap();
   const employeeTradeMap = await buildEmployeeTradeMap();
+  const baseRates = await getBaseRates();
 
   // ------------------------------------------------------------------
   // 1. Fetch all non-deleted salary records for the given month+year
@@ -181,8 +183,12 @@ export async function allocateEmployeeHours(
       highRate = bonusAdjustedRate;
     } else {
       // Priority 3: Helper (no trade) → threshold-based defaults
-      lowRate = hasBonus ? 3.0 : 2.5;
-      highRate = hasBonus ? 5.5 : 5.0;
+      lowRate = hasBonus
+        ? (employee.isTeamLeader ? baseRates.tlLow : baseRates.supLow)
+        : baseRates.standardLow;
+      highRate = hasBonus
+        ? (employee.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh)
+        : baseRates.standardHigh;
     }
 
     // ------------------------------------------------------------------
@@ -700,17 +706,21 @@ export function computeAllocationSplit(params: {
   customRate?: number;
   customHourlyRate?: number | null;
 }): SiteAllocation[] {
-  const { previousCumulative, currentMonthSiteHours, threshold, isTeamLeader, isSupervisor, isCustomRate = false, customRate = 2.5, customHourlyRate = null } = params;
+  const { previousCumulative, currentMonthSiteHours, threshold, isTeamLeader, isSupervisor, isCustomRate = false, customRate, customHourlyRate = null } = params;
   const hasBonus = isTeamLeader || isSupervisor;
   // Direct hourly rates (PRD v2.0 — no divisors)
-  const effectiveCustomRate = customHourlyRate != null ? customHourlyRate : customRate;
+  // Use default base rates for this pure function (can't be async).
+  // The caller (allocateEmployeeHours) already uses DB base rates.
+  const baseLow = hasBonus ? (isTeamLeader ? 3.0 : 3.0) : 2.5;
+  const baseHigh = hasBonus ? (isTeamLeader ? 5.5 : 5.5) : 5.0;
+  const effectiveCustomRate = customHourlyRate != null ? customHourlyRate : (customRate ?? baseLow);
   const effectiveIsCustom = isCustomRate || customHourlyRate != null;
   const lowRate = effectiveIsCustom && effectiveCustomRate
     ? effectiveCustomRate
-    : (hasBonus ? 3.0 : 2.5);
+    : baseLow;
   const highRate = effectiveIsCustom && effectiveCustomRate
     ? effectiveCustomRate
-    : (hasBonus ? 5.5 : 5.0);
+    : baseHigh;
 
   let consumedThreshold = Math.min(previousCumulative, threshold);
   const siteAllocations: SiteAllocation[] = [];

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { getBaseRates } from '@/lib/base-rates';
 
 // ---------------------------------------------------------------------------
 // Recalculation Engine — Direct Hourly Rates (PRD v2.0)
@@ -31,7 +32,7 @@ import { buildEmployeeTradeMap } from '@/lib/employee-trade';
  * to hourly rates. The caller should build this from the TradeRate table
  * and pass it in. If not provided, trade rates are skipped.
  */
-export function getEmployeeRates(
+export async function getEmployeeRates(
   employee: {
     customHourlyRate: number | null;
     role: string;
@@ -70,10 +71,13 @@ export function getEmployeeRates(
     }
   }
 
-  // 3. Role-based rates (Helper / no trade)
+  // 3. Role-based rates (Helper / no trade) — use DB base rates
+  const baseRates = await getBaseRates();
+  const isTL = employee.isTeamLeader;
+  const isSup = employee.isSupervisor || employee.role === 'Supervisor';
   return {
-    lowRate: isLeader ? 3.0 : 2.5,
-    highRate: isLeader ? 5.5 : 5.0,
+    lowRate: isTL ? baseRates.tlLow : (isSup ? baseRates.supLow : baseRates.standardLow),
+    highRate: isTL ? baseRates.tlHigh : (isSup ? baseRates.supHigh : baseRates.standardHigh),
     isCustom: false,
   };
 }
@@ -169,7 +173,7 @@ export async function recalcEmployeeFromMonth(
 
   // Override employee.trade with the effective trade for rate lookup
   const employeeWithTrade = { ...employee, trade: effectiveTrade };
-  const { lowRate, highRate, isCustom } = getEmployeeRates(employeeWithTrade, tradeRateMap);
+  const { lowRate, highRate, isCustom } = await getEmployeeRates(employeeWithTrade, tradeRateMap);
   const threshold = employee.hoursThreshold || 1000;
 
   // Fetch all non-deleted work logs for this employee, sorted chronologically

@@ -71,7 +71,7 @@ export async function GET(
     const empTradeInfo = employeeTradeMap.get(id);
     const effectiveTrade = savedTrade || empTradeInfo?.trade || 'Helper';
     const employeeWithTrade = { ...employee, trade: effectiveTrade };
-    const { lowRate, highRate, isCustom } = getEmployeeRates(employeeWithTrade, tradeRateMap);
+    const { lowRate, highRate, isCustom } = await getEmployeeRates(employeeWithTrade, tradeRateMap);
     const threshold = employee.hoursThreshold || 1000;
 
     // 3. Fetch ALL work logs (no year filter) for cumulative calculation

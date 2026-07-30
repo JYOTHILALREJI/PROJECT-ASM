@@ -3,6 +3,7 @@ import { allocateEmployeeHours } from '@/lib/allocation-engine';
 import { recalcEmployeeFromMonth } from '@/lib/recalculation';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { getBaseRates } from '@/lib/base-rates';
 
 // ---------------------------------------------------------------------------
 // Attendance → Salary sync
@@ -261,9 +262,12 @@ export async function syncEmployeeSalaryFromAttendance(
   // Priority (per project owner):
   //   1) Employee.customHourlyRate (from Hours Ledger) → ONLY this rate
   //   2) Trade rate (from EmployeeTrade junction) → +0.5 if TL/Sup
-  //   3) Helper default → 2.5 (standard) or 3.0 (TL/Sup)
+  //   3) Helper default → baseRates.standardLow or baseRates.tlLow/supLow
   const employeeCustomRate = employee.customHourlyRate;
   const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
+
+  // Fetch base rates from DB
+  const baseRates = await getBaseRates();
 
   let defaultLowRate: number;
   if (hasCustomRate) {
@@ -284,7 +288,9 @@ export async function syncEmployeeSalaryFromAttendance(
       defaultLowRate = hasBonus ? tradeRate! + 0.5 : tradeRate!;
     } else {
       // Priority 3: Helper default
-      defaultLowRate = hasBonus ? 3.0 : 2.5;
+      defaultLowRate = hasBonus
+        ? (employee.isTeamLeader ? baseRates.tlLow : baseRates.supLow)
+        : baseRates.standardLow;
     }
   }
 

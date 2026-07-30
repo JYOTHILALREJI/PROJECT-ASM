@@ -24,6 +24,7 @@ import {
   GitBranch,
   Wrench,
   Plus,
+  Settings,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -281,8 +282,8 @@ function mergeApiEntries(
       highRate = bonusAdjustedRate;
     } else {
       // Priority 3: Helper default
-      lowRate = hasBonus ? 3.0 : 2.5;
-      highRate = hasBonus ? 5.5 : 5.0;
+      lowRate = hasBonus ? (baseEntry.isTeamLeader ? (baseRates?.tlLow ?? 3.0) : (baseRates?.supLow ?? 3.0)) : (baseRates?.standardLow ?? 2.5);
+      highRate = hasBonus ? (baseEntry.isTeamLeader ? (baseRates?.tlHigh ?? 5.5) : (baseRates?.supHigh ?? 5.5)) : (baseRates?.standardHigh ?? 5.0);
     }
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
@@ -453,6 +454,20 @@ export function AccountsPage() {
   // records server-side by /api/accounts.
   const [totalPendingAdvances, setTotalPendingAdvances] = useState(0);
 
+  // Base rates (configurable from Manage Rates dialog)
+  const [baseRates, setBaseRates] = useState<{
+    standardLow: number; standardHigh: number;
+    tlLow: number; tlHigh: number;
+    supLow: number; supHigh: number;
+  } | null>(null);
+  const [showRatesDialog, setShowRatesDialog] = useState(false);
+  const [ratesSaving, setRatesSaving] = useState(false);
+  const [ratesForm, setRatesForm] = useState({
+    standardLow: 2.5, standardHigh: 5.0,
+    tlLow: 3.0, tlHigh: 5.5,
+    supLow: 3.0, supHigh: 5.5,
+  });
+
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
     return Array.from({ length: 6 }, (_, i) => currentYear - i);
@@ -537,6 +552,49 @@ export function AccountsPage() {
     };
     fetchPendingAdvances();
   }, [monthStr, selectedYear]);
+
+  // Fetch base rates on mount
+  useEffect(() => {
+    const fetchBaseRates = async () => {
+      try {
+        const res = await fetch('/api/base-rates');
+        const data = await res.json();
+        if (data.success) {
+          setBaseRates(data.data);
+          setRatesForm(data.data);
+        }
+      } catch {
+        // silent — use defaults
+      }
+    };
+    fetchBaseRates();
+  }, []);
+
+  // Save base rates
+  const handleSaveRates = useCallback(async () => {
+    setRatesSaving(true);
+    try {
+      const res = await fetch('/api/base-rates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ratesForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBaseRates(ratesForm);
+        setShowRatesDialog(false);
+        toast({ title: 'Rates updated', description: 'Base rates saved successfully.' });
+        // Refetch salary data to apply new rates
+        fetchData();
+      } else {
+        toast({ title: 'Error', description: data.error || 'Failed to save rates', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to save rates', variant: 'destructive' });
+    } finally {
+      setRatesSaving(false);
+    }
+  }, [ratesForm, fetchData]);
 
   // Reset edit mode when month/year changes
   useEffect(() => {
@@ -1271,6 +1329,15 @@ export function AccountsPage() {
                 )}
               </>
             )}
+            {/* Manage Rates button */}
+            <Button
+              onClick={() => setShowRatesDialog(true)}
+              className="bg-violet-700 hover:bg-violet-600 text-white gap-2"
+              title="Manage base rates"
+            >
+              <Settings className="h-4 w-4" />
+              <span className="hidden sm:inline">Manage Rates</span>
+            </Button>
           </div>,
           slot,
         );
@@ -1979,6 +2046,75 @@ export function AccountsPage() {
           )}
         </div>
       )}
+
+      {/* ── Manage Base Rates Dialog ── */}
+      <Dialog open={showRatesDialog} onOpenChange={setShowRatesDialog}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Settings className="h-5 w-5 text-violet-400" />
+              Manage Base Rates
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Set the base hourly rates for standard workers, Team Leaders, and Supervisors.
+              These rates are used when no trade rate or custom rate is set.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Standard Workers */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Standard Workers</div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-slate-400 w-24">Below Threshold</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.standardLow}
+                  onChange={(e) => setRatesForm({ ...ratesForm, standardLow: parseFloat(e.target.value) || 0 })}
+                  className="bg-slate-900 border-slate-600 text-white h-8" />
+                <label className="text-xs text-slate-400 w-24">Above Threshold</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.standardHigh}
+                  onChange={(e) => setRatesForm({ ...ratesForm, standardHigh: parseFloat(e.target.value) || 0 })}
+                  className="bg-slate-900 border-slate-600 text-white h-8" />
+              </div>
+            </div>
+            {/* Team Leaders */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Team Leaders</div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-slate-400 w-24">Below Threshold</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.tlLow}
+                  onChange={(e) => setRatesForm({ ...ratesForm, tlLow: parseFloat(e.target.value) || 0 })}
+                  className="bg-slate-900 border-slate-600 text-white h-8" />
+                <label className="text-xs text-slate-400 w-24">Above Threshold</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.tlHigh}
+                  onChange={(e) => setRatesForm({ ...ratesForm, tlHigh: parseFloat(e.target.value) || 0 })}
+                  className="bg-slate-900 border-slate-600 text-white h-8" />
+              </div>
+            </div>
+            {/* Supervisors */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Supervisors</div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-slate-400 w-24">Below Threshold</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.supLow}
+                  onChange={(e) => setRatesForm({ ...ratesForm, supLow: parseFloat(e.target.value) || 0 })}
+                  className="bg-slate-900 border-slate-600 text-white h-8" />
+                <label className="text-xs text-slate-400 w-24">Above Threshold</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.supHigh}
+                  onChange={(e) => setRatesForm({ ...ratesForm, supHigh: parseFloat(e.target.value) || 0 })}
+                  className="bg-slate-900 border-slate-600 text-white h-8" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowRatesDialog(false)} className="text-slate-400 hover:text-white">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveRates} disabled={ratesSaving} className="bg-violet-600 hover:bg-violet-700 text-white gap-2">
+              {ratesSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {ratesSaving ? 'Saving...' : 'Save Rates'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Trade Rates Dialog ── */}
       <Dialog open={tradeRatesOpen} onOpenChange={setTradeRatesOpen}>

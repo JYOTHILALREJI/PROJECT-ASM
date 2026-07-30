@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { getBaseRates } from '@/lib/base-rates';
 
 // GET /api/accounts
 // Mode 1: Per-site query (siteId + month required) → returns salary records for that site
@@ -13,9 +14,10 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month'); // YYYY-MM
     const year = searchParams.get('year');
 
-    // Build trade rate map for trade-based custom rates
+    // Build trade rate map + employee trade map + base rates
     const tradeRateMap = await buildTradeRateMap();
     const employeeTradeMap = await buildEmployeeTradeMap();
+    const baseRates = await getBaseRates();
 
     if (!month) {
       return NextResponse.json(
@@ -537,7 +539,7 @@ export async function GET(request: NextRequest) {
         const customRtPerHour = hasCustomRate
           ? employeeCustomRate!
           : effectiveTradeRate ??
-            (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : 2.5));
+            (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : baseRates.standardLow));
 
         // Calculate low/high rates:
         // 1) Custom rate → only that rate (no bonus, no threshold)
@@ -546,11 +548,11 @@ export async function GET(request: NextRequest) {
         const lowRate = hasCustomRate
           ? employeeCustomRate!
           : effectiveTradeRate ??
-            (hasBonus ? 3.0 : 2.5);
+            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlLow : baseRates.supLow) : baseRates.standardLow);
         const highRate = hasCustomRate
           ? employeeCustomRate!
           : effectiveTradeRate ??
-            (hasBonus ? 5.5 : 5.0);
+            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh) : baseRates.standardHigh);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold
@@ -633,16 +635,16 @@ export async function GET(request: NextRequest) {
         const customRtPerHour = hasCustomRate
           ? employeeCustomRate!
           : effectiveTradeRate ??
-            (currentMonthWh?.rtPerHour ?? 2.5);
+            (currentMonthWh?.rtPerHour ?? baseRates.standardLow);
 
         const lowRate = hasCustomRate
           ? employeeCustomRate!
           : effectiveTradeRate ??
-            (hasBonus ? 3.0 : 2.5);
+            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlLow : baseRates.supLow) : baseRates.standardLow);
         const highRate = hasCustomRate
           ? employeeCustomRate!
           : effectiveTradeRate ??
-            (hasBonus ? 5.5 : 5.0);
+            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh) : baseRates.standardHigh);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold ? highRate : lowRate;
