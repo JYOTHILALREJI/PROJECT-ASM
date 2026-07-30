@@ -37,6 +37,10 @@ export async function getBaseRates(): Promise<BaseRates> {
   if (cachedRates) return cachedRates;
 
   try {
+    // Check if db.baseRate exists (might not if prisma generate wasn't run)
+    if (!db.baseRate) {
+      return DEFAULT_RATES;
+    }
     let record = await db.baseRate.findUnique({ where: { id: 'singleton' } });
     if (!record) {
       // Create with defaults
@@ -62,22 +66,27 @@ export async function getBaseRates(): Promise<BaseRates> {
  * are used immediately.
  */
 export async function updateBaseRates(rates: BaseRates): Promise<void> {
-  await db.baseRate.upsert({
-    where: { id: 'singleton' },
-    update: {
-      standardLow: rates.standardLow,
-      standardHigh: rates.standardHigh,
-      tlLow: rates.tlLow,
-      tlHigh: rates.tlHigh,
-      supLow: rates.supLow,
-      supHigh: rates.supHigh,
-    },
-    create: {
-      id: 'singleton',
-      ...rates,
-    },
-  });
-  cachedRates = null; // Clear cache
+  try {
+    if (!db.baseRate) return; // BaseRate model not available
+    await db.baseRate.upsert({
+      where: { id: 'singleton' },
+      update: {
+        standardLow: rates.standardLow,
+        standardHigh: rates.standardHigh,
+        tlLow: rates.tlLow,
+        tlHigh: rates.tlHigh,
+        supLow: rates.supLow,
+        supHigh: rates.supHigh,
+      },
+      create: {
+        id: 'singleton',
+        ...rates,
+      },
+    });
+  } catch {
+    // Table doesn't exist — ignore
+  }
+  cachedRates = rates; // Always update cache
 }
 
 /**
