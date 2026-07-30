@@ -569,7 +569,9 @@ export async function syncEmployeeSalaryFromAttendance(
       },
     });
 
-    // Upsert WorkLog for this site
+    // Upsert WorkLog for this site — use REGULAR hours only (camp_sitting excluded)
+    // The WorkLog feeds the employee's hours ledger. Camp sitting hours are
+    // NOT included in the ledger (they don't count toward the lifetime threshold).
     await db.workLog.upsert({
       where: {
         employeeId_siteId_year_month: {
@@ -580,7 +582,7 @@ export async function syncEmployeeSalaryFromAttendance(
         },
       },
       update: {
-        hoursWorked: siteData.totalHours,
+        hoursWorked: siteData.regularHours,
         deletedAt: null,
       },
       create: {
@@ -588,7 +590,7 @@ export async function syncEmployeeSalaryFromAttendance(
         siteId,
         year,
         month: monthNum,
-        hoursWorked: siteData.totalHours,
+        hoursWorked: siteData.regularHours,
         allowances: 0,
         deductions: 0,
       },
