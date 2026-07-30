@@ -418,9 +418,28 @@ function SiteListView({
     return true;
   }, []);
 
-  // Total working hours = P×10 + C×8 + overtime(10+ot)
-  // Counts ALL attendance records in the active range — blockedDates only
-  // affects visual rendering (merged cells), NOT the hour calculation.
+  // Helper: determine if an attendance record belongs to THIS site.
+  // - If record has siteId: compare directly with site.id
+  // - If record has no siteId (legacy): check if the date falls within
+  //   this site's active range AND is NOT in blockedDates (blocked = belongs
+  //   to another site)
+  const belongsToSite = useCallback(
+    (emp: Employee, dateStr: string, rec: AttendanceRecord | undefined): boolean => {
+      if (!rec) return false;
+      if (rec.siteId) {
+        return rec.siteId === site.id;
+      }
+      // Legacy record (siteId = null):
+      // If this date is in blockedDates, it belongs to another site
+      if (emp.blockedDates?.has(dateStr)) return false;
+      // Otherwise, it belongs to this site (it's in the active range and
+      // not blocked)
+      return true;
+    },
+    [site.id]
+  );
+
+  // Total working hours = P×10 + C×8 + overtime(10+ot) — ONLY for THIS site
   const computeTotalHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
@@ -428,7 +447,7 @@ function SiteListView({
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
-        if (!rec) continue;
+        if (!belongsToSite(emp, dateStr, rec)) continue;
         if (rec.status === 'present') total += HOURS_PER_PRESENT;
         else if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
         else if (rec.status === 'overtime') {
@@ -437,10 +456,10 @@ function SiteListView({
       }
       return total;
     },
-    [displayDays, dateStrFor, isInRange, attendanceMap]
+    [displayDays, dateStrFor, isInRange, attendanceMap, belongsToSite]
   );
 
-  // Total camp sitting hours = C×8
+  // Total camp sitting hours = C×8 — ONLY for THIS site
   const computeCampSittingHours = useCallback(
     (emp: Employee): number => {
       let total = 0;
@@ -448,12 +467,12 @@ function SiteListView({
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
-        if (!rec) continue;
+        if (!belongsToSite(emp, dateStr, rec)) continue;
         if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
       }
       return total;
     },
-    [displayDays, dateStrFor, isInRange, attendanceMap]
+    [displayDays, dateStrFor, isInRange, attendanceMap, belongsToSite]
   );
 
   // ── Mark handler: save + push undo + auto-advance DOWN ──
