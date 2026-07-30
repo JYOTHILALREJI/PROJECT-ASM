@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import { recalcEmployeeFromMonth, recalcEmployeeFull, getEmployeeRates, computeSalaryBreakdown, buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 
+// Ensure fresh data on every request — no caching
+export const dynamic = 'force-dynamic';
+
 // GET /api/employees/[id]/worklogs
 // Get all WorkLog entries for an employee, with SalaryRecord fallback for months without WorkLog entries
 export async function GET(
@@ -103,8 +106,11 @@ export async function GET(
     }
 
     // Aggregate salary record hours by (siteId, month) for combos NOT covered by work logs
+    // EXCLUDE camp_sitting rate tier — those hours don't count toward the ledger
     const salarySiteMonthHours = new Map<string, { monthKey: string; totalHours: number }>();
     for (const sr of allSalaryRecords) {
+      // Skip camp_sitting records — their hours are not part of the lifetime ledger
+      if (sr.rateTier === 'camp_sitting') continue;
       const siteMonthKey = `${sr.siteId}|${sr.month}`;
       if (!allWorkLogSiteMonthSet.has(siteMonthKey)) {
         const existing = salarySiteMonthHours.get(siteMonthKey);
@@ -234,6 +240,8 @@ export async function GET(
     }>();
 
     for (const sr of salaryRecords) {
+      // Skip camp_sitting records — their hours are not part of the lifetime ledger
+      if (sr.rateTier === 'camp_sitting') continue;
       const key = `${sr.siteId}|${sr.month}`;
       if (filteredWorkLogKeys.has(key)) continue; // Skip if work log exists for this site+month
 
