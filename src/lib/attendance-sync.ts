@@ -610,11 +610,15 @@ export async function syncEmployeeSalaryFromAttendance(
     data: { isDeleted: true },
   });
 
-  // 6. Update TotalEmployeeWorkingHours with the grand total
+  // 6. Update TotalEmployeeWorkingHours with REGULAR hours only (camp_sitting excluded)
+  // The ledger tracks lifetime working hours for the threshold calculation.
+  // Camp sitting (C) hours are NOT included in lifetime hours — only P (10h)
+  // and overtime (10h + OT) count.
+  // Site doesn't matter here — we sum across ALL sites.
   await db.totalEmployeeWorkingHours.upsert({
     where: { empId_month: { empId: employeeId, month } },
     update: {
-      totalWorkingHours: grandTotalHours,
+      totalWorkingHours: grandRegularHours,
       empName: employee.fullName,
       isDeleted: false,
     },
@@ -622,7 +626,7 @@ export async function syncEmployeeSalaryFromAttendance(
       empId: employeeId,
       empName: employee.fullName,
       month,
-      totalWorkingHours: grandTotalHours,
+      totalWorkingHours: grandRegularHours,
       rtPerHour: defaultLowRate,
       isCustom: false,
     },
