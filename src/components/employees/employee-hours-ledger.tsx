@@ -321,21 +321,10 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
 
     for (let m = 1; m <= 12; m++) {
       const monthKey = `${selectedYear}-${String(m).padStart(2, '0')}`;
-      // Aggregate ALL workLog entries for this month (may have multiple sites)
-      const monthEntries = workLogs.filter((w) => w.monthKey === monthKey);
-      if (monthEntries.length > 0) {
-        // Sum hours across all sites for this month
-        const totalHours = monthEntries.reduce((sum, w) => sum + w.hoursWorked, 0);
-        // Use the first entry as the base, but override hoursWorked with the sum
-        const base = monthEntries[0];
-        const siteNames = monthEntries.map(w => w.siteName).filter(Boolean).join(', ');
-        grid.push({
-          ...base,
-          hoursWorked: totalHours,
-          siteName: siteNames || base.siteName,
-          cumulativeAfter: base.cumulativeBefore + totalHours,
-          hasData: true,
-        });
+      // The API now returns ONE aggregated entry per month (summing all sites)
+      const existing = workLogs.find((w) => w.monthKey === monthKey);
+      if (existing) {
+        grid.push({ ...existing, hasData: true });
       } else {
         // Placeholder row for months with no data
         grid.push({

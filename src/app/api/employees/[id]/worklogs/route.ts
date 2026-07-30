@@ -163,23 +163,31 @@ export async function GET(
       filteredWorkLogKeys.add(`${log.siteId}|${monthKey}`);
     }
 
-    // 9. Build monthly data from work logs
-    const monthlyData = workLogs.map(log => {
+    // 9. Build monthly data from work logs — AGGREGATED by month (not per-site)
+    // If an employee worked at multiple sites in the same month, their hours
+    // are summed into a single entry so the breakdown (below/above threshold)
+    // is computed on the TOTAL hours, not just one site's hours.
+    const workLogsByMonth = new Map<string, typeof workLogs>();
+    for (const log of workLogs) {
       const monthKey = `${log.year}-${String(log.month).padStart(2, '0')}`;
+      if (!workLogsByMonth.has(monthKey)) workLogsByMonth.set(monthKey, []);
+      workLogsByMonth.get(monthKey)!.push(log);
+    }
+
+    const monthlyData = Array.from(workLogsByMonth.entries()).map(([monthKey, logs]) => {
       const cumulativeBefore = cumulativeMap.get(monthKey) || 0;
+      // Sum hours across all sites for this month
+      const totalHours = logs.reduce((sum, l) => sum + l.hoursWorked, 0);
       const breakdown = computeSalaryBreakdown(
-        log.hoursWorked,
+        totalHours,
         cumulativeBefore,
         threshold,
         isCustom ? lowRate : lowRate,
         isCustom ? highRate : highRate,
       );
 
-      // Find matching salary records for this month+site
-      const monthSalaryRecords = salaryRecords.filter(
-        sr => sr.month === monthKey && sr.siteId === log.siteId
-      );
-
+      // Find matching salary records for this month (across all sites)
+      const monthSalaryRecords = salaryRecords.filter(sr => sr.month === monthKey);
       const stdRecord = monthSalaryRecords.find(sr => sr.rateTier === 'standard');
       const premRecord = monthSalaryRecords.find(sr => sr.rateTier === 'premium');
 
@@ -187,24 +195,28 @@ export async function GET(
       const advance = stdRecord?.advance ?? premRecord?.advance ?? 0;
       const isPaid = (stdRecord?.isPaid ?? false) || (premRecord?.isPaid ?? false);
 
+      // Use first log for base fields; aggregate site names
+      const firstLog = logs[0];
+      const siteNames = logs.map(l => l.site?.name).filter(Boolean).join(', ');
+
       return {
-        logId: log.logId,
-        employeeId: log.employeeId,
-        siteId: log.siteId,
-        siteName: log.site?.name || '',
-        year: log.year,
-        month: log.month,
+        logId: firstLog.logId,
+        employeeId: firstLog.employeeId,
+        siteId: firstLog.siteId,
+        siteName: siteNames || firstLog.site?.name || '',
+        year: firstLog.year,
+        month: firstLog.month,
         monthKey,
-        hoursWorked: log.hoursWorked,
-        allowances: log.allowances,
-        deductions: log.deductions,
+        hoursWorked: totalHours,
+        allowances: logs.reduce((s, l) => s + l.allowances, 0),
+        deductions: logs.reduce((s, l) => s + l.deductions, 0),
         cumulativeBefore,
-        cumulativeAfter: cumulativeBefore + log.hoursWorked,
+        cumulativeAfter: cumulativeBefore + totalHours,
         // Rate info
         lowRate,
         highRate,
         isCustom,
-        // Salary breakdown
+        // Salary breakdown — computed on TOTAL hours
         belowHours: breakdown.belowHours,
         aboveHours: breakdown.aboveHours,
         belowSalary: breakdown.belowSalary,
@@ -216,12 +228,12 @@ export async function GET(
         advance,
         balanceSalary: parseFloat((breakdown.totalSalary - deduction - advance).toFixed(2)),
         isPaid,
-        // Record IDs for updates
+        // Record IDs for updates (from first site's records)
         standardRecordId: stdRecord?.id ?? null,
         premiumRecordId: premRecord?.id ?? null,
         // Timestamps
-        createdAt: log.createdAt.toISOString(),
-        updatedAt: log.updatedAt.toISOString(),
+        createdAt: firstLog.createdAt.toISOString(),
+        updatedAt: firstLog.updatedAt.toISOString(),
         // Source indicator
         isSynthetic: false,
       };
