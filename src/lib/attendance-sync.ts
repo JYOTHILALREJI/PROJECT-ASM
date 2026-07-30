@@ -91,15 +91,12 @@ export async function computeMonthlyHoursFromAttendance(
 /**
  * Compute hours PER SITE for an employee in a given month.
  *
- * Uses EmpCountSitePerMonth to determine which days the employee was at
- * which site, then attributes each attendance record to the site the
- * employee was at on that date.
+ * Uses the siteId on each attendance record to attribute hours to the
+ * correct site. For legacy records (siteId = null), falls back to
+ * EmpCountSitePerMonth date ranges to determine the site.
  *
  * Returns a Map<siteId, { siteName, regularHours, campSittingHours, totalHours }>
  * — one entry per site the employee worked at during the month.
- *
- * If there are no EmpCountSitePerMonth records, falls back to attributing
- * ALL hours to the employee's current site (legacy behaviour).
  */
 export async function computeMonthlyHoursPerSite(
   employeeId: string,
@@ -125,7 +122,7 @@ export async function computeMonthlyHoursPerSite(
   });
 
   // Fetch all EmpCountSitePerMonth records for this employee + month
-  // These tell us which site the employee was at on each day.
+  // (used for legacy records with null siteId)
   const siteAssignments = await db.empCountSitePerMonth.findMany({
     where: {
       empId: employeeId,
@@ -134,44 +131,23 @@ export async function computeMonthlyHoursPerSite(
     },
   });
 
-  // If no site assignments, fall back to attributing all hours to the
-  // employee's current site (legacy behaviour)
-  if (siteAssignments.length === 0) {
-    if (!fallbackSiteId) return new Map();
-    let reg = 0;
-    let camp = 0;
-    for (const r of records) {
-      if (r.status === 'present') reg += HOURS_PER_PRESENT_DAY;
-      else if (r.status === 'overtime') reg += HOURS_PER_PRESENT_DAY + (r.overtimeHours || 0);
-      else if (r.status === 'camp_sitting') camp += HOURS_PER_CAMP_SITTING;
-    }
-    const m = new Map();
-    m.set(fallbackSiteId, {
-      siteName: fallbackSiteName || '',
-      regularHours: reg,
-      campSittingHours: camp,
-      totalHours: reg + camp,
-    });
-    return m;
+  // Build a siteId → siteName map
+  const siteNameMap = new Map<string, string>();
+  for (const sa of siteAssignments) {
+    siteNameMap.set(sa.siteId, sa.siteName);
   }
 
-  // Build a date → siteId map using the EmpCountSitePerMonth records.
-  // Each assignment has a createdDate (when the employee started at the
-  // site) and an optional removedDate (when they left). For each day in
-  // the month, we find the assignment whose [createdDate, removedDate]
-  // range contains that day.
+  // Build date ranges for legacy record inference
   const monthStart = `${year}-${String(monthNum).padStart(2, '0')}-01`;
   const daysInMonth = new Date(year, monthNum, 0).getDate();
   const monthEnd = `${year}-${String(monthNum).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
-  // Helper: clamp a date string to [monthStart, monthEnd]
   const clamp = (d: string): string => {
     if (d < monthStart) return monthStart;
     if (d > monthEnd) return monthEnd;
     return d;
   };
 
-  // For each site assignment, compute the clamped date range
   const ranges = siteAssignments.map((a) => {
     const start = clamp(a.createdDate.toISOString().split('T')[0]);
     const end = a.removedDate
@@ -180,31 +156,40 @@ export async function computeMonthlyHoursPerSite(
     return { siteId: a.siteId, siteName: a.siteName, start, end };
   });
 
-  // For each attendance record, find which site it belongs to
   const siteMap = new Map<string, { siteName: string; regularHours: number; campSittingHours: number; totalHours: number }>();
 
-  for (const r of records) {
-    // Find the site assignment whose range contains this date
-    const matchingRange = ranges.find((rg) => r.date >= rg.start && r.date <= rg.end);
-    if (!matchingRange) continue; // date doesn't fall in any site assignment
-
-    if (!siteMap.has(matchingRange.siteId)) {
-      siteMap.set(matchingRange.siteId, {
-        siteName: matchingRange.siteName,
-        regularHours: 0,
-        campSittingHours: 0,
-        totalHours: 0,
-      });
+  // Helper to add hours to a site
+  const addToSite = (siteId: string, siteName: string, record: typeof records[0]) => {
+    if (!siteMap.has(siteId)) {
+      siteMap.set(siteId, { siteName, regularHours: 0, campSittingHours: 0, totalHours: 0 });
     }
-    const entry = siteMap.get(matchingRange.siteId)!;
-    if (r.status === 'present') {
+    const entry = siteMap.get(siteId)!;
+    if (record.status === 'present') {
       entry.regularHours += HOURS_PER_PRESENT_DAY;
-    } else if (r.status === 'overtime') {
-      entry.regularHours += HOURS_PER_PRESENT_DAY + (r.overtimeHours || 0);
-    } else if (r.status === 'camp_sitting') {
+    } else if (record.status === 'overtime') {
+      entry.regularHours += HOURS_PER_PRESENT_DAY + (record.overtimeHours || 0);
+    } else if (record.status === 'camp_sitting') {
       entry.campSittingHours += HOURS_PER_CAMP_SITTING;
     }
     entry.totalHours = entry.regularHours + entry.campSittingHours;
+  };
+
+  for (const r of records) {
+    if (r.siteId) {
+      // Record has explicit siteId — use it directly
+      const sName = siteNameMap.get(r.siteId) || 'Unknown Site';
+      addToSite(r.siteId, sName, r);
+    } else {
+      // Legacy record (siteId = null) — infer from date ranges
+      const matchingRange = ranges.find((rg) => r.date >= rg.start && r.date <= rg.end);
+      if (matchingRange) {
+        addToSite(matchingRange.siteId, matchingRange.siteName, r);
+      } else if (fallbackSiteId) {
+        // No matching range — attribute to fallback (current site)
+        addToSite(fallbackSiteId, fallbackSiteName || '', r);
+      }
+      // If no matching range and no fallback, skip (can't determine site)
+    }
   }
 
   return siteMap;
