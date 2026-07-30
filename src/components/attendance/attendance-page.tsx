@@ -1497,13 +1497,10 @@ export function AttendancePage() {
         // active here regardless of what removedDate says.
         const isCurrentSite = emp.currentSite === siteName;
 
-        // createdDate is when the EmpCountSitePerMonth record was created.
-        // For the CURRENT site, we treat the employee as active from the
-        // month start (they might have been at this site before the record
-        // was created). For moved-away sites, use the clamped createdDate.
-        const activeFrom = isCurrentSite
-          ? monthStartStr
-          : clampToMonth(assignment.createdDate.split('T')[0]);
+        // For ALL sites (current AND moved-away), activeFrom = monthStart.
+        // This ensures all days are in-range and attendance marks are visible.
+        // The movedAway flag + opacity-40 provides the visual distinction.
+        const activeFrom = monthStartStr;
 
         // removedDate is when the employee left the site.
         // If this is the employee's current site, ignore removedDate (stale).
