@@ -1092,7 +1092,6 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
             </CardTitle>
             <div className="flex items-center gap-3 text-xs text-slate-400">
               <span>Year Total: <span className="text-white font-medium">{yearlyTotals.totalHours.toLocaleString()}h</span></span>
-              <span>Est. Salary: <span className="text-white font-medium">{formatCurrency(yearlyTotals.totalSalary)}</span></span>
             </div>
           </div>
         </CardHeader>
@@ -1104,16 +1103,14 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                   <TableHead className={`text-slate-400 font-medium ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Month</TableHead>
                   <TableHead className={`text-slate-400 font-medium text-right ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Total Hours</TableHead>
                   <TableHead className={`text-slate-400 font-medium text-right ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Cumulative Hrs</TableHead>
-                  <TableHead className={`text-slate-400 font-medium text-right ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Rate/Hr</TableHead>
                   <TableHead className={`text-slate-400 font-medium text-right ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Below Threshold Hrs</TableHead>
                   <TableHead className={`text-slate-400 font-medium text-right ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Above Threshold Hrs</TableHead>
-                  <TableHead className={`text-slate-400 font-medium text-right ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>Est. Salary</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {monthlyGrid.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-slate-500">
+                    <TableCell colSpan={5} className="text-center py-12 text-slate-500">
                       No data available for {selectedYear}
                     </TableCell>
                   </TableRow>
@@ -1168,44 +1165,11 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                             ? dataRow.cumulativeAfter.toFixed(1)
                             : '—'}
                         </TableCell>
-                        <TableCell className={`text-right py-1.5 px-3 ${isChanged ? 'border-r border-emerald-500/20' : 'border-r border-slate-700/30'}`}>
-                          {dataRow && dataRow.hoursWorked > 0 ? (
-                            <Badge className={`text-xs px-2 py-0.5 h-6 font-mono ${getRateBadgeClasses(getRateColor(getDirectRate(dataRow), dataRow.isCustom))}`}>
-                              {getDirectRate(dataRow).toFixed(1)}
-                            </Badge>
-                          ) : (
-                            <span className="text-slate-600 font-mono">—</span>
-                          )}
-                        </TableCell>
                         <TableCell className={`text-right font-mono text-slate-400 py-1.5 px-3 ${isChanged ? 'border-r border-emerald-500/20' : 'border-r border-slate-700/30'}`}>
                           {dataRow && dataRow.belowHours > 0 ? dataRow.belowHours.toFixed(1) : '—'}
                         </TableCell>
                         <TableCell className={`text-right font-mono text-slate-400 py-1.5 px-3 ${isChanged ? 'border-r border-emerald-500/20' : 'border-r border-slate-700/30'}`}>
                           {dataRow && dataRow.aboveHours > 0 ? dataRow.aboveHours.toFixed(1) : '—'}
-                        </TableCell>
-                        <TableCell className={`text-right font-mono text-slate-400 py-1.5 px-3 ${isChanged ? 'border-r border-emerald-500/20' : 'border-r border-slate-700/30'}`}>
-                          {dataRow && dataRow.totalSalary > 0 ? (
-                            <div className="flex flex-col items-end gap-0.5">
-                              <span className="text-[9px] text-slate-500 font-mono">
-                                {dataRow.isCustom ? (
-                                  `${dataRow.hoursWorked.toFixed(1)} × ${dataRow.lowRate.toFixed(1)}`
-                                ) : dataRow.aboveHours > 0 && dataRow.belowHours > 0 ? (
-                                  <>
-                                    <span className="text-emerald-500">{dataRow.belowHours.toFixed(1)} × {dataRow.lowRate.toFixed(1)}</span>
-                                    {' + '}
-                                    <span className="text-amber-500">{dataRow.aboveHours.toFixed(1)} × {dataRow.highRate.toFixed(1)}</span>
-                                  </>
-                                ) : dataRow.aboveHours > 0 ? (
-                                  `${dataRow.aboveHours.toFixed(1)} × ${dataRow.highRate.toFixed(1)}`
-                                ) : (
-                                  `${dataRow.belowHours.toFixed(1)} × ${dataRow.lowRate.toFixed(1)}`
-                                )}
-                              </span>
-                              <span className="text-emerald-400">
-                                = {formatCurrency(dataRow.totalSalary)}
-                              </span>
-                            </div>
-                          ) : '—'}
                         </TableCell>
                       </TableRow>
                     );
@@ -1214,9 +1178,6 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                   /* ── View Mode Rows ── */
                   monthlyGrid.map((row) => {
                     const isThresholdRow = thresholdCrossMonth === row.monthKey;
-                    const isCustomRate = row.isCustom;
-                    const directRate = getDirectRate(row);
-                    const rateColor = getRateColor(directRate, isCustomRate);
                     const isCustomHoursRow = row.monthKey === '__custom__';
 
                     return (
@@ -1269,48 +1230,11 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                             {row.cumulativeAfter > 0 ? row.cumulativeAfter.toFixed(1) : '—'}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right border-r border-slate-700/20">
-                          {isCustomHoursRow ? (
-                            <span className="text-violet-400 font-mono text-xs">—</span>
-                          ) : row.hoursWorked > 0 ? (
-                            <Badge className={`text-xs px-2 py-0.5 h-6 font-mono ${getRateBadgeClasses(rateColor)}`}>
-                              {directRate.toFixed(1)}
-                            </Badge>
-                          ) : (
-                            <span className="text-slate-600 font-mono">—</span>
-                          )}
-                        </TableCell>
                         <TableCell className="text-right font-mono text-slate-200 border-r border-slate-700/20">
                           {row.belowHours > 0 ? row.belowHours.toFixed(1) : '—'}
                         </TableCell>
                         <TableCell className="text-right font-mono text-slate-200 border-r border-slate-700/20">
                           {row.aboveHours > 0 ? row.aboveHours.toFixed(1) : '—'}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-slate-200">
-                          {isCustomHoursRow ? (
-                            <span className="text-violet-400 text-xs">No salary (adjustment only)</span>
-                          ) : row.totalSalary > 0 ? (
-                            <div className="flex flex-col items-end gap-0.5">
-                              <span className="text-[9px] text-slate-500 font-mono">
-                                {row.isCustom ? (
-                                  `${row.hoursWorked.toFixed(1)} × ${row.lowRate.toFixed(1)}`
-                                ) : row.aboveHours > 0 && row.belowHours > 0 ? (
-                                  <>
-                                    <span className="text-emerald-500">{row.belowHours.toFixed(1)} × {row.lowRate.toFixed(1)}</span>
-                                    {' + '}
-                                    <span className="text-amber-500">{row.aboveHours.toFixed(1)} × {row.highRate.toFixed(1)}</span>
-                                  </>
-                                ) : row.aboveHours > 0 ? (
-                                  `${row.aboveHours.toFixed(1)} × ${row.highRate.toFixed(1)}`
-                                ) : (
-                                  `${row.belowHours.toFixed(1)} × ${row.lowRate.toFixed(1)}`
-                                )}
-                              </span>
-                              <span className="text-emerald-400">
-                                = {formatCurrency(row.totalSalary)}
-                              </span>
-                            </div>
-                          ) : '—'}
                         </TableCell>
                       </TableRow>
                     );
@@ -1329,17 +1253,11 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                     <TableCell className={`text-right text-slate-400 ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>
                       —
                     </TableCell>
-                    <TableCell className={`text-right text-slate-400 ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>
-                      —
-                    </TableCell>
                     <TableCell className={`text-right font-mono text-slate-400 ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>
                       {workLogs.reduce((s, w) => s + w.belowHours, 0).toFixed(1)}
                     </TableCell>
                     <TableCell className={`text-right font-mono text-slate-400 ${isEditMode ? 'border-r border-slate-700/30' : ''}`}>
                       {workLogs.reduce((s, w) => s + w.aboveHours, 0).toFixed(1)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono font-bold text-white">
-                      {formatCurrency(yearlyTotals.totalSalary)}
                     </TableCell>
                   </TableRow>
                 )}
