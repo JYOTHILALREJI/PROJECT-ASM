@@ -675,7 +675,7 @@ export function ConsolidatedSalaryPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [baseRates]);
 
   // Fetch base rates on mount
   useEffect(() => {
@@ -695,7 +695,7 @@ export function ConsolidatedSalaryPage() {
 
   useEffect(() => {
     fetchSalaryData(month, year);
-  }, [month, year, fetchSalaryData, fetchKey]);
+  }, [month, year, fetchSalaryData, fetchKey, baseRates]);
 
   /* ── Refresh data (DB-first invalidation) ── */
   const refreshData = useCallback(() => {
