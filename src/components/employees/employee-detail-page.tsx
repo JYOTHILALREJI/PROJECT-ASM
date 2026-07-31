@@ -29,14 +29,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
@@ -162,6 +154,44 @@ function InfoRow({
       <div className="flex-1 min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">{label}</p>
         <p className="text-sm text-slate-200 font-medium break-words">{displayValue}</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Editable Field Component (inline edit mode) ─────────────────────────
+
+function EditableField({
+  icon: Icon,
+  label,
+  field,
+  value,
+  onChange,
+  type = 'text',
+  placeholder,
+}: {
+  icon: React.ElementType;
+  label: string;
+  field: string;
+  value: string;
+  onChange: (field: string, value: string) => void;
+  type?: 'text' | 'number' | 'date' | 'email';
+  placeholder?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 py-2 px-3 rounded-lg">
+      <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-slate-700/50 flex-shrink-0 mt-0.5">
+        <Icon className="h-4 w-4 text-slate-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium mb-1">{label}</p>
+        <Input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(field, e.target.value)}
+          className="bg-slate-900 border-slate-600 text-white h-7 text-sm"
+          placeholder={placeholder}
+        />
       </div>
     </div>
   );
@@ -419,8 +449,8 @@ export function EmployeeDetailPage() {
   const [quickHoursSaving, setQuickHoursSaving] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
 
-  // ── Edit dialog state ──
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  // ── Edit mode state (inline editing on the same page, no modal) ──
+  const [isEditMode, setIsEditMode] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editForm, setEditForm] = useState({
     fullName: '',
@@ -546,8 +576,8 @@ export function EmployeeDetailPage() {
     }
   };
 
-  // ── Edit dialog handlers ──
-  const openEditDialog = () => {
+  // ── Edit mode handlers (inline editing, no modal) ──
+  const enterEditMode = () => {
     if (!employee) return;
     setEditForm({
       fullName: employee.fullName || '',
@@ -574,7 +604,11 @@ export function EmployeeDetailPage() {
       customHourlyRate: employee.customHourlyRate != null ? String(employee.customHourlyRate) : '',
       currentTotalWorkingHours: employee.currentTotalWorkingHours != null ? String(employee.currentTotalWorkingHours) : '',
     });
-    setEditDialogOpen(true);
+    setIsEditMode(true);
+  };
+
+  const cancelEditMode = () => {
+    setIsEditMode(false);
   };
 
   const handleEditFieldChange = (field: string, value: string | boolean) => {
@@ -616,7 +650,7 @@ export function EmployeeDetailPage() {
       const json = await res.json();
       if (json.success) {
         toast({ title: 'Employee Updated', description: `${editForm.fullName} has been updated successfully.` });
-        setEditDialogOpen(false);
+        setIsEditMode(false);
         // Refresh the employee data
         await fetchEmployee();
       } else {
@@ -669,48 +703,82 @@ export function EmployeeDetailPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Button
           variant="ghost"
-          onClick={handleBack}
+          onClick={isEditMode ? cancelEditMode : handleBack}
           className="text-slate-400 hover:text-white hover:bg-slate-800"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Employees
+          {isEditMode ? 'Cancel' : 'Back to Employees'}
         </Button>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleWhatsApp}
-            disabled={!employee.phone}
-            className="border-slate-700 text-slate-300 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/50"
-          >
-            <MessageCircle className="h-4 w-4 mr-1.5" />
-            WhatsApp
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadCV}
-            disabled={generatingPDF}
-            className="border-slate-700 text-slate-300 hover:bg-blue-500/10 hover:text-blue-400 hover:border-blue-500/50"
-          >
-            {generatingPDF ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-1.5" />
-            )}
-            Download CV
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openEditDialog}
-            className="border-slate-700 text-slate-300 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/50"
-          >
-            <Pencil className="h-4 w-4 mr-1.5" />
-            Edit
-          </Button>
+          {isEditMode ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={cancelEditMode}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleEditSubmit}
+                disabled={editSaving}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {editSaving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : null}
+                Save Changes
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleWhatsApp}
+                disabled={!employee.phone}
+                className="border-slate-700 text-slate-300 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/50"
+              >
+                <MessageCircle className="h-4 w-4 mr-1.5" />
+                WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadCV}
+                disabled={generatingPDF}
+                className="border-slate-700 text-slate-300 hover:bg-blue-500/10 hover:text-blue-400 hover:border-blue-500/50"
+              >
+                {generatingPDF ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-1.5" />
+                )}
+                Download CV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={enterEditMode}
+                className="border-slate-700 text-slate-300 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/50"
+              >
+                <Pencil className="h-4 w-4 mr-1.5" />
+                Edit
+              </Button>
+            </>
+          )}
         </div>
       </div>
+
+      {/* ─── Edit mode banner ─── */}
+      {isEditMode && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-2.5 flex items-center gap-2">
+          <Pencil className="h-4 w-4 text-amber-400" />
+          <span className="text-sm text-amber-300">
+            Edit Mode — fields below are editable. Click <strong>Save Changes</strong> to persist or <strong>Cancel</strong> to discard.
+          </span>
+        </div>
+      )}
 
       {/* ─── Hero Header Card ─── */}
       <Card className="bg-gradient-to-br from-slate-800 to-slate-800/60 border-slate-700/50 overflow-hidden">
@@ -734,36 +802,97 @@ export function EmployeeDetailPage() {
             {/* Name + badges */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                <h1 className="text-2xl font-bold text-white">{employee.fullName}</h1>
-                {employee.isTeamLeader && (
-                  <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/25 text-[10px] px-2 py-0.5">
-                    <Crown className="h-3 w-3 mr-0.5" />
-                    Team Leader
-                  </Badge>
+                {isEditMode ? (
+                  <Input
+                    value={editForm.fullName}
+                    onChange={(e) => handleEditFieldChange('fullName', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white text-2xl font-bold h-10 max-w-md"
+                    placeholder="Full Name"
+                  />
+                ) : (
+                  <h1 className="text-2xl font-bold text-white">{employee.fullName}</h1>
                 )}
-                {employee.isSupervisor && (
-                  <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[10px] px-2 py-0.5">
-                    <ShieldCheck className="h-3 w-3 mr-0.5" />
-                    Supervisor
-                  </Badge>
+                {isEditMode ? (
+                  <div className="flex items-center gap-3 mt-1">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editForm.isTeamLeader}
+                        onChange={(e) => handleEditFieldChange('isTeamLeader', e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                      />
+                      <span className="text-xs text-amber-400">Team Leader</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editForm.isSupervisor}
+                        onChange={(e) => handleEditFieldChange('isSupervisor', e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
+                      />
+                      <span className="text-xs text-violet-400">Supervisor</span>
+                    </label>
+                  </div>
+                ) : (
+                  <>
+                    {employee.isTeamLeader && (
+                      <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/25 text-[10px] px-2 py-0.5">
+                        <Crown className="h-3 w-3 mr-0.5" />
+                        Team Leader
+                      </Badge>
+                    )}
+                    {employee.isSupervisor && (
+                      <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[10px] px-2 py-0.5">
+                        <ShieldCheck className="h-3 w-3 mr-0.5" />
+                        Supervisor
+                      </Badge>
+                    )}
+                  </>
                 )}
               </div>
-              <p className="text-sm text-slate-400 font-mono mb-2">{employee.employeeId}</p>
+              {isEditMode ? (
+                <Input
+                  value={editForm.employeeId}
+                  onChange={(e) => handleEditFieldChange('employeeId', e.target.value)}
+                  className="bg-slate-900 border-slate-600 text-slate-400 font-mono text-sm h-7 max-w-xs mt-1 mb-2"
+                  placeholder="Employee ID"
+                />
+              ) : (
+                <p className="text-sm text-slate-400 font-mono mb-2">{employee.employeeId}</p>
+              )}
               <div className="flex items-center gap-3 flex-wrap">
-                <StatusBadge status={employee.status} />
-                {employee.trade && (
-                  <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/25 text-[10px] px-2 py-0.5">
-                    <Briefcase className="h-3 w-3 mr-0.5" />
-                    {employee.trade}
-                  </Badge>
+                {!isEditMode && <StatusBadge status={employee.status} />}
+                {isEditMode ? (
+                  <Input
+                    value={editForm.trade}
+                    onChange={(e) => handleEditFieldChange('trade', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white text-xs h-7 max-w-[140px]"
+                    placeholder="Trade"
+                  />
+                ) : (
+                  employee.trade && (
+                    <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/25 text-[10px] px-2 py-0.5">
+                      <Briefcase className="h-3 w-3 mr-0.5" />
+                      {employee.trade}
+                    </Badge>
+                  )
                 )}
-                {employee.currentSite && (
-                  <Badge className="bg-slate-700/50 text-slate-300 border-slate-600/50 text-[10px] px-2 py-0.5">
-                    <Building2 className="h-3 w-3 mr-0.5" />
-                    {employee.currentSite}
-                  </Badge>
+                {isEditMode ? (
+                  <Input
+                    value={editForm.currentSite}
+                    onChange={(e) => handleEditFieldChange('currentSite', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white text-xs h-7 max-w-[140px]"
+                    placeholder="Site"
+                  />
+                ) : (
+                  employee.currentSite && (
+                    <Badge className="bg-slate-700/50 text-slate-300 border-slate-600/50 text-[10px] px-2 py-0.5">
+                      <Building2 className="h-3 w-3 mr-0.5" />
+                      {employee.currentSite}
+                    </Badge>
+                  )
                 )}
-                {employee.rating > 0 && <StarRating rating={employee.rating} />}
+                {!isEditMode && employee.rating > 0 && <StarRating rating={employee.rating} />}
               </div>
             </div>
 
@@ -791,30 +920,54 @@ export function EmployeeDetailPage() {
         {/* Personal Information */}
         <SectionCard title="Personal Information" icon={User}>
           <div className="space-y-0.5">
-            <InfoRow icon={CreditCard} label="Employee ID" value={employee.employeeId} />
-            <InfoRow icon={Globe} label="Nationality" value={employee.nationality} />
-            <InfoRow icon={Calendar} label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
-            <InfoRow icon={Phone} label="Phone" value={employee.phone} />
-            <InfoRow icon={Mail} label="Email" value={employee.email} />
-            <InfoRow icon={MapPin} label="Address" value={employee.address} />
-            <InfoRow icon={Phone} label="Emergency Contact" value={employee.emergencyContact} />
+            {isEditMode ? (
+              <>
+                <EditableField icon={Globe} label="Nationality" field="nationality" value={editForm.nationality} onChange={handleEditFieldChange} placeholder="e.g. Kenya" />
+                <EditableField icon={Calendar} label="Date of Birth" field="dateOfBirth" type="date" value={editForm.dateOfBirth} onChange={handleEditFieldChange} />
+                <EditableField icon={Phone} label="Phone" field="phone" value={editForm.phone} onChange={handleEditFieldChange} placeholder="e.g. +971501234567" />
+                <EditableField icon={Mail} label="Email" field="email" type="email" value={editForm.email} onChange={handleEditFieldChange} placeholder="e.g. john@example.com" />
+                <EditableField icon={MapPin} label="Address" field="address" value={editForm.address} onChange={handleEditFieldChange} placeholder="Full address" />
+                <EditableField icon={Phone} label="Emergency Contact" field="emergencyContact" value={editForm.emergencyContact} onChange={handleEditFieldChange} placeholder="Name + phone" />
+              </>
+            ) : (
+              <>
+                <InfoRow icon={CreditCard} label="Employee ID" value={employee.employeeId} />
+                <InfoRow icon={Globe} label="Nationality" value={employee.nationality} />
+                <InfoRow icon={Calendar} label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
+                <InfoRow icon={Phone} label="Phone" value={employee.phone} />
+                <InfoRow icon={Mail} label="Email" value={employee.email} />
+                <InfoRow icon={MapPin} label="Address" value={employee.address} />
+                <InfoRow icon={Phone} label="Emergency Contact" value={employee.emergencyContact} />
+              </>
+            )}
           </div>
         </SectionCard>
 
         {/* Professional Information */}
         <SectionCard title="Professional Information" icon={Briefcase}>
           <div className="space-y-0.5">
-            <InfoRow icon={Briefcase} label="Trade" value={employee.trade} />
-            <InfoRow icon={User} label="Position" value={employee.position} />
-            <InfoRow icon={Building2} label="Company" value={employee.companyName} />
-            <InfoRow icon={Building2} label="Current Site" value={employee.currentSite} />
-            <InfoRow icon={Calendar} label="Join Date" value={formatDate(employee.joinDate)} />
-            <InfoRow icon={Star} label="Rating" value={employee.rating > 0 ? `${employee.rating} / 5` : '—'} />
-            {employee.isTeamLeader && teamLeaderSite && (
-              <InfoRow icon={Crown} label="Team Leader At" value={teamLeaderSite.name} />
-            )}
-            {employee.isSupervisor && supervisorSite && (
-              <InfoRow icon={ShieldCheck} label="Supervisor At" value={supervisorSite.name} />
+            {isEditMode ? (
+              <>
+                <EditableField icon={Briefcase} label="Trade" field="trade" value={editForm.trade} onChange={handleEditFieldChange} placeholder="e.g. Mason, Electrician" />
+                <EditableField icon={Building2} label="Company Name" field="companyName" value={editForm.companyName} onChange={handleEditFieldChange} placeholder="Company" />
+                <EditableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} placeholder="Site name" />
+                <EditableField icon={Calendar} label="Join Date" field="joinDate" type="date" value={editForm.joinDate} onChange={handleEditFieldChange} />
+              </>
+            ) : (
+              <>
+                <InfoRow icon={Briefcase} label="Trade" value={employee.trade} />
+                <InfoRow icon={User} label="Position" value={employee.position} />
+                <InfoRow icon={Building2} label="Company" value={employee.companyName} />
+                <InfoRow icon={Building2} label="Current Site" value={employee.currentSite} />
+                <InfoRow icon={Calendar} label="Join Date" value={formatDate(employee.joinDate)} />
+                <InfoRow icon={Star} label="Rating" value={employee.rating > 0 ? `${employee.rating} / 5` : '—'} />
+                {employee.isTeamLeader && teamLeaderSite && (
+                  <InfoRow icon={Crown} label="Team Leader At" value={teamLeaderSite.name} />
+                )}
+                {employee.isSupervisor && supervisorSite && (
+                  <InfoRow icon={ShieldCheck} label="Supervisor At" value={supervisorSite.name} />
+                )}
+              </>
             )}
           </div>
         </SectionCard>
@@ -822,28 +975,46 @@ export function EmployeeDetailPage() {
         {/* Identification Documents */}
         <SectionCard title="Identification Documents" icon={Shield}>
           <div className="space-y-0.5">
-            <InfoRow icon={BookOpen} label="Passport Number" value={employee.passportNumber} />
-            <InfoRow icon={Shield} label="Passport Status" value={employee.passportStatus} />
-            <InfoRow icon={CreditCard} label="ID Number" value={employee.idNumber} />
-            <InfoRow icon={Shield} label="ID Status" value={employee.idStatus} />
+            {isEditMode ? (
+              <>
+                <EditableField icon={BookOpen} label="Passport Number" field="passportNumber" value={editForm.passportNumber} onChange={handleEditFieldChange} placeholder="Passport No." />
+                <EditableField icon={Shield} label="Passport Status" field="passportStatus" value={editForm.passportStatus} onChange={handleEditFieldChange} placeholder="e.g. Valid" />
+                <EditableField icon={CreditCard} label="ID Number" field="idNumber" value={editForm.idNumber} onChange={handleEditFieldChange} placeholder="ID No." />
+                <EditableField icon={Shield} label="ID Status" field="idStatus" value={editForm.idStatus} onChange={handleEditFieldChange} placeholder="e.g. Valid" />
+              </>
+            ) : (
+              <>
+                <InfoRow icon={BookOpen} label="Passport Number" value={employee.passportNumber} />
+                <InfoRow icon={Shield} label="Passport Status" value={employee.passportStatus} />
+                <InfoRow icon={CreditCard} label="ID Number" value={employee.idNumber} />
+                <InfoRow icon={Shield} label="ID Status" value={employee.idStatus} />
+              </>
+            )}
           </div>
         </SectionCard>
 
         {/* Work Configuration */}
         <SectionCard title="Work Configuration" icon={Clock}>
           <div className="space-y-3">
-            <InfoRow
-              icon={CreditCard}
-              label="Custom Hourly Rate"
-              value={employee.customHourlyRate != null ? `${employee.customHourlyRate} AED/hr` : '—'}
-            />
-            <InfoRow
-              icon={Clock}
-              label="Hours Threshold"
-              value={employee.hoursThreshold ? `${employee.hoursThreshold} hrs` : '—'}
-            />
-            {/* Quick hours editor */}
-            <div className="pt-3 border-t border-slate-700/50">
+            {isEditMode ? (
+              <>
+                <EditableField icon={CreditCard} label="Custom Hourly Rate (AED)" field="customHourlyRate" type="number" value={editForm.customHourlyRate} onChange={handleEditFieldChange} placeholder="e.g. 6.5" />
+                <EditableField icon={Clock} label="Current Total Hours" field="currentTotalWorkingHours" type="number" value={editForm.currentTotalWorkingHours} onChange={handleEditFieldChange} placeholder="e.g. 850" />
+              </>
+            ) : (
+              <>
+                <InfoRow
+                  icon={CreditCard}
+                  label="Custom Hourly Rate"
+                  value={employee.customHourlyRate != null ? `${employee.customHourlyRate} AED/hr` : '—'}
+                />
+                <InfoRow
+                  icon={Clock}
+                  label="Hours Threshold"
+                  value={employee.hoursThreshold ? `${employee.hoursThreshold} hrs` : '—'}
+                />
+                {/* Quick hours editor (view mode only) */}
+                <div className="pt-3 border-t border-slate-700/50">
               <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium mb-2 px-3">
                 Current Total Working Hours
               </p>
@@ -870,6 +1041,8 @@ export function EmployeeDetailPage() {
                 Manually set the employee's running cumulative hours. Used as a starting balance.
               </p>
             </div>
+              </>
+            )}
           </div>
         </SectionCard>
       </div>
@@ -895,241 +1068,6 @@ export function EmployeeDetailPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* ─── Edit Dialog ─── */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-white">Edit Employee</DialogTitle>
-            <DialogDescription className="text-slate-400">
-              Update employee information. Changes are saved to the database.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            {/* Personal Information */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider">Personal Information</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Full Name *</Label>
-                  <Input
-                    value={editForm.fullName}
-                    onChange={(e) => handleEditFieldChange('fullName', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Employee ID</Label>
-                  <Input
-                    value={editForm.employeeId}
-                    onChange={(e) => handleEditFieldChange('employeeId', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Nationality</Label>
-                  <Input
-                    value={editForm.nationality}
-                    onChange={(e) => handleEditFieldChange('nationality', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Date of Birth</Label>
-                  <Input
-                    type="date"
-                    value={editForm.dateOfBirth}
-                    onChange={(e) => handleEditFieldChange('dateOfBirth', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Phone</Label>
-                  <Input
-                    value={editForm.phone}
-                    onChange={(e) => handleEditFieldChange('phone', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Email</Label>
-                  <Input
-                    type="email"
-                    value={editForm.email}
-                    onChange={(e) => handleEditFieldChange('email', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5 col-span-2">
-                  <Label className="text-xs text-slate-400">Address</Label>
-                  <Input
-                    value={editForm.address}
-                    onChange={(e) => handleEditFieldChange('address', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Emergency Contact</Label>
-                  <Input
-                    value={editForm.emergencyContact}
-                    onChange={(e) => handleEditFieldChange('emergencyContact', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Professional Information */}
-            <div className="space-y-3 pt-2 border-t border-slate-700/50">
-              <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider">Professional Information</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Trade</Label>
-                  <Input
-                    value={editForm.trade}
-                    onChange={(e) => handleEditFieldChange('trade', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                    placeholder="e.g. Mason, Electrician, Helper"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Company Name</Label>
-                  <Input
-                    value={editForm.companyName}
-                    onChange={(e) => handleEditFieldChange('companyName', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Current Site</Label>
-                  <Input
-                    value={editForm.currentSite}
-                    onChange={(e) => handleEditFieldChange('currentSite', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                    placeholder="Site name"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Join Date</Label>
-                  <Input
-                    type="date"
-                    value={editForm.joinDate}
-                    onChange={(e) => handleEditFieldChange('joinDate', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Custom Hourly Rate (AED)</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    value={editForm.customHourlyRate}
-                    onChange={(e) => handleEditFieldChange('customHourlyRate', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                    placeholder="e.g. 6.5"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Current Total Hours</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    value={editForm.currentTotalWorkingHours}
-                    onChange={(e) => handleEditFieldChange('currentTotalWorkingHours', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                    placeholder="e.g. 850"
-                  />
-                </div>
-              </div>
-
-              {/* Role toggles */}
-              <div className="flex items-center gap-4 pt-1">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editForm.isTeamLeader}
-                    onChange={(e) => handleEditFieldChange('isTeamLeader', e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500"
-                  />
-                  <span className="text-sm text-slate-300">Team Leader</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editForm.isSupervisor}
-                    onChange={(e) => handleEditFieldChange('isSupervisor', e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
-                  />
-                  <span className="text-sm text-slate-300">Supervisor</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Identification */}
-            <div className="space-y-3 pt-2 border-t border-slate-700/50">
-              <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider">Identification Documents</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Passport Number</Label>
-                  <Input
-                    value={editForm.passportNumber}
-                    onChange={(e) => handleEditFieldChange('passportNumber', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">Passport Status</Label>
-                  <Input
-                    value={editForm.passportStatus}
-                    onChange={(e) => handleEditFieldChange('passportStatus', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                    placeholder="e.g. Valid, Expired"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">ID Number</Label>
-                  <Input
-                    value={editForm.idNumber}
-                    onChange={(e) => handleEditFieldChange('idNumber', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-slate-400">ID Status</Label>
-                  <Input
-                    value={editForm.idStatus}
-                    onChange={(e) => handleEditFieldChange('idStatus', e.target.value)}
-                    className="bg-slate-900 border-slate-600 text-white h-8"
-                    placeholder="e.g. Valid, Expired"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-700/50">
-            <Button
-              variant="outline"
-              onClick={() => setEditDialogOpen(false)}
-              className="border-slate-600 text-slate-300 hover:bg-slate-700"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleEditSubmit}
-              disabled={editSaving}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              {editSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-              Save Changes
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
