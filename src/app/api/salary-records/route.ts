@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { allocateEmployeeHours } from '@/lib/allocation-engine';
+import { safeFindPendingAdvances } from '@/lib/safe-advance';
 
 // GET /api/salary-records?siteId=xxx&month=YYYY-MM&year=YYYY
 // If siteId is not provided, returns all records for the month (for consolidated view)
@@ -63,14 +64,7 @@ export async function GET(request: NextRequest) {
     // We merge in-memory here (NOT writing to DB) so the display always reflects
     // the latest pending advances. The actual DB write happens in bulk-save.
     {
-      const pendingAdvances = await db.advance.findMany({
-        where: {
-          effectiveMonth: month,
-          effectiveYear: yearNum,
-          status: 'pending',
-          deletedAt: null,
-        },
-      });
+      const pendingAdvances = await safeFindPendingAdvances(month, yearNum);
 
       if (pendingAdvances.length > 0) {
         // Group pending advances by empId

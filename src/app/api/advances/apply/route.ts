@@ -36,16 +36,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find all pending advances for this month/year
-    const pendingAdvances = await db.advance.findMany({
-      where: {
-        effectiveMonth: month,
-        effectiveYear: year,
-        status: 'pending',
-        deletedAt: null,
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    // Find all pending advances for this month/year.
+    // Defensively handle missing Advance table (pre-migration).
+    let pendingAdvances: Array<{
+      id: string;
+      empId: string;
+      empName: string;
+      amount: number;
+      createdAt: Date;
+    }> = [];
+    try {
+      pendingAdvances = await db.advance.findMany({
+        where: {
+          effectiveMonth: month,
+          effectiveYear: year,
+          status: 'pending',
+          deletedAt: null,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+    } catch (err) {
+      console.warn(
+        '[advances/apply] Advance table missing or query failed, returning empty result.',
+        err instanceof Error ? err.message : err,
+      );
+      pendingAdvances = [];
+    }
 
     if (pendingAdvances.length === 0) {
       return NextResponse.json({

@@ -44,24 +44,60 @@ export async function GET(request: NextRequest) {
     if (empId) where.empId = empId;
     if (status) where.status = status;
 
-    const advances = await db.advance.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { empName: 'asc' }],
-      include: {
-        employee: {
-          select: {
-            id: true,
-            fullName: true,
-            employeeId: true,
-            currentSite: true,
-            currentSiteId: true,
-            trade: true,
-            nationality: true,
-            status: true,
+    // Defensively handle the case where the Advance table doesn't exist yet
+    // (pre-migration). Return [] instead of crashing.
+    let advances: Array<{
+      id: string;
+      empId: string;
+      empName: string;
+      employeeCode: string;
+      amount: number;
+      reason: string;
+      status: string;
+      effectiveMonth: string;
+      effectiveYear: number;
+      appliedToSalaryRecordId: string | null;
+      createdById: string;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+      employee: {
+        id: string;
+        fullName: string;
+        employeeId: string;
+        currentSite: string;
+        currentSiteId: string | null;
+        trade: string | null;
+        nationality: string | null;
+        status: string;
+      } | null;
+    }> = [];
+    try {
+      advances = await db.advance.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { empName: 'asc' }],
+        include: {
+          employee: {
+            select: {
+              id: true,
+              fullName: true,
+              employeeId: true,
+              currentSite: true,
+              currentSiteId: true,
+              trade: true,
+              nationality: true,
+              status: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      console.warn(
+        '[advances] Advance table missing or query failed, returning [].',
+        err instanceof Error ? err.message : err,
+      );
+      advances = [];
+    }
 
     // Group totals for quick UI display
     const totalAmount = advances.reduce((s, a) => s + a.amount, 0);

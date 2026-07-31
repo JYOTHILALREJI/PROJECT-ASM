@@ -108,31 +108,41 @@ export async function POST(request: NextRequest) {
       const totalAdvanceDeducted = salaryRecords.reduce((sum, r) => sum + r.advance, 0);
 
       if (totalAdvanceDeducted > 0) {
-        // Find all pending advances for this employee+month+year
-        const pendingAdvances = await db.advance.findMany({
-          where: {
-            empId,
-            effectiveMonth: month,
-            effectiveYear: yearNum,
-            status: 'pending',
-            deletedAt: null,
-          },
-        });
-
-        // Mark them as 'applied' and link to the first salary record
-        // (the advance has been deducted from the salary that was just paid)
-        const firstSalaryRecordId = salaryRecords[0]?.id || null;
-
-        for (const adv of pendingAdvances) {
-          await db.advance.update({
-            where: { id: adv.id },
-            data: {
-              status: 'applied',
-              appliedToSalaryRecordId: firstSalaryRecordId,
+        // Find all pending advances for this employee+month+year.
+        // Wrapped defensively — if the Advance table doesn't exist yet
+        // (pre-migration), skip the advance-marking step instead of
+        // crashing the whole toggle-paid operation.
+        try {
+          const pendingAdvances = await db.advance.findMany({
+            where: {
+              empId,
+              effectiveMonth: month,
+              effectiveYear: yearNum,
+              status: 'pending',
+              deletedAt: null,
             },
           });
-          appliedAdvanceCount++;
-          appliedAdvanceAmount += adv.amount;
+
+          // Mark them as 'applied' and link to the first salary record
+          // (the advance has been deducted from the salary that was just paid)
+          const firstSalaryRecordId = salaryRecords[0]?.id || null;
+
+          for (const adv of pendingAdvances) {
+            await db.advance.update({
+              where: { id: adv.id },
+              data: {
+                status: 'applied',
+                appliedToSalaryRecordId: firstSalaryRecordId,
+              },
+            });
+            appliedAdvanceCount++;
+            appliedAdvanceAmount += adv.amount;
+          }
+        } catch (advErr) {
+          console.warn(
+            '[toggle-paid] Advance table missing or query failed, skipping advance marking.',
+            advErr instanceof Error ? advErr.message : advErr,
+          );
         }
       }
     }

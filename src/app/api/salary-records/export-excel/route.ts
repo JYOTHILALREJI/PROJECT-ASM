@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import * as XLSX from 'xlsx';
+import { safeFindPendingAdvances } from '@/lib/safe-advance';
 
 /**
  * GET /api/salary-records/export-excel?month=YYYY-MM&year=YYYY
@@ -214,14 +215,7 @@ export async function GET(request: NextRequest) {
     // for detailed comments. This keeps the Excel export consistent with the
     // on-screen salary sheet.
     {
-      const pendingAdvances = await db.advance.findMany({
-        where: {
-          effectiveMonth: month,
-          effectiveYear: yearNum,
-          status: 'pending',
-          deletedAt: null,
-        },
-      });
+      const pendingAdvances = await safeFindPendingAdvances(month, yearNum);
 
       if (pendingAdvances.length > 0 && records.length > 0) {
         const pendingByEmp = new Map<string, number>();

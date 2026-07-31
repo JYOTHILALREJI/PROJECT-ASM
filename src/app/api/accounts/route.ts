@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
+import { safeFindPendingAdvances } from '@/lib/safe-advance';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,14 +113,7 @@ export async function GET(request: NextRequest) {
     // with no salary records yet) so their advance amount shows up too.
     const pendingByEmp = new Map<string, number>();
     {
-      const pendingAdvances = await db.advance.findMany({
-        where: {
-          effectiveMonth: month,
-          effectiveYear: yearNum,
-          status: 'pending',
-          deletedAt: null,
-        },
-      });
+      const pendingAdvances = await safeFindPendingAdvances(month, yearNum);
 
       if (pendingAdvances.length > 0) {
         // Group pending advances by empId (into the outer pendingByEmp map)

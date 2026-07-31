@@ -36,26 +36,48 @@ export async function GET(request: NextRequest) {
 
     const yearNum = parseInt(year, 10);
 
-    // Find all pending advances for this month/year
-    const pendingAdvances = await db.advance.findMany({
-      where: {
-        effectiveMonth: month,
-        effectiveYear: yearNum,
-        status: 'pending',
-        deletedAt: null,
-      },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            fullName: true,
-            employeeId: true,
-            currentSite: true,
+    // Find all pending advances for this month/year.
+    // Wrapped defensively — if the Advance table doesn't exist yet (pre-
+    // migration), return [] instead of crashing the whole endpoint.
+    let pendingAdvances: Array<{
+      id: string;
+      empId: string;
+      empName: string;
+      employeeCode: string;
+      amount: number;
+      reason: string;
+      effectiveMonth: string;
+      effectiveYear: number;
+      createdAt: Date;
+      employee: { id: string; fullName: string; employeeId: string; currentSite: string } | null;
+    }> = [];
+    try {
+      pendingAdvances = await db.advance.findMany({
+        where: {
+          effectiveMonth: month,
+          effectiveYear: yearNum,
+          status: 'pending',
+          deletedAt: null,
+        },
+        include: {
+          employee: {
+            select: {
+              id: true,
+              fullName: true,
+              employeeId: true,
+              currentSite: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+        orderBy: { createdAt: 'asc' },
+      });
+    } catch (err) {
+      console.warn(
+        '[advances/pending-by-month] Advance table missing or query failed, returning [].',
+        err instanceof Error ? err.message : err,
+      );
+      pendingAdvances = [];
+    }
 
     // Group by empId -> total amount
     const byEmp = new Map<string, { empId: string; empName: string; employeeCode: string; total: number; count: number }>();

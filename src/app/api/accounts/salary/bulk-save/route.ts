@@ -392,15 +392,30 @@ export async function POST(request: NextRequest) {
         const [advMonth, advYearStr] = combo.split('|');
         const advYear = parseInt(advYearStr, 10);
 
-        const pendingAdvances = await db.advance.findMany({
-          where: {
-            effectiveMonth: advMonth,
-            effectiveYear: advYear,
-            status: 'pending',
-            deletedAt: null,
-          },
-          orderBy: { createdAt: 'asc' },
-        });
+        // Defensively handle missing Advance table (pre-migration)
+        let pendingAdvances: Array<{
+          id: string;
+          empId: string;
+          amount: number;
+          createdAt: Date;
+        }> = [];
+        try {
+          pendingAdvances = await db.advance.findMany({
+            where: {
+              effectiveMonth: advMonth,
+              effectiveYear: advYear,
+              status: 'pending',
+              deletedAt: null,
+            },
+            orderBy: { createdAt: 'asc' },
+          });
+        } catch (advErr) {
+          console.warn(
+            '[bulk-save] Advance table missing or query failed, skipping advance application.',
+            advErr instanceof Error ? advErr.message : advErr,
+          );
+          pendingAdvances = [];
+        }
 
         for (const advance of pendingAdvances) {
           // Find this employee's salary records for this month/year (across all sites)
@@ -707,14 +722,28 @@ export async function POST(request: NextRequest) {
       for (const combo of manualMonthYearCombos) {
         const [advMonth, advYearStr] = combo.split('|');
         const advYear = parseInt(advYearStr, 10);
-        const pendingAdvances = await db.advance.findMany({
-          where: {
-            effectiveMonth: advMonth,
-            effectiveYear: advYear,
-            status: 'pending',
-            deletedAt: null,
-          },
-        });
+        // Defensively handle missing Advance table (pre-migration)
+        let pendingAdvances: Array<{
+          id: string;
+          empId: string;
+          amount: number;
+        }> = [];
+        try {
+          pendingAdvances = await db.advance.findMany({
+            where: {
+              effectiveMonth: advMonth,
+              effectiveYear: advYear,
+              status: 'pending',
+              deletedAt: null,
+            },
+          });
+        } catch (advErr) {
+          console.warn(
+            '[bulk-save manual] Advance table missing or query failed, skipping advance application.',
+            advErr instanceof Error ? advErr.message : advErr,
+          );
+          pendingAdvances = [];
+        }
         for (const advance of pendingAdvances) {
           const empSalaryRecords = await db.salaryRecord.findMany({
             where: { empId: advance.empId, month: advMonth, year: advYear, isDeleted: false },
