@@ -534,7 +534,7 @@ export function AccountsPage() {
     } finally {
       setLoading(false);
     }
-  }, [monthStr, selectedYear]);
+  }, [monthStr, selectedYear, baseRates]);
 
   useEffect(() => {
     fetchData();
@@ -592,8 +592,8 @@ export function AccountsPage() {
         setBaseRates(ratesForm);
         setShowRatesDialog(false);
         toast({ title: 'Rates updated', description: 'Base rates saved successfully.' });
-        // Refetch salary data to apply new rates
-        fetchData();
+        // fetchData will be called automatically by the useEffect below
+        // when baseRates changes (it's in the dependency array)
       } else {
         toast({ title: 'Error', description: data.error || 'Failed to save rates', variant: 'destructive' });
       }
@@ -602,7 +602,7 @@ export function AccountsPage() {
     } finally {
       setRatesSaving(false);
     }
-  }, [ratesForm, fetchData]);
+  }, [ratesForm]);
 
   // Reset edit mode when month/year changes
   useEffect(() => {
