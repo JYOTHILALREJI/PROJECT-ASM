@@ -23,32 +23,70 @@ export async function GET(
       where.year = yearNum;
     }
 
-    // 1. Fetch work logs (filtered by year if provided)
-    const workLogs = await db.workLog.findMany({
-      where,
-      orderBy: [{ year: 'asc' }, { month: 'asc' }],
-      include: {
-        site: { select: { id: true, name: true } },
-      },
-    });
-
-    // 2. Get employee info for rate calculations
-    const employee = await db.employee.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        fullName: true,
-        employeeId: true,
-        role: true,
-        isTeamLeader: true,
-        isSupervisor: true,
-        customHourlyRate: true,
-        hoursThreshold: true,
-        nationality: true,
-        trade: true,
-        currentTotalWorkingHours: true,
-      },
-    });
+    // 2. Get employee info FIRST — before any other query.
+    // This ensures we return a proper 404 (instead of a 500 from a later
+    // query) if the employee doesn't exist.
+    //
+    // Defensive: try with the full select (including currentTotalWorkingHours)
+    // first. If that fails (e.g. because the user's Prisma client wasn't
+    // regenerated after the schema change that added currentTotalWorkingHours),
+    // fall back to a simpler query without that field.
+    let employee: {
+      id: string;
+      fullName: string;
+      employeeId: string;
+      role: string;
+      isTeamLeader: boolean;
+      isSupervisor: boolean;
+      customHourlyRate: number | null;
+      hoursThreshold: number;
+      nationality: string | null;
+      trade: string | null;
+      currentTotalWorkingHours: number;
+    } | null = null;
+    try {
+      employee = await db.employee.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          fullName: true,
+          employeeId: true,
+          role: true,
+          isTeamLeader: true,
+          isSupervisor: true,
+          customHourlyRate: true,
+          hoursThreshold: true,
+          nationality: true,
+          trade: true,
+          currentTotalWorkingHours: true,
+        },
+      });
+    } catch (empErr) {
+      console.warn('[worklogs GET] employee.findUnique with full select failed, trying simpler query:', empErr instanceof Error ? empErr.message : empErr);
+      try {
+        // Fallback: query without currentTotalWorkingHours (in case the
+        // Prisma client wasn't regenerated after the schema change)
+        const empSimple = await db.employee.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            fullName: true,
+            employeeId: true,
+            role: true,
+            isTeamLeader: true,
+            isSupervisor: true,
+            customHourlyRate: true,
+            hoursThreshold: true,
+            nationality: true,
+            trade: true,
+          },
+        });
+        employee = empSimple ? { ...empSimple, currentTotalWorkingHours: 0 } : null;
+      } catch (empErr2) {
+        console.error('[worklogs GET] employee.findUnique fallback also failed:', empErr2 instanceof Error ? empErr2.message : empErr2);
+        employee = null;
+      }
+    }
 
     if (!employee) {
       return NextResponse.json(
@@ -57,36 +95,121 @@ export async function GET(
       );
     }
 
+    // 1. Fetch work logs (filtered by year if provided).
+    // Defensive: try with `include: { site }` first; if that fails (e.g.
+    // because the Site→Branch relation is broken in the user's Prisma client
+    // or DB), fall back to a query without the include and fetch site names
+    // separately.
+    let workLogs: Array<{
+      logId: number;
+      employeeId: string;
+      siteId: string;
+      year: number;
+      month: number;
+      hoursWorked: number;
+      allowances: number;
+      deductions: number;
+      deletedAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+      site?: { id: string; name: string } | null;
+    }> = [];
+    try {
+      workLogs = await db.workLog.findMany({
+        where,
+        orderBy: [{ year: 'asc' }, { month: 'asc' }],
+        include: {
+          site: { select: { id: true, name: true } },
+        },
+      });
+    } catch (wlErr) {
+      console.warn('[worklogs GET] workLog.findMany with include failed, falling back:', wlErr instanceof Error ? wlErr.message : wlErr);
+      // Fallback: query without include
+      try {
+        workLogs = await db.workLog.findMany({
+          where,
+          orderBy: [{ year: 'asc' }, { month: 'asc' }],
+        });
+      } catch (wlErr2) {
+        console.error('[worklogs GET] workLog.findMany fallback also failed:', wlErr2 instanceof Error ? wlErr2.message : wlErr2);
+        workLogs = [];
+      }
+    }
+
     const tradeRateMap = await buildTradeRateMap();
     const employeeTradeMap = await buildEmployeeTradeMap();
 
     // Trade priority: SalaryRecord (Accounts edit) > EmployeeTrade > "Helper"
-    const salaryRecsForTrade = await db.salaryRecord.findMany({
-      where: { empId: id, isDeleted: false },
-      select: { trade: true },
-      orderBy: { createdAt: 'desc' },
-      take: 1,
-    });
-    const savedTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || null;
+    // Defensive: if this query fails, fall back to EmployeeTrade or "Helper".
+    let savedTrade: string | null = null;
+    try {
+      const salaryRecsForTrade = await db.salaryRecord.findMany({
+        where: { empId: id, isDeleted: false },
+        select: { trade: true },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      });
+      savedTrade = (salaryRecsForTrade[0]?.trade && salaryRecsForTrade[0].trade.trim()) || null;
+    } catch (tradeErr) {
+      console.warn('[worklogs GET] salaryRecsForTrade query failed:', tradeErr instanceof Error ? tradeErr.message : tradeErr);
+      savedTrade = null;
+    }
     const empTradeInfo = employeeTradeMap.get(id);
     const effectiveTrade = savedTrade || empTradeInfo?.trade || 'Helper';
     const employeeWithTrade = { ...employee, trade: effectiveTrade };
     const { lowRate, highRate, isCustom } = await getEmployeeRates(employeeWithTrade, tradeRateMap);
     const threshold = employee.hoursThreshold || 1000;
 
-    // 3. Fetch ALL work logs (no year filter) for cumulative calculation
-    const allLogs = await db.workLog.findMany({
-      where: { employeeId: id, deletedAt: null },
-      orderBy: [{ year: 'asc' }, { month: 'asc' }],
-    });
+    // 3. Fetch ALL work logs (no year filter) for cumulative calculation.
+    // Defensive: if this fails, use the year-filtered workLogs as a fallback.
+    let allLogs: typeof workLogs = [];
+    try {
+      allLogs = await db.workLog.findMany({
+        where: { employeeId: id, deletedAt: null },
+        orderBy: [{ year: 'asc' }, { month: 'asc' }],
+      });
+    } catch (allLogsErr) {
+      console.warn('[worklogs GET] allLogs query failed, using year-filtered workLogs as fallback:', allLogsErr instanceof Error ? allLogsErr.message : allLogsErr);
+      allLogs = workLogs;
+    }
 
     // 4. Fetch ALL salary records (no year filter) for cumulative calculation and fallback entries
-    const allSalaryRecords = await db.salaryRecord.findMany({
-      where: {
-        empId: id,
-        isDeleted: false,
-      },
-    });
+    let allSalaryRecords: Array<{
+      id: string;
+      empId: string;
+      empName: string;
+      siteId: string;
+      siteName: string;
+      month: string;
+      year: number;
+      nationality: string;
+      trade: string;
+      employeeCode: string;
+      slNo: number;
+      totalHours: number;
+      rtPerHour: number;
+      totalSalary: number;
+      deduction: number;
+      advance: number;
+      balanceSalary: number;
+      isPaid: boolean;
+      isDeleted: boolean;
+      rateTier: string;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+    }> = [];
+    try {
+      allSalaryRecords = await db.salaryRecord.findMany({
+        where: {
+          empId: id,
+          isDeleted: false,
+        },
+      });
+    } catch (srErr) {
+      console.warn('[worklogs GET] salaryRecord.findMany failed, returning empty:', srErr instanceof Error ? srErr.message : srErr);
+      allSalaryRecords = [];
+    }
 
     // 5. Build combined month data for cumulative calculation
     // For each month, total hours = sum of work log hours + salary record hours for (siteId, month) combos not covered by work logs
