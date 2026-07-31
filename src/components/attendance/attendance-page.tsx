@@ -447,7 +447,7 @@ function SiteListView({
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
-        if (!belongsToSite(emp, dateStr, rec)) continue;
+        if (!rec || !belongsToSite(emp, dateStr, rec)) continue;
         if (rec.status === 'present') total += HOURS_PER_PRESENT;
         else if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
         else if (rec.status === 'overtime') {
@@ -467,7 +467,7 @@ function SiteListView({
         const dateStr = dateStrFor(day);
         if (!isInRange(emp, dateStr)) continue;
         const rec = attendanceMap.get(`${emp.id}-${dateStr}`);
-        if (!belongsToSite(emp, dateStr, rec)) continue;
+        if (!rec || !belongsToSite(emp, dateStr, rec)) continue;
         if (rec.status === 'camp_sitting') total += HOURS_PER_CAMP_SITTING;
       }
       return total;
