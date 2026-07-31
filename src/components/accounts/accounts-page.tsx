@@ -227,6 +227,7 @@ function mergeApiEntries(
   entries: ApiEmployeeEntry[],
   siteId: string,
   siteName: string,
+  baseRates?: { standardLow: number; standardHigh: number; tlLow: number; tlHigh: number; supLow: number; supHigh: number } | null,
 ): MergedEmployeeRow[] {
   const grouped = new Map<string, ApiEmployeeEntry[]>();
   for (const entry of entries) {
@@ -281,10 +282,14 @@ function mergeApiEntries(
       lowRate = bonusAdjustedRate;
       highRate = bonusAdjustedRate;
     } else {
-      // Priority 3: Helper default (hardcoded fallback — the API already
-      // uses DB-configured base rates, so this is just a display fallback)
-      lowRate = hasBonus ? 3.0 : 2.5;
-      highRate = hasBonus ? 5.5 : 5.0;
+      // Priority 3: Helper default — use DB-configured base rates
+      const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
+      lowRate = hasBonus
+        ? (baseEntry.isTeamLeader ? br.tlLow : br.supLow)
+        : br.standardLow;
+      highRate = hasBonus
+        ? (baseEntry.isTeamLeader ? br.tlHigh : br.supHigh)
+        : br.standardHigh;
     }
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
@@ -489,7 +494,7 @@ export function AccountsPage() {
         // live trade rates) instead of the stale DB totals.
         const empMap: Record<string, MergedEmployeeRow[]> = {};
         for (const s of siteResults) {
-          empMap[s.site.id] = mergeApiEntries(s.employees, s.site.id, s.site.name);
+          empMap[s.site.id] = mergeApiEntries(s.employees, s.site.id, s.site.name, baseRates);
         }
         setSiteEmployees(empMap);
         setOriginalSiteEmployees(JSON.parse(JSON.stringify(empMap)));
@@ -847,8 +852,8 @@ export function AccountsPage() {
             highRateHours: 0,
             previousCumulativeHours: 0,
             hoursThreshold: 1000,
-            lowRate: 2.5,
-            highRate: 5.0,
+            lowRate: baseRates?.standardLow ?? 2.5,
+            highRate: baseRates?.standardHigh ?? 5.0,
             totalSalary: 0,
             deduction: 0,
             advance: 0,
@@ -1236,8 +1241,8 @@ export function AccountsPage() {
   }, []);
 
   // ── Column headers ──
-  const lowRateHeader = 'Rate 2.5/3.0';
-  const highRateHeader = 'Rate 5.0/5.5';
+  const lowRateHeader = `Rate ${baseRates?.standardLow ?? 2.5}/${baseRates?.tlLow ?? 3.0}`;
+  const highRateHeader = `Rate ${baseRates?.standardHigh ?? 5.0}/${baseRates?.tlHigh ?? 5.5}`;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1780,8 +1785,9 @@ export function AccountsPage() {
                                         } else {
                                           // Reset to standard rates if no trade rate
                                           const hasBonus = emp.isTeamLeader || emp.isSupervisor;
-                                          handleCellChange(site.id, index, 'lowRate', hasBonus ? 3.0 : 2.5);
-                                          handleCellChange(site.id, index, 'highRate', hasBonus ? 5.5 : 5.0);
+                                          const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
+                                          handleCellChange(site.id, index, 'lowRate', hasBonus ? (emp.isTeamLeader ? br.tlLow : br.supLow) : br.standardLow);
+                                          handleCellChange(site.id, index, 'highRate', hasBonus ? (emp.isTeamLeader ? br.tlHigh : br.supHigh) : br.standardHigh);
                                         }
                                       }}
                                       className="h-6 text-[11px] bg-slate-900/80 border-slate-600/50 text-white w-full py-0 px-1.5 rounded"

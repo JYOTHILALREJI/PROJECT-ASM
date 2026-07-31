@@ -630,8 +630,8 @@ export async function allocateEmployeeHours(
       empCustomRate !== null && empCustomRate !== undefined
         ? empCustomRate
         : (aggregateTotal >= empThreshold
-          ? (empHasBonus ? 5.5 : 5.0)
-          : (empHasBonus ? 3.0 : 2.5));
+          ? (empHasBonus ? (employee.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh) : baseRates.standardHigh)
+          : (empHasBonus ? (employee.isTeamLeader ? baseRates.tlLow : baseRates.supLow) : baseRates.standardLow));
 
     const isCustom = currentMonthWhRecord?.isCustom ?? false;
     const effectiveRt = isCustom
@@ -676,7 +676,7 @@ export async function allocateEmployeeHours(
           empName: allocation.empName,
           month: m,
           totalWorkingHours: monthTotal,
-          rtPerHour: 2.5,
+          rtPerHour: baseRates.standardLow,
           isCustom: false,
         },
       });
@@ -705,14 +705,14 @@ export function computeAllocationSplit(params: {
   isCustomRate?: boolean;
   customRate?: number;
   customHourlyRate?: number | null;
+  baseRates?: { standardLow: number; standardHigh: number; tlLow: number; tlHigh: number; supLow: number; supHigh: number };
 }): SiteAllocation[] {
-  const { previousCumulative, currentMonthSiteHours, threshold, isTeamLeader, isSupervisor, isCustomRate = false, customRate, customHourlyRate = null } = params;
+  const { previousCumulative, currentMonthSiteHours, threshold, isTeamLeader, isSupervisor, isCustomRate = false, customRate, customHourlyRate = null, baseRates } = params;
   const hasBonus = isTeamLeader || isSupervisor;
   // Direct hourly rates (PRD v2.0 — no divisors)
-  // Use default base rates for this pure function (can't be async).
-  // The caller (allocateEmployeeHours) already uses DB base rates.
-  const baseLow = hasBonus ? (isTeamLeader ? 3.0 : 3.0) : 2.5;
-  const baseHigh = hasBonus ? (isTeamLeader ? 5.5 : 5.5) : 5.0;
+  const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
+  const baseLow = hasBonus ? (isTeamLeader ? br.tlLow : br.supLow) : br.standardLow;
+  const baseHigh = hasBonus ? (isTeamLeader ? br.tlHigh : br.supHigh) : br.standardHigh;
   const effectiveCustomRate = customHourlyRate != null ? customHourlyRate : (customRate ?? baseLow);
   const effectiveIsCustom = isCustomRate || customHourlyRate != null;
   const lowRate = effectiveIsCustom && effectiveCustomRate

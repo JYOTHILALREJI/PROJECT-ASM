@@ -214,6 +214,7 @@ function mergeApiEntries(
   siteName: string,
   branchId: string | null = null,
   branchName: string | null = null,
+  baseRates?: { standardLow: number; standardHigh: number; tlLow: number; tlHigh: number; supLow: number; supHigh: number } | null,
 ): MergedEmployeeRow[] {
   const grouped = new Map<string, ApiEmployeeEntry[]>();
   for (const entry of entries) {
@@ -265,9 +266,14 @@ function mergeApiEntries(
       lowRate = bonusAdjustedRate;
       highRate = bonusAdjustedRate;
     } else {
-      // Priority 3: Helper default
-      lowRate = hasBonus ? 3.0 : 2.5;
-      highRate = hasBonus ? 5.5 : 5.0;
+      // Priority 3: Helper default — use DB-configured base rates
+      const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
+      lowRate = hasBonus
+        ? (baseEntry.isTeamLeader ? br.tlLow : br.supLow)
+        : br.standardLow;
+      highRate = hasBonus
+        ? (baseEntry.isTeamLeader ? br.tlHigh : br.supHigh)
+        : br.standardHigh;
     }
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
@@ -597,6 +603,13 @@ export function ConsolidatedSalaryPage() {
   const [fetchKey, setFetchKey] = useState(0); // DB-first invalidation key
   const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
 
+  // Base rates (fetched from /api/base-rates)
+  const [baseRates, setBaseRates] = useState<{
+    standardLow: number; standardHigh: number;
+    tlLow: number; tlHigh: number;
+    supLow: number; supHigh: number;
+  } | null>(null);
+
   const yearOptions = useMemo(() => {
     const currentYear = now.getFullYear();
     return [
@@ -639,6 +652,7 @@ export function ConsolidatedSalaryPage() {
             s.site.name,
             s.site.branchId ?? null,
             s.site.branch?.name ?? null,
+            baseRates,
           );
         }
         setPerSiteRows(empMap);
@@ -661,6 +675,22 @@ export function ConsolidatedSalaryPage() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Fetch base rates on mount
+  useEffect(() => {
+    const fetchBaseRates = async () => {
+      try {
+        const res = await fetch('/api/base-rates');
+        const data = await res.json();
+        if (data.success) {
+          setBaseRates(data.data);
+        }
+      } catch {
+        // silent — use null (defaults will be used)
+      }
+    };
+    fetchBaseRates();
   }, []);
 
   useEffect(() => {
