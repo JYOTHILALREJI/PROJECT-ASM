@@ -37,14 +37,17 @@ export async function getBaseRates(): Promise<BaseRates> {
   if (cachedRates) return cachedRates;
 
   try {
-    // Check if db.baseRate exists (might not if prisma generate wasn't run)
-    if (!db.baseRate) {
+    // Check if db.baseRate exists (might not if prisma generate wasn't run
+    // after the schema change that added the BaseRate model)
+    const baseRateModel = (db as Record<string, unknown>).baseRate;
+    if (!baseRateModel || typeof baseRateModel !== 'object') {
       return DEFAULT_RATES;
     }
-    let record = await db.baseRate.findUnique({ where: { id: 'singleton' } });
+    const model = baseRateModel as { findUnique: Function; create: Function };
+    let record = await model.findUnique({ where: { id: 'singleton' } });
     if (!record) {
       // Create with defaults
-      record = await db.baseRate.create({ data: { id: 'singleton' } });
+      record = await model.create({ data: { id: 'singleton' } });
     }
     cachedRates = {
       standardLow: record.standardLow,
@@ -67,8 +70,13 @@ export async function getBaseRates(): Promise<BaseRates> {
  */
 export async function updateBaseRates(rates: BaseRates): Promise<void> {
   try {
-    if (!db.baseRate) return; // BaseRate model not available
-    await db.baseRate.upsert({
+    const baseRateModel = (db as Record<string, unknown>).baseRate;
+    if (!baseRateModel || typeof baseRateModel !== 'object') {
+      cachedRates = rates;
+      return;
+    }
+    const model = baseRateModel as { upsert: Function };
+    await model.upsert({
       where: { id: 'singleton' },
       update: {
         standardLow: rates.standardLow,

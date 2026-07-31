@@ -4,6 +4,8 @@ import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/accounts
 // Mode 1: Per-site query (siteId + month required) → returns salary records for that site
 // Mode 2: Consolidated query (month required, no siteId) → returns all sites with employees

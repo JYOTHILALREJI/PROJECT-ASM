@@ -519,9 +519,11 @@ export function AccountsPage() {
         });
         setSites(mappedSites);
       } else {
+        console.error('[Accounts fetchData] API error:', json.error);
         toast({ title: 'Error', description: json.error || 'Failed to load data', variant: 'destructive' });
       }
-    } catch {
+    } catch (fetchErr) {
+      console.error('[Accounts fetchData] Network/parse error:', fetchErr);
       toast({ title: 'Error', description: 'Failed to load salary data', variant: 'destructive' });
     } finally {
       setLoading(false);
