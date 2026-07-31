@@ -867,8 +867,8 @@ export function EmployeePage() {
       try {
         const res = await fetch(`/api/employees/${empId}`);
         const json = await res.json();
-        if (json.success && json.employee) {
-          openEditDialog(json.employee);
+        if (json.success && json.data && json.data.employee) {
+          openEditDialog(json.data.employee);
         }
       } catch {
         // silent

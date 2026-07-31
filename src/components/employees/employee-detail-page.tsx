@@ -417,14 +417,14 @@ export function EmployeeDetailPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/employees/${selectedEmployeeId}`);
-      const data = await res.json();
-      if (data.success) {
-        setEmployee(data.employee);
-        if (data.employee.currentTotalWorkingHours != null) {
-          setQuickHoursValue(String(data.employee.currentTotalWorkingHours));
+      const json = await res.json();
+      if (json.success && json.data && json.data.employee) {
+        setEmployee(json.data.employee);
+        if (json.data.employee.currentTotalWorkingHours != null) {
+          setQuickHoursValue(String(json.data.employee.currentTotalWorkingHours));
         }
       } else {
-        toast({ title: 'Error', description: data.error || 'Failed to load employee', variant: 'destructive' });
+        toast({ title: 'Error', description: json.error || 'Failed to load employee', variant: 'destructive' });
       }
     } catch {
       toast({ title: 'Error', description: 'Failed to load employee', variant: 'destructive' });
