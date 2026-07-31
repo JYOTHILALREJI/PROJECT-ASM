@@ -281,9 +281,10 @@ function mergeApiEntries(
       lowRate = bonusAdjustedRate;
       highRate = bonusAdjustedRate;
     } else {
-      // Priority 3: Helper default
-      lowRate = hasBonus ? (baseEntry.isTeamLeader ? (baseRates?.tlLow ?? 3.0) : (baseRates?.supLow ?? 3.0)) : (baseRates?.standardLow ?? 2.5);
-      highRate = hasBonus ? (baseEntry.isTeamLeader ? (baseRates?.tlHigh ?? 5.5) : (baseRates?.supHigh ?? 5.5)) : (baseRates?.standardHigh ?? 5.0);
+      // Priority 3: Helper default (hardcoded fallback — the API already
+      // uses DB-configured base rates, so this is just a display fallback)
+      lowRate = hasBonus ? 3.0 : 2.5;
+      highRate = hasBonus ? 5.5 : 5.0;
     }
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
