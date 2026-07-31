@@ -232,8 +232,11 @@ export async function GET(request: NextRequest) {
           if (appliedEmps.has(r.empId)) continue;
           if (r.rateTier !== 'standard') continue;
 
-          const newAdvance = r.advance + pending;
-          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          const newAdvanceRaw = r.advance + pending;
+          // Clamp: salary never goes below 0
+          const maxAdvance = Math.max(0, r.totalSalary - r.deduction);
+          const newAdvance = Math.min(newAdvanceRaw, maxAdvance);
+          const newBalance = Math.max(0, r.totalSalary - r.deduction - newAdvance);
           records[i] = {
             ...r,
             advance: newAdvance,
@@ -248,12 +251,15 @@ export async function GET(request: NextRequest) {
           const pending = pendingByEmp.get(r.empId);
           if (pending === undefined) continue;
 
-          const newAdvance = r.advance + pending;
-          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          const newAdvanceRaw = r.advance + pending;
+          // Clamp: salary never goes below 0
+          const maxAdvance2 = Math.max(0, r.totalSalary - r.deduction);
+          const newAdvance2 = Math.min(newAdvanceRaw, maxAdvance2);
+          const newBalance2 = Math.max(0, r.totalSalary - r.deduction - newAdvance2);
           records[i] = {
             ...r,
-            advance: newAdvance,
-            balanceSalary: newBalance,
+            advance: newAdvance2,
+            balanceSalary: newBalance2,
           };
           appliedEmps.add(r.empId);
         }

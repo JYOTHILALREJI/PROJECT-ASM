@@ -135,10 +135,14 @@ export async function GET(request: NextRequest) {
           if (r.rateTier !== 'standard') continue;
 
           const newAdvance = r.advance + pending;
-          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          // Clamp: advance + deduction must never exceed totalSalary.
+          // If it does, cap the advance so balance = 0 (salary never negative).
+          const maxAdvance = Math.max(0, r.totalSalary - r.deduction);
+          const clampedAdvance = Math.min(newAdvance, maxAdvance);
+          const newBalance = Math.max(0, r.totalSalary - r.deduction - clampedAdvance);
           allSalaryRecords[i] = {
             ...r,
-            advance: newAdvance,
+            advance: clampedAdvance,
             balanceSalary: newBalance,
           };
           appliedEmps.add(r.empId);
@@ -152,11 +156,14 @@ export async function GET(request: NextRequest) {
           if (pending === undefined) continue;
 
           const newAdvance = r.advance + pending;
-          const newBalance = r.totalSalary - r.deduction - newAdvance;
+          // Same clamping as above
+          const maxAdvance2 = Math.max(0, r.totalSalary - r.deduction);
+          const clampedAdvance2 = Math.min(newAdvance, maxAdvance2);
+          const newBalance2 = Math.max(0, r.totalSalary - r.deduction - clampedAdvance2);
           allSalaryRecords[i] = {
             ...r,
-            advance: newAdvance,
-            balanceSalary: newBalance,
+            advance: clampedAdvance2,
+            balanceSalary: newBalance2,
           };
           appliedEmps.add(r.empId);
         }

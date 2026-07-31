@@ -394,7 +394,8 @@ export async function recalcEmployeeFromMonth(
             totalHours: sh.hours,
             rtPerHour: monthLowRate,
             totalSalary: siteSalary,
-            balanceSalary: siteSalary - existingDeduction - existingAdvance,
+            // Clamp: salary never goes below 0
+            balanceSalary: Math.max(0, siteSalary - existingDeduction - existingAdvance),
             deduction: existingDeduction,
             advance: existingAdvance,
             isPaid: existingIsPaid,
@@ -554,7 +555,8 @@ export async function recalcEmployeeFromMonth(
               totalHours: parseFloat(split.siteBelow.toFixed(2)),
               rtPerHour: monthLowRate,
               totalSalary: parseFloat(stdSalary.toFixed(2)),
-              balanceSalary: parseFloat((stdSalary - stdDeduction - stdAdvance).toFixed(2)),
+              // Clamp: salary never goes below 0
+              balanceSalary: parseFloat(Math.max(0, stdSalary - stdDeduction - stdAdvance).toFixed(2)),
               deduction: stdDeduction,
               advance: stdAdvance,
               isPaid: existingIsPaid,
@@ -614,7 +616,8 @@ export async function recalcEmployeeFromMonth(
               totalHours: parseFloat(split.siteAbove.toFixed(2)),
               rtPerHour: monthHighRate,
               totalSalary: parseFloat(premSalary.toFixed(2)),
-              balanceSalary: parseFloat((premSalary - premDeduction - premAdvance).toFixed(2)),
+              // Clamp: salary never goes below 0
+              balanceSalary: parseFloat(Math.max(0, premSalary - premDeduction - premAdvance).toFixed(2)),
               deduction: premDeduction,
               advance: premAdvance,
               isPaid: existingIsPaid,

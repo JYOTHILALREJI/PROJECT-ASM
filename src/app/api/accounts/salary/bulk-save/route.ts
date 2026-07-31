@@ -462,9 +462,13 @@ export async function POST(request: NextRequest) {
             });
             advancesApplied++;
           } else {
-            // Not merged — add the pending amount to the advance field
-            const newAdvance = targetRecord.advance + advance.amount;
-            const newBalance = targetRecord.totalSalary - targetRecord.deduction - newAdvance;
+            // Not merged — add the pending amount to the advance field.
+            // Clamp: advance + deduction must never exceed totalSalary (salary
+            // never goes below 0). Cap the advance at totalSalary - deduction.
+            const newAdvanceRaw = targetRecord.advance + advance.amount;
+            const maxAdvance = Math.max(0, targetRecord.totalSalary - targetRecord.deduction);
+            const newAdvance = Math.min(newAdvanceRaw, maxAdvance);
+            const newBalance = Math.max(0, targetRecord.totalSalary - targetRecord.deduction - newAdvance);
 
             const updatedSalaryRecord = await db.salaryRecord.update({
               where: { id: targetRecord.id },
@@ -811,9 +815,12 @@ export async function POST(request: NextRequest) {
             });
             manualAdvancesApplied++;
           } else {
-            // Not merged — add the pending amount
-            const newAdvance = target.advance + advance.amount;
-            const newBalance = target.totalSalary - target.deduction - newAdvance;
+            // Not merged — add the pending amount.
+            // Clamp: salary never goes below 0.
+            const newAdvanceRaw = target.advance + advance.amount;
+            const maxAdvance = Math.max(0, target.totalSalary - target.deduction);
+            const newAdvance = Math.min(newAdvanceRaw, maxAdvance);
+            const newBalance = Math.max(0, target.totalSalary - target.deduction - newAdvance);
             const updated = await db.salaryRecord.update({
               where: { id: target.id },
               data: { advance: newAdvance, balanceSalary: newBalance },

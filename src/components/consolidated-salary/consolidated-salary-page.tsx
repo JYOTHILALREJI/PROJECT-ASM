@@ -323,7 +323,8 @@ function mergeApiEntries(
       totalSalary,
       deduction,
       advance,
-      balanceSalary: totalSalary - deduction - advance,
+      // Clamp: salary never goes below 0
+      balanceSalary: Math.max(0, totalSalary - deduction - advance),
       isPaid,
       standardRecordId: standardEntry?.salaryRecord?.id ?? null,
       premiumRecordId: premiumEntry?.salaryRecord?.id ?? null,

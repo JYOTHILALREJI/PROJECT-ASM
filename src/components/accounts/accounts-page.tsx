@@ -339,7 +339,9 @@ function mergeApiEntries(
       totalSalary,
       deduction,
       advance,
-      balanceSalary: totalSalary - deduction - advance,
+      // Clamp: salary never goes below 0. If advance + deduction > totalSalary,
+      // cap the advance at totalSalary - deduction so balance = 0.
+      balanceSalary: Math.max(0, totalSalary - deduction - advance),
       isPaid,
       standardRecordId: standardEntry?.salaryRecord?.id ?? null,
       premiumRecordId: premiumEntry?.salaryRecord?.id ?? null,
@@ -652,7 +654,7 @@ export function AccountsPage() {
             u.lowRateHours = u.totalHours;
             u.highRateHours = 0;
             u.totalSalary = u.lowRateHours * u.lowRate;
-            u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+            u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
             u.rateTier = 'standard';
           } else {
             const threshold = u.hoursThreshold || 1000;
@@ -672,38 +674,48 @@ export function AccountsPage() {
             }
 
             u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-            u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+            u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
             u.rateTier = u.highRateHours > 0 ? (u.lowRateHours > 0 ? 'split' : 'premium') : 'standard';
           }
         }
 
-        if (field === 'deduction' || field === 'advance') {
+        if (field === 'deduction') {
           u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+          // Clamp balanceSalary to never go below 0.
+          // The advance + deduction should never exceed totalSalary.
+          // If it does, cap the deduction so balance = 0 (salary never negative).
+          const maxDeduction = Math.max(0, u.totalSalary - u.advance);
+          u.deduction = Math.min(u.deduction, maxDeduction);
+          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
         }
 
         if (field === 'lowRateHours') {
           u.totalHours = u.lowRateHours + u.highRateHours;
           u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
           u.rateTier = u.highRateHours > 0 ? (u.lowRateHours > 0 ? 'split' : 'premium') : 'standard';
         }
 
         if (field === 'highRateHours') {
           u.totalHours = u.lowRateHours + u.highRateHours;
           u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
           u.rateTier = u.highRateHours > 0 ? (u.lowRateHours > 0 ? 'split' : 'premium') : 'standard';
         }
 
         if (field === 'lowRate') {
           u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
         }
 
         if (field === 'highRate') {
           u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = u.totalSalary - u.deduction - u.advance;
+          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+        }
+
+        // Also clamp for the 'totalHours' field case (non-custom rate)
+        if (field === 'totalHours') {
+          u.balanceSalary = Math.max(0, u.balanceSalary);
         }
 
         return u;
@@ -1888,14 +1900,16 @@ export function AccountsPage() {
                                   </div>
                                 </td>
 
-                                {/* Advance */}
+                                {/* Advance — READ ONLY.
+                                 * The advance (cutting) amount is set in the
+                                 * Advance Management page only, either as a
+                                 * one-time advance or a recurring monthly
+                                 * deduction. It must NOT be editable here.
+                                 */}
                                 <td className="py-1.5 px-2 text-right">
-                                  <EditableCell
-                                    value={emp.advance}
-                                    onChange={(v) => handleCellChange(site.id, index, 'advance', v as number)}
-                                    className="text-[11px] text-slate-300 font-mono"
-                                    editMode={editMode}
-                                  />
+                                  <span className="text-[11px] text-slate-300 font-mono">
+                                    {emp.advance === 0 ? '-' : formatNumber(emp.advance)}
+                                  </span>
                                 </td>
 
                                 {/* Deduction */}

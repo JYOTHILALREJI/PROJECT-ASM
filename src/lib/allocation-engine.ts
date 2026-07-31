@@ -374,7 +374,7 @@ export async function allocateEmployeeHours(
         const totalSalary = alloc.lowRateHours * effectiveLowRate;
         const carryDeduction = siteData.existingStandard?.deduction ?? 0;
         const carryAdvance = siteData.existingStandard?.advance ?? 0;
-        const balanceSalary = totalSalary - carryDeduction - carryAdvance;
+        const balanceSalary = Math.max(0, totalSalary - carryDeduction - carryAdvance);
 
         await db.salaryRecord.upsert({
           where: {
@@ -461,7 +461,7 @@ export async function allocateEmployeeHours(
         const totalSalary = alloc.highRateHours * effectiveHighRate;
         const carryDeduction = siteData.existingPremium?.deduction ?? 0;
         const carryAdvance = siteData.existingPremium?.advance ?? 0;
-        const balanceSalary = totalSalary - carryDeduction - carryAdvance;
+        const balanceSalary = Math.max(0, totalSalary - carryDeduction - carryAdvance);
 
         await db.salaryRecord.upsert({
           where: {
