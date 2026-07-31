@@ -153,15 +153,47 @@ function formatCurrency(amount: number): string {
 }
 
 // ─── Rate color helper (direct rates — NO divisors) ─────────────────────
+//
+// Compares the given rate against the DB-configured base rates to decide
+// which badge color to use. If baseRates is not yet loaded (null), falls
+// back to the default values (2.5/3.0 below, 5.0/5.5 above).
+//
+//   - emerald = below-threshold rate (standardLow, tlLow, or supLow)
+//   - green   = above-threshold rate (standardHigh, tlHigh, or supHigh)
+//   - violet  = custom rate or any rate that doesn't match the base rates
 
-function getRateColor(rate: number, isCustomRate: boolean): 'emerald' | 'green' | 'violet' {
+interface BaseRatesForColor {
+  standardLow: number; standardHigh: number;
+  tlLow: number; tlHigh: number;
+  supLow: number; supHigh: number;
+}
+
+function getRateColor(
+  rate: number,
+  isCustomRate: boolean,
+  baseRates?: BaseRatesForColor | null,
+): 'emerald' | 'green' | 'violet' {
   if (isCustomRate) return 'violet';
 
-  // Direct rate comparison: 2.5 or 3.0 = below threshold (emerald)
-  if (Math.abs(rate - 2.5) < 0.01 || Math.abs(rate - 3.0) < 0.01) return 'emerald';
+  const br = baseRates ?? {
+    standardLow: 2.5, standardHigh: 5.0,
+    tlLow: 3.0, tlHigh: 5.5,
+    supLow: 3.0, supHigh: 5.5,
+  };
 
-  // Direct rate comparison: 5.0 or 5.5 = above threshold (green)
-  if (Math.abs(rate - 5.0) < 0.01 || Math.abs(rate - 5.5) < 0.01) return 'green';
+  // Below-threshold rates (emerald)
+  if (
+    Math.abs(rate - br.standardLow) < 0.01 ||
+    Math.abs(rate - br.tlLow) < 0.01 ||
+    Math.abs(rate - br.supLow) < 0.01
+  ) return 'emerald';
+
+  // Above-threshold rates (green)
+  if (
+    Math.abs(rate - br.standardHigh) < 0.01 ||
+    Math.abs(rate - br.tlHigh) < 0.01 ||
+    Math.abs(rate - br.supHigh) < 0.01
+  ) return 'green';
 
   return 'violet';
 }
@@ -227,6 +259,14 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   const [editableRows, setEditableRows] = useState<EditableRow[]>([]);
   const [isSavingEdits, setIsSavingEdits] = useState(false);
   const [changedMonths, setChangedMonths] = useState<Set<string>>(new Set());
+
+  // ── Base rates (fetched from /api/base-rates, same as Accounts page) ──
+  // Used as fallbacks instead of hardcoded 2.5/5.0/3.0/5.5.
+  const [baseRates, setBaseRates] = useState<{
+    standardLow: number; standardHigh: number;
+    tlLow: number; tlHigh: number;
+    supLow: number; supHigh: number;
+  } | null>(null);
 
   // ── Paid-month confirmation state ──
   const [paidMonthDialog, setPaidMonthDialog] = useState<{
@@ -297,6 +337,23 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
     fetchWorkLogs();
   }, [fetchWorkLogs]);
 
+  // Fetch base rates on mount (same pattern as Accounts & Consolidated Salary
+  // pages). Used as fallbacks instead of hardcoded 2.5/5.0/3.0/5.5.
+  useEffect(() => {
+    const fetchBaseRates = async () => {
+      try {
+        const res = await fetch('/api/base-rates');
+        const data = await res.json();
+        if (data.success) {
+          setBaseRates(data.data);
+        }
+      } catch {
+        // silent — use null (defaults will be used)
+      }
+    };
+    fetchBaseRates();
+  }, []);
+
   // ── Available years ──
   const availableYears = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -340,8 +397,8 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
           deductions: 0,
           cumulativeBefore: 0,
           cumulativeAfter: 0,
-          lowRate: employeeInfo?.lowRate ?? 2.5,
-          highRate: employeeInfo?.highRate ?? 5.0,
+          lowRate: employeeInfo?.lowRate ?? baseRates?.standardLow ?? 2.5,
+          highRate: employeeInfo?.highRate ?? baseRates?.standardHigh ?? 5.0,
           isCustom: employeeInfo?.isCustom ?? false,
           belowHours: 0,
           aboveHours: 0,
@@ -362,7 +419,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
       }
     }
     return grid;
-  }, [workLogs, selectedYear, employeeId, employeeDetails, employeeInfo]);
+  }, [workLogs, selectedYear, employeeId, employeeDetails, employeeInfo, baseRates]);
 
   // ── Threshold crossing detection ──
   const thresholdCrossMonth = useMemo(() => {
