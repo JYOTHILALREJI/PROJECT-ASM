@@ -856,28 +856,6 @@ export function EmployeePage() {
     }
   }, []);
 
-  // ── Listen for 'editEmployee' events from the Employee Detail page ──
-  // When the user clicks "Edit" on the detail page, it navigates back here
-  // and dispatches this event. We fetch the employee by ID and open the
-  // edit dialog.
-  useEffect(() => {
-    const handleEditEvent = async (e: Event) => {
-      const empId = (e as CustomEvent<string>).detail;
-      if (!empId) return;
-      try {
-        const res = await fetch(`/api/employees/${empId}`);
-        const json = await res.json();
-        if (json.success && json.data && json.data.employee) {
-          openEditDialog(json.data.employee);
-        }
-      } catch {
-        // silent
-      }
-    };
-    window.addEventListener('editEmployee', handleEditEvent as EventListener);
-    return () => window.removeEventListener('editEmployee', handleEditEvent as EventListener);
-  }, []);
-
   // ── Auto-generate employee ID ──
   const generateAutoId = useCallback(() => {
     const year = new Date().getFullYear();

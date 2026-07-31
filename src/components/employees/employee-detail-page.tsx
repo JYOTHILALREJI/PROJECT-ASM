@@ -29,6 +29,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
@@ -411,6 +419,35 @@ export function EmployeeDetailPage() {
   const [quickHoursSaving, setQuickHoursSaving] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
 
+  // ── Edit dialog state ──
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    fullName: '',
+    employeeId: '',
+    nationality: '',
+    dateOfBirth: '',
+    phone: '',
+    email: '',
+    address: '',
+    emergencyContact: '',
+    trade: '',
+    position: '',
+    joinDate: '',
+    companyName: '',
+    passportNumber: '',
+    passportStatus: '',
+    idNumber: '',
+    idStatus: '',
+    currentSite: '',
+    isTeamLeader: false,
+    teamLeaderSiteId: '',
+    isSupervisor: false,
+    supervisorSiteId: '',
+    customHourlyRate: '',
+    currentTotalWorkingHours: '',
+  });
+
   // Fetch employee details
   const fetchEmployee = useCallback(async () => {
     if (!selectedEmployeeId) return;
@@ -509,6 +546,89 @@ export function EmployeeDetailPage() {
     }
   };
 
+  // ── Edit dialog handlers ──
+  const openEditDialog = () => {
+    if (!employee) return;
+    setEditForm({
+      fullName: employee.fullName || '',
+      employeeId: employee.employeeId || '',
+      nationality: employee.nationality || '',
+      dateOfBirth: employee.dateOfBirth ? employee.dateOfBirth.split('T')[0] : '',
+      phone: employee.phone || '',
+      email: employee.email || '',
+      address: employee.address || '',
+      emergencyContact: employee.emergencyContact || '',
+      trade: employee.trade || employee.position || '',
+      position: employee.position || '',
+      joinDate: employee.joinDate ? employee.joinDate.split('T')[0] : '',
+      companyName: employee.companyName || '',
+      passportNumber: employee.passportNumber || '',
+      passportStatus: employee.passportStatus || '',
+      idNumber: employee.idNumber || '',
+      idStatus: employee.idStatus || '',
+      currentSite: employee.currentSite || '',
+      isTeamLeader: employee.isTeamLeader || false,
+      teamLeaderSiteId: employee.teamLeaderSiteId || '',
+      isSupervisor: employee.isSupervisor || false,
+      supervisorSiteId: employee.supervisorSiteId || '',
+      customHourlyRate: employee.customHourlyRate != null ? String(employee.customHourlyRate) : '',
+      currentTotalWorkingHours: employee.currentTotalWorkingHours != null ? String(employee.currentTotalWorkingHours) : '',
+    });
+    setEditDialogOpen(true);
+  };
+
+  const handleEditFieldChange = (field: string, value: string | boolean) => {
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleEditSubmit = async () => {
+    if (!employee) return;
+    if (!editForm.fullName.trim()) {
+      toast({ title: 'Validation Error', description: 'Full name is required', variant: 'destructive' });
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const payload: Record<string, unknown> = {
+        ...editForm,
+        employeeId: editForm.employeeId?.trim() || null,
+        trade: editForm.trade || null,
+        position: editForm.trade || null,
+        isTeamLeader: editForm.isTeamLeader,
+        teamLeaderSiteId: editForm.isTeamLeader ? (editForm.teamLeaderSiteId || null) : null,
+        isSupervisor: editForm.isSupervisor,
+        supervisorSiteId: editForm.isSupervisor ? (editForm.supervisorSiteId || null) : null,
+        customHourlyRate: editForm.customHourlyRate ? parseFloat(editForm.customHourlyRate) : null,
+        currentTotalWorkingHours: editForm.currentTotalWorkingHours !== '' ? parseFloat(editForm.currentTotalWorkingHours) : 0,
+      };
+      // Clear empty strings
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === '' && key !== 'isTeamLeader' && key !== 'isSupervisor' && key !== 'employeeId') {
+          payload[key] = null;
+        }
+      });
+
+      const res = await fetch(`/api/employees/${employee.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: 'Employee Updated', description: `${editForm.fullName} has been updated successfully.` });
+        setEditDialogOpen(false);
+        // Refresh the employee data
+        await fetchEmployee();
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to update employee', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update employee', variant: 'destructive' });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   // ── Loading state ──
   if (loading && !employee) {
     return (
@@ -583,13 +703,7 @@ export function EmployeeDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              useAppStore.getState().setCurrentView('employees');
-              // Trigger edit — the employee page listens for this
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('editEmployee', { detail: employee.id }));
-              }, 100);
-            }}
+            onClick={openEditDialog}
             className="border-slate-700 text-slate-300 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/50"
           >
             <Pencil className="h-4 w-4 mr-1.5" />
@@ -781,6 +895,241 @@ export function EmployeeDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Edit Dialog ─── */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">Edit Employee</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Update employee information. Changes are saved to the database.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Personal Information */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider">Personal Information</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Full Name *</Label>
+                  <Input
+                    value={editForm.fullName}
+                    onChange={(e) => handleEditFieldChange('fullName', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Employee ID</Label>
+                  <Input
+                    value={editForm.employeeId}
+                    onChange={(e) => handleEditFieldChange('employeeId', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Nationality</Label>
+                  <Input
+                    value={editForm.nationality}
+                    onChange={(e) => handleEditFieldChange('nationality', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Date of Birth</Label>
+                  <Input
+                    type="date"
+                    value={editForm.dateOfBirth}
+                    onChange={(e) => handleEditFieldChange('dateOfBirth', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Phone</Label>
+                  <Input
+                    value={editForm.phone}
+                    onChange={(e) => handleEditFieldChange('phone', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Email</Label>
+                  <Input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => handleEditFieldChange('email', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5 col-span-2">
+                  <Label className="text-xs text-slate-400">Address</Label>
+                  <Input
+                    value={editForm.address}
+                    onChange={(e) => handleEditFieldChange('address', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Emergency Contact</Label>
+                  <Input
+                    value={editForm.emergencyContact}
+                    onChange={(e) => handleEditFieldChange('emergencyContact', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Professional Information */}
+            <div className="space-y-3 pt-2 border-t border-slate-700/50">
+              <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider">Professional Information</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Trade</Label>
+                  <Input
+                    value={editForm.trade}
+                    onChange={(e) => handleEditFieldChange('trade', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                    placeholder="e.g. Mason, Electrician, Helper"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Company Name</Label>
+                  <Input
+                    value={editForm.companyName}
+                    onChange={(e) => handleEditFieldChange('companyName', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Current Site</Label>
+                  <Input
+                    value={editForm.currentSite}
+                    onChange={(e) => handleEditFieldChange('currentSite', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                    placeholder="Site name"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Join Date</Label>
+                  <Input
+                    type="date"
+                    value={editForm.joinDate}
+                    onChange={(e) => handleEditFieldChange('joinDate', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Custom Hourly Rate (AED)</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editForm.customHourlyRate}
+                    onChange={(e) => handleEditFieldChange('customHourlyRate', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                    placeholder="e.g. 6.5"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Current Total Hours</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editForm.currentTotalWorkingHours}
+                    onChange={(e) => handleEditFieldChange('currentTotalWorkingHours', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                    placeholder="e.g. 850"
+                  />
+                </div>
+              </div>
+
+              {/* Role toggles */}
+              <div className="flex items-center gap-4 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editForm.isTeamLeader}
+                    onChange={(e) => handleEditFieldChange('isTeamLeader', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                  />
+                  <span className="text-sm text-slate-300">Team Leader</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editForm.isSupervisor}
+                    onChange={(e) => handleEditFieldChange('isSupervisor', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
+                  />
+                  <span className="text-sm text-slate-300">Supervisor</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Identification */}
+            <div className="space-y-3 pt-2 border-t border-slate-700/50">
+              <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider">Identification Documents</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Passport Number</Label>
+                  <Input
+                    value={editForm.passportNumber}
+                    onChange={(e) => handleEditFieldChange('passportNumber', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Passport Status</Label>
+                  <Input
+                    value={editForm.passportStatus}
+                    onChange={(e) => handleEditFieldChange('passportStatus', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                    placeholder="e.g. Valid, Expired"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">ID Number</Label>
+                  <Input
+                    value={editForm.idNumber}
+                    onChange={(e) => handleEditFieldChange('idNumber', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">ID Status</Label>
+                  <Input
+                    value={editForm.idStatus}
+                    onChange={(e) => handleEditFieldChange('idStatus', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white h-8"
+                    placeholder="e.g. Valid, Expired"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer Actions */}
+          <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-700/50">
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              className="border-slate-600 text-slate-300 hover:bg-slate-700"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditSubmit}
+              disabled={editSaving}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {editSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Save Changes
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
