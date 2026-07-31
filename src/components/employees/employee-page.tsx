@@ -856,6 +856,28 @@ export function EmployeePage() {
     }
   }, []);
 
+  // ── Listen for 'editEmployee' events from the Employee Detail page ──
+  // When the user clicks "Edit" on the detail page, it navigates back here
+  // and dispatches this event. We fetch the employee by ID and open the
+  // edit dialog.
+  useEffect(() => {
+    const handleEditEvent = async (e: Event) => {
+      const empId = (e as CustomEvent<string>).detail;
+      if (!empId) return;
+      try {
+        const res = await fetch(`/api/employees/${empId}`);
+        const json = await res.json();
+        if (json.success && json.employee) {
+          openEditDialog(json.employee);
+        }
+      } catch {
+        // silent
+      }
+    };
+    window.addEventListener('editEmployee', handleEditEvent as EventListener);
+    return () => window.removeEventListener('editEmployee', handleEditEvent as EventListener);
+  }, []);
+
   // ── Auto-generate employee ID ──
   const generateAutoId = useCallback(() => {
     const year = new Date().getFullYear();
@@ -1032,19 +1054,11 @@ export function EmployeePage() {
     setFormDialogOpen(true);
   };
 
-  const openDetailsDialog = async (employee: Employee) => {
-    setViewingEmployee(employee);
-    setDetailsDialogOpen(true);
-    // Fetch full details
-    try {
-      const res = await fetch(`/api/employees/${employee.id}`);
-      const json = await res.json();
-      if (json.success) {
-        setViewingEmployee(json.data.employee);
-      }
-    } catch {
-      // use list data
-    }
+  const openDetailsDialog = (employee: Employee) => {
+    // Navigate to the full-page employee detail view instead of opening a modal.
+    // The detail page fetches its own data, so we just set the ID and switch view.
+    useAppStore.getState().setSelectedEmployeeId(employee.id);
+    useAppStore.getState().setCurrentView('employee_detail');
   };
 
   // Keep the quick hours input in sync with the employee being viewed
