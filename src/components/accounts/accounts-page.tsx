@@ -641,7 +641,10 @@ export function AccountsPage() {
       const employees = prev[siteId] || [];
       const updated = employees.map((emp, i) => {
         if (i !== index) return emp;
-        const u = { ...emp, [field]: value };
+        // Use a typed assertion so the computed-property spread doesn't widen
+        // the type (which would drop `assignedTrade`/`assignedTradeRate` from
+        // TypeScript's view and break the SetStateAction type).
+        const u: MergedEmployeeRow = { ...emp, [field]: value } as MergedEmployeeRow;
 
         // Recalculate salary fields when relevant fields change
         if (field === 'totalHours') {
@@ -843,6 +846,8 @@ export function AccountsPage() {
             empName: '',
             nationality: '',
             trade: '',
+            assignedTrade: null,
+            assignedTradeRate: null,
             employeeCode: '',
             isTeamLeader: false,
             isSupervisor: false,
@@ -870,7 +875,7 @@ export function AccountsPage() {
         ],
       };
     });
-  }, [sites]);
+  }, [sites, baseRates]);
 
   // ── Save all changes using bulk-save API ──
   const handleSave = useCallback(async () => {
