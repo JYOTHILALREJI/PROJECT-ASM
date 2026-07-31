@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { allocateEmployeeHours, type AllocationResult } from '@/lib/allocation-engine';
 import { recalcEmployeeFromMonth } from '@/lib/recalculation';
 import { logActivity } from '@/lib/activity-logger';
+import { getEligibleRecurringAdvances, computeMonthlyDeduction, recordRepayments } from '@/lib/advance-deduction';
 
 // Force dynamic — ensures this route is always treated as a serverless function
 // and never statically optimized. Fixes 404 errors in Turbopack dev mode when
@@ -609,6 +610,52 @@ export async function POST(request: NextRequest) {
         request,
       });
 
+      // ── Record recurring advance repayments ──
+      // For each unique (empId, month, year) in the saved records, check if
+      // the employee has any active recurring advances. If so, record a
+      // repayment for each, decrementing the remainingBalance.
+      let recurringRepaymentsRecorded = 0;
+      let recurringTotalDeducted = 0;
+      try {
+        const savedByEmpMonth = new Map<string, { empId: string; month: string; year: number; recordId: string }>();
+        for (const r of savedRecords) {
+          // Use the standard-tier record if available, otherwise the first
+          const key = `${r.empId}|${r.month}`;
+          if (!savedByEmpMonth.has(key) || r.rateTier === 'standard') {
+            savedByEmpMonth.set(key, {
+              empId: r.empId,
+              month: r.month,
+              year: r.year,
+              recordId: r.id,
+            });
+          }
+        }
+
+        // Group by month for the recurring advance lookup
+        const monthToEmpIds = new Map<string, string[]>();
+        for (const [, info] of savedByEmpMonth) {
+          if (!monthToEmpIds.has(info.month)) monthToEmpIds.set(info.month, []);
+          if (!monthToEmpIds.get(info.month)!.includes(info.empId)) {
+            monthToEmpIds.get(info.month)!.push(info.empId);
+          }
+        }
+
+        for (const [monthKey, empIds] of monthToEmpIds) {
+          const eligibleMap = await getEligibleRecurringAdvances(empIds, monthKey);
+          for (const [empId, advances] of eligibleMap) {
+            const deduction = computeMonthlyDeduction(advances);
+            if (deduction.totalDeduction <= 0) continue;
+            const info = savedByEmpMonth.get(`${empId}|${monthKey}`);
+            const yearNum = info?.year ?? parseInt(monthKey.split('-')[0], 10);
+            await recordRepayments(deduction.advances, empId, monthKey, yearNum, info?.recordId ?? null);
+            recurringRepaymentsRecorded += deduction.advances.length;
+            recurringTotalDeducted += deduction.totalDeduction;
+          }
+        }
+      } catch (recErr) {
+        console.warn('[bulk-save] Failed to record recurring repayments:', recErr instanceof Error ? recErr.message : recErr);
+      }
+
       return NextResponse.json({
         success: true,
         data: {
@@ -616,6 +663,8 @@ export async function POST(request: NextRequest) {
           softDeletedCount: 0, // Allocation engine handles deletes internally
           advancesApplied,
           advancesSkipped,
+          recurringRepaymentsRecorded,
+          recurringTotalDeducted: parseFloat(recurringTotalDeducted.toFixed(2)),
           records: finalRecords.map((r) => ({
             ...r,
             createdAt: r.createdAt.toISOString(),
@@ -778,6 +827,45 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Record recurring advance repayments (manual mode) ──
+      let recurringRepaymentsRecorded = 0;
+      let recurringTotalDeducted = 0;
+      try {
+        const savedByEmpMonth = new Map<string, { empId: string; month: string; year: number; recordId: string }>();
+        for (const r of savedRecords) {
+          const key = `${r.empId}|${r.month}`;
+          if (!savedByEmpMonth.has(key) || r.rateTier === 'standard') {
+            savedByEmpMonth.set(key, {
+              empId: r.empId,
+              month: r.month,
+              year: r.year,
+              recordId: r.id,
+            });
+          }
+        }
+        const monthToEmpIds = new Map<string, string[]>();
+        for (const [, info] of savedByEmpMonth) {
+          if (!monthToEmpIds.has(info.month)) monthToEmpIds.set(info.month, []);
+          if (!monthToEmpIds.get(info.month)!.includes(info.empId)) {
+            monthToEmpIds.get(info.month)!.push(info.empId);
+          }
+        }
+        for (const [monthKey, empIds] of monthToEmpIds) {
+          const eligibleMap = await getEligibleRecurringAdvances(empIds, monthKey);
+          for (const [empId, advances] of eligibleMap) {
+            const deduction = computeMonthlyDeduction(advances);
+            if (deduction.totalDeduction <= 0) continue;
+            const info = savedByEmpMonth.get(`${empId}|${monthKey}`);
+            const yearNum = info?.year ?? parseInt(monthKey.split('-')[0], 10);
+            await recordRepayments(deduction.advances, empId, monthKey, yearNum, info?.recordId ?? null);
+            recurringRepaymentsRecorded += deduction.advances.length;
+            recurringTotalDeducted += deduction.totalDeduction;
+          }
+        }
+      } catch (recErr) {
+        console.warn('[bulk-save manual] Failed to record recurring repayments:', recErr instanceof Error ? recErr.message : recErr);
+      }
+
       return NextResponse.json({
         success: true,
         data: {
@@ -785,6 +873,8 @@ export async function POST(request: NextRequest) {
           softDeletedCount,
           advancesApplied: manualAdvancesApplied,
           advancesSkipped: manualAdvancesSkipped,
+          recurringRepaymentsRecorded,
+          recurringTotalDeducted: parseFloat(recurringTotalDeducted.toFixed(2)),
           records: finalRecords.map((r) => ({
             ...r,
             createdAt: r.createdAt.toISOString(),

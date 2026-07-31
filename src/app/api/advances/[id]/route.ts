@@ -72,10 +72,13 @@ export async function PATCH(
 
     if (existing.status === 'applied') {
       return NextResponse.json(
-        { success: false, error: 'Cannot edit an advance that has already been applied' },
+        { success: false, error: 'Cannot edit a one-time advance that has already been applied' },
         { status: 400 },
       );
     }
+
+    // "completed" recurring advances CAN be edited (to change the monthly
+    // amount and reactivate them). Only block edits to one-time "applied".
 
     const updateData: Record<string, unknown> = {};
 
@@ -96,6 +99,40 @@ export async function PATCH(
     }
     if (body.status === 'pending' && existing.status === 'cancelled') {
       updateData.status = 'pending';
+    }
+
+    // ── Recurring deduction fields ──
+    // Allow changing the monthly deduction amount mid-way. The new amount
+    // applies from the next month onward — previous repayments are unaffected.
+    // If the advance was "completed", changing the amount reactivates it.
+    if (typeof body.monthlyDeductionAmount === 'number' && body.monthlyDeductionAmount >= 0) {
+      updateData.monthlyDeductionAmount = body.monthlyDeductionAmount;
+      // If the advance is recurring and was completed, reactivate it
+      if (existing.deductionType === 'recurring' && existing.status === 'completed') {
+        updateData.status = 'active';
+      }
+    }
+
+    // Allow changing deductionType (one_time ↔ recurring)
+    if (body.deductionType === 'recurring' || body.deductionType === 'one_time') {
+      updateData.deductionType = body.deductionType;
+      if (body.deductionType === 'recurring') {
+        // When switching to recurring, initialize remainingBalance
+        if (typeof body.monthlyDeductionAmount === 'number' && body.monthlyDeductionAmount > 0) {
+          updateData.monthlyDeductionAmount = body.monthlyDeductionAmount;
+        }
+        updateData.remainingBalance = body.amount ?? existing.amount;
+        if (existing.status !== 'completed') {
+          updateData.status = 'active';
+        }
+      } else {
+        // Switching back to one_time — clear recurring fields
+        updateData.monthlyDeductionAmount = null;
+        updateData.remainingBalance = null;
+        if (existing.status === 'active') {
+          updateData.status = 'pending';
+        }
+      }
     }
 
     const updated = await db.advance.update({

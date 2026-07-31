@@ -17,6 +17,11 @@ interface AdvanceCreateItem {
   reason?: string;
   effectiveMonth: string; // YYYY-MM
   effectiveYear: number;
+  // ── Recurring deduction fields (optional) ──
+  // If deductionType = "recurring", monthlyDeductionAmount is deducted each
+  // month starting from effectiveMonth until the full amount is repaid.
+  deductionType?: 'one_time' | 'recurring';
+  monthlyDeductionAmount?: number;
 }
 
 /**
@@ -236,6 +241,7 @@ export async function POST(request: NextRequest) {
       const created = await db.$transaction(
         items.map((it) => {
           const emp = empMap.get(it.empId);
+          const isRecurring = it.deductionType === 'recurring';
           return db.advance.create({
             data: {
               empId: it.empId,
@@ -243,10 +249,17 @@ export async function POST(request: NextRequest) {
               employeeCode: it.employeeCode || emp?.employeeId || '',
               amount: it.amount,
               reason: it.reason || '',
-              status: 'pending',
+              // Recurring advances start as "active" so installments begin
+              // from effectiveMonth onward. One-time advances stay "pending"
+              // until bulk-save / toggle-paid applies them.
+              status: isRecurring ? 'active' : 'pending',
               effectiveMonth: it.effectiveMonth,
               effectiveYear: it.effectiveYear,
               createdById: resolvedCreatedById,
+              // Recurring fields
+              deductionType: isRecurring ? 'recurring' : 'one_time',
+              monthlyDeductionAmount: isRecurring ? (it.monthlyDeductionAmount ?? null) : null,
+              remainingBalance: isRecurring ? it.amount : null,
             },
           });
         }),
@@ -292,6 +305,8 @@ export async function POST(request: NextRequest) {
       reason,
       effectiveMonth = defaultMonth.month,
       effectiveYear = defaultMonth.year,
+      deductionType = 'one_time',
+      monthlyDeductionAmount,
     } = body;
 
     if (!empId) {
@@ -318,6 +333,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const isRecurring = deductionType === 'recurring';
     const advance = await db.advance.create({
       data: {
         empId,
@@ -325,10 +341,13 @@ export async function POST(request: NextRequest) {
         employeeCode: employee.employeeId,
         amount,
         reason: reason || '',
-        status: 'pending',
+        status: isRecurring ? 'active' : 'pending',
         effectiveMonth,
         effectiveYear,
         createdById: resolvedCreatedById,
+        deductionType: isRecurring ? 'recurring' : 'one_time',
+        monthlyDeductionAmount: isRecurring ? (typeof monthlyDeductionAmount === 'number' ? monthlyDeductionAmount : null) : null,
+        remainingBalance: isRecurring ? amount : null,
       },
     });
 

@@ -121,6 +121,12 @@ export function AdvancePage() {
   // Common amount (applied to all bucket items that don't have custom amount)
   const [commonAmount, setCommonAmount] = useState<number>(100);
 
+  // ── Recurring deduction state ──
+  // deductionType: "one_time" (full amount in one month) or "recurring"
+  // (monthlyDeductionAmount deducted each month until repaid)
+  const [deductionType, setDeductionType] = useState<'one_time' | 'recurring'>('one_time');
+  const [monthlyDeductionAmount, setMonthlyDeductionAmount] = useState<number>(50);
+
   // Existing pending advances for the selected month
   const [pendingAdvances, setPendingAdvances] = useState<PendingAdvance[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
@@ -304,6 +310,9 @@ export function AdvancePage() {
           amount: item.useCustom ? item.amount : commonAmount,
           effectiveMonth: monthStr,
           effectiveYear: selectedYear,
+          // Recurring deduction fields
+          deductionType,
+          monthlyDeductionAmount: deductionType === 'recurring' ? monthlyDeductionAmount : undefined,
         })),
         // Send both id and email so the server can resolve the creator
         // even if the localStorage id is stale (e.g., after a DB reset).
@@ -320,7 +329,9 @@ export function AdvancePage() {
       if (data.success) {
         toast({
           title: 'Advances saved',
-          description: `${data.data.count} advance(s) saved for ${MONTH_FULL[selectedMonth]} ${selectedYear}. They will be deducted from the ${MONTH_FULL[selectedMonth]} ${selectedYear} salary.`,
+          description: deductionType === 'recurring'
+            ? `${data.data.count} recurring advance(s) saved. ${monthlyDeductionAmount} AED/month will be deducted from ${MONTH_FULL[selectedMonth]} ${selectedYear} salary until repaid.`
+            : `${data.data.count} advance(s) saved for ${MONTH_FULL[selectedMonth]} ${selectedYear}. They will be deducted from the ${MONTH_FULL[selectedMonth]} ${selectedYear} salary.`,
         });
         setBucket(new Map());
         fetchPendingAdvances();
@@ -663,6 +674,51 @@ export function AdvancePage() {
                     >
                       Reset all to common amount
                     </Button>
+                  </div>
+
+                  {/* Deduction type: one-time vs recurring */}
+                  <div className="space-y-2 pb-3 border-b border-slate-700/50">
+                    <Label className="text-xs text-slate-400">Deduction type</Label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={deductionType === 'one_time' ? 'default' : 'outline'}
+                        onClick={() => setDeductionType('one_time')}
+                        className={`h-8 text-xs ${deductionType === 'one_time' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'border-slate-600 text-slate-300 hover:bg-slate-700'}`}
+                      >
+                        One-time
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={deductionType === 'recurring' ? 'default' : 'outline'}
+                        onClick={() => setDeductionType('recurring')}
+                        className={`h-8 text-xs ${deductionType === 'recurring' ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'border-slate-600 text-slate-300 hover:bg-slate-700'}`}
+                      >
+                        Recurring (monthly)
+                      </Button>
+                    </div>
+                    {deductionType === 'recurring' && (
+                      <div className="space-y-1.5 mt-2">
+                        <Label className="text-xs text-violet-400">Monthly deduction amount (DHS/month)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={monthlyDeductionAmount}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            setMonthlyDeductionAmount(isNaN(v) ? 0 : v);
+                          }}
+                          className="bg-slate-900 border-slate-600 text-white h-8"
+                        />
+                        <p className="text-[10px] text-slate-500">
+                          This amount will be deducted from the employee's salary each month
+                          starting from {MONTH_FULL[selectedMonth]} {selectedYear} until the full
+                          advance is repaid. You can change the amount later — the new amount
+                          applies from the next month onward.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Bucket items */}

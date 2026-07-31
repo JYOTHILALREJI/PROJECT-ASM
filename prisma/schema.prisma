@@ -579,28 +579,74 @@ model Advance {
   employeeCode  String   @default("") // employee.employeeId (e.g. ASM-001)
   amount        Float    @default(0)
   reason        String   @default("")
-  // Status: pending (not yet applied), applied (deducted from salary),
-  //         cancelled (admin voided before applying)
+  // Status:
+  //   "pending"   — not yet applied (one-time advance waiting for salary save)
+  //   "applied"   — fully deducted from salary (one-time advance, completed)
+  //   "cancelled" — admin voided before applying
+  //   "active"    — recurring advance, installments ongoing
+  //   "completed" — recurring advance, fully repaid (remainingBalance <= 0)
   status        String   @default("pending")
-  // Effective month/year: which salary month this advance should be deducted from.
+  // Effective month/year: which salary month this advance should START being
+  // deducted from.
   // Format: month = "YYYY-MM", year = integer.
   // Default: next month from creation date.
   effectiveMonth String  // YYYY-MM
   effectiveYear  Int
-  // If applied, link to the salary record it was deducted from
+  // If applied (one-time) or last installment applied (recurring), link to
+  // the salary record it was deducted from
   appliedToSalaryRecordId String?
+
+  // ── Recurring deduction fields (only used when deductionType = "recurring") ──
+  // deductionType:
+  //   "one_time"  — the full `amount` is deducted in ONE month (effectiveMonth)
+  //   "recurring" — `monthlyDeductionAmount` is deducted each month starting
+  //                 from `effectiveMonth` until `remainingBalance` reaches 0
+  deductionType           String  @default("one_time")
+  monthlyDeductionAmount  Float?  // how much to deduct per month (recurring only)
+  remainingBalance        Float?  // how much is left to repay (recurring only)
+
   createdById   String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   deletedAt     DateTime?
 
-  employee Employee @relation(fields: [empId], references: [id], onDelete: Cascade)
+  employee    Employee            @relation(fields: [empId], references: [id], onDelete: Cascade)
+  repayments  AdvanceRepayment[]
 
   @@index([empId])
   @@index([status])
   @@index([effectiveMonth, effectiveYear])
   @@index([effectiveYear])
   @@index([deletedAt])
+  @@index([deductionType])
+}
+
+// ---------------------------------------------------------------------------
+// AdvanceRepayment — tracks each monthly installment for recurring advances
+// ---------------------------------------------------------------------------
+// When a recurring advance has `monthlyDeductionAmount` deducted from a
+// salary record, a repayment row is created linking the advance to the
+// salary record and recording the amount deducted for that month.
+//
+// If the admin changes the monthly deduction amount mid-way, the new amount
+// applies from the next month onward (previous repayments are unaffected).
+// ---------------------------------------------------------------------------
+model AdvanceRepayment {
+  id              String   @id @default(cuid())
+  advanceId       String   // FK to Advance.id
+  empId           String   // denormalized for easy querying
+  salaryRecordId  String?  // salary record this installment was deducted from
+  month           String   // YYYY-MM — which salary month this installment covers
+  year            Int
+  amount          Float    // how much was deducted this month
+  createdAt       DateTime @default(now())
+
+  advance Advance @relation(fields: [advanceId], references: [id], onDelete: Cascade)
+
+  @@unique([advanceId, month]) // one installment per advance per month
+  @@index([advanceId])
+  @@index([empId, month])
+  @@index([month, year])
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import { getBaseRates } from '@/lib/base-rates';
 import { safeFindPendingAdvances } from '@/lib/safe-advance';
 import { safeFetchSitesWithBranch } from '@/lib/safe-site';
 import { getRateMapForMonth } from '@/lib/rate-changelog';
+import { getEligibleRecurringAdvances, computeMonthlyDeduction } from '@/lib/advance-deduction';
 
 export const dynamic = 'force-dynamic';
 
@@ -165,6 +166,27 @@ export async function GET(request: NextRequest) {
 
     // Get all unique empIds from salary records
     const empIds = [...new Set(allSalaryRecords.map((r) => r.empId))];
+
+    // ── Recurring advance deductions for this month ──
+    // For each employee with an active recurring advance, compute the monthly
+    // deduction (min of monthlyDeductionAmount and remainingBalance) and add
+    // it to the pendingByEmp map so it gets merged into the salary records'
+    // `advance` field — same as one-time pending advances above.
+    //
+    // Repayments are NOT recorded here (this is a read-only merge for display).
+    // The actual repayment recording happens in bulk-save / toggle-paid when
+    // the salary is saved/paid.
+    let recurringAdvancesMap: Map<string, ReturnType<typeof computeMonthlyDeduction>> = new Map();
+    if (empIds.length > 0) {
+      const eligibleMap = await getEligibleRecurringAdvances(empIds, month);
+      for (const [empId, advances] of eligibleMap) {
+        const deduction = computeMonthlyDeduction(advances);
+        if (deduction.totalDeduction > 0) {
+          pendingByEmp.set(empId, (pendingByEmp.get(empId) || 0) + deduction.totalDeduction);
+          recurringAdvancesMap.set(empId, deduction);
+        }
+      }
+    }
 
     // Fetch employee details for all employees in salary records
     const employees = await db.employee.findMany({
@@ -395,6 +417,16 @@ export async function GET(request: NextRequest) {
       const missingChangelogRates = await getRateMapForMonth(missingEmpIds, month);
       for (const [empId, rate] of missingChangelogRates) {
         changelogRateMap.set(empId, rate);
+      }
+
+      // Fetch recurring advance deductions for missing employees too
+      const missingRecurringMap = await getEligibleRecurringAdvances(missingEmpIds, month);
+      for (const [empId, advances] of missingRecurringMap) {
+        const deduction = computeMonthlyDeduction(advances);
+        if (deduction.totalDeduction > 0) {
+          pendingByEmp.set(empId, (pendingByEmp.get(empId) || 0) + deduction.totalDeduction);
+          recurringAdvancesMap.set(empId, deduction);
+        }
       }
     }
 

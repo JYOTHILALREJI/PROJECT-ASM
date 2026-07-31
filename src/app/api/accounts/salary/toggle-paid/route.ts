@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getEligibleRecurringAdvances, computeMonthlyDeduction, recordRepayments } from '@/lib/advance-deduction';
 
 // ---------------------------------------------------------------------------
 // POST /api/accounts/salary/toggle-paid
@@ -144,6 +145,35 @@ export async function POST(request: NextRequest) {
             advErr instanceof Error ? advErr.message : advErr,
           );
         }
+      }
+
+      // ── Record recurring advance repayments when marking as PAID ──
+      // For active recurring advances, compute the monthly deduction and
+      // record a repayment. This decrements remainingBalance and marks the
+      // advance as "completed" when fully repaid.
+      try {
+        const eligibleMap = await getEligibleRecurringAdvances([empId], month);
+        const advances = eligibleMap.get(empId);
+        if (advances && advances.length > 0) {
+          const deduction = computeMonthlyDeduction(advances);
+          if (deduction.totalDeduction > 0) {
+            const firstSalaryRecordId = salaryRecords[0]?.id || null;
+            await recordRepayments(
+              deduction.advances,
+              empId,
+              month,
+              yearNum,
+              firstSalaryRecordId,
+            );
+            appliedAdvanceCount += deduction.advances.length;
+            appliedAdvanceAmount += deduction.totalDeduction;
+          }
+        }
+      } catch (recErr) {
+        console.warn(
+          '[toggle-paid] Failed to record recurring repayments:',
+          recErr instanceof Error ? recErr.message : recErr,
+        );
       }
     }
 
