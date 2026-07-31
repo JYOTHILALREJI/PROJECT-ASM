@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { recalcEmployeeFromMonth, recalcEmployeeFull, getEmployeeRates, computeSalaryBreakdown, buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { getRateForMonth } from '@/lib/rate-changelog';
 
 // Ensure fresh data on every request — no caching
 export const dynamic = 'force-dynamic';
@@ -297,16 +298,33 @@ export async function GET(
       workLogsByMonth.get(monthKey)!.push(log);
     }
 
-    const monthlyData = Array.from(workLogsByMonth.entries()).map(([monthKey, logs]) => {
+    const monthlyData = await Promise.all(
+      Array.from(workLogsByMonth.entries()).map(async ([monthKey, logs]) => {
       const cumulativeBefore = cumulativeMap.get(monthKey) || 0;
       // Sum hours across all sites for this month
       const totalHours = logs.reduce((sum, l) => sum + l.hoursWorked, 0);
+
+      // ── Rate changelog override for this month ──
+      // If a changelog entry exists with effectiveMonth <= monthKey, use its
+      // rate for BOTH lowRate and highRate (custom rate = no threshold split).
+      // This makes past months keep their old rate while future months use
+      // the new rate.
+      const changelogRate = await getRateForMonth(id, monthKey);
+      let monthLowRate = lowRate;
+      let monthHighRate = highRate;
+      let monthIsCustom = isCustom;
+      if (changelogRate.rate !== null) {
+        monthLowRate = changelogRate.rate;
+        monthHighRate = changelogRate.rate;
+        monthIsCustom = true;
+      }
+
       const breakdown = computeSalaryBreakdown(
         totalHours,
         cumulativeBefore,
         threshold,
-        isCustom ? lowRate : lowRate,
-        isCustom ? highRate : highRate,
+        monthLowRate,
+        monthHighRate,
       );
 
       // Find matching salary records for this month (across all sites)
@@ -335,10 +353,11 @@ export async function GET(
         deductions: logs.reduce((s, l) => s + l.deductions, 0),
         cumulativeBefore,
         cumulativeAfter: cumulativeBefore + totalHours,
-        // Rate info
-        lowRate,
-        highRate,
-        isCustom,
+        // Rate info (per-month — may differ from the global rate if a
+        // changelog override exists for this month)
+        lowRate: monthLowRate,
+        highRate: monthHighRate,
+        isCustom: monthIsCustom,
         // Salary breakdown — computed on TOTAL hours
         belowHours: breakdown.belowHours,
         aboveHours: breakdown.aboveHours,
@@ -360,7 +379,8 @@ export async function GET(
         // Source indicator
         isSynthetic: false,
       };
-    });
+    }),
+    );
 
     // 10. Create synthetic entries for salary records that don't have corresponding work logs
     // Group salary records by (siteId, month) to aggregate standard+premium tiers into a single entry
@@ -399,15 +419,28 @@ export async function GET(
     }
 
     // Convert grouped salary records into synthetic work-log-shaped entries
-    const syntheticEntries = Array.from(salaryBySiteMonth.values()).map(srGroup => {
+    const syntheticEntries = await Promise.all(
+      Array.from(salaryBySiteMonth.values()).map(async srGroup => {
       const monthNum = parseInt(srGroup.month.split('-')[1], 10);
       const cumulativeBefore = cumulativeMap.get(srGroup.month) || 0;
+
+      // ── Rate changelog override for this month ──
+      const changelogRate = await getRateForMonth(id, srGroup.month);
+      let monthLowRate = lowRate;
+      let monthHighRate = highRate;
+      let monthIsCustom = isCustom;
+      if (changelogRate.rate !== null) {
+        monthLowRate = changelogRate.rate;
+        monthHighRate = changelogRate.rate;
+        monthIsCustom = true;
+      }
+
       const breakdown = computeSalaryBreakdown(
         srGroup.totalHours,
         cumulativeBefore,
         threshold,
-        isCustom ? lowRate : lowRate,
-        isCustom ? highRate : highRate,
+        monthLowRate,
+        monthHighRate,
       );
 
       const deduction = srGroup.stdRecord?.deduction ?? srGroup.premRecord?.deduction ?? 0;
@@ -427,10 +460,11 @@ export async function GET(
         deductions: 0,
         cumulativeBefore,
         cumulativeAfter: cumulativeBefore + srGroup.totalHours,
-        // Rate info
-        lowRate,
-        highRate,
-        isCustom,
+        // Rate info (per-month — may differ from the global rate if a
+        // changelog override exists for this month)
+        lowRate: monthLowRate,
+        highRate: monthHighRate,
+        isCustom: monthIsCustom,
         // Salary breakdown
         belowHours: breakdown.belowHours,
         aboveHours: breakdown.aboveHours,
@@ -452,7 +486,8 @@ export async function GET(
         // Source indicator
         isSynthetic: true,
       };
-    });
+    }),
+    );
 
     // 11. Combine and sort all entries chronologically
     // If there are manual starting-balance hours (seedHours > 0), prepend a

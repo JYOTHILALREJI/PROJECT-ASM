@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
+import { getRateForMonth } from '@/lib/rate-changelog';
 
 // ---------------------------------------------------------------------------
 // Recalculation Engine — Direct Hourly Rates (PRD v2.0)
@@ -302,9 +303,18 @@ export async function recalcEmployeeFromMonth(
       continue;
     }
 
-    if (isCustom) {
+    // ── Rate changelog override for this month ──
+    // If a changelog entry exists with effectiveMonth <= md.monthKey, use its
+    // rate for BOTH lowRate and highRate. This makes past months keep their
+    // old rate while future months use the new rate during recalculation.
+    const changelogRate = await getRateForMonth(employeeId, md.monthKey);
+    const monthLowRate = changelogRate.rate !== null ? changelogRate.rate : lowRate;
+    const monthHighRate = changelogRate.rate !== null ? changelogRate.rate : highRate;
+    const monthIsCustom = changelogRate.rate !== null ? true : isCustom;
+
+    if (monthIsCustom) {
       // Custom rate: all hours at the custom rate as a single "standard" record
-      const totalSalary = md.hoursWorked * lowRate; // lowRate == highRate for custom
+      const totalSalary = md.hoursWorked * monthLowRate; // lowRate == highRate for custom
       const blendedRate = md.hoursWorked > 0 ? totalSalary / md.hoursWorked : 0;
 
       // Update TotalEmployeeWorkingHours
@@ -327,7 +337,7 @@ export async function recalcEmployeeFromMonth(
 
       // For custom rate, put all hours in a single salary record per site
       for (const sh of md.siteHours) {
-        const siteSalary = sh.hours * lowRate;
+        const siteSalary = sh.hours * monthLowRate;
         // Check for existing records
         const existingStd = await db.salaryRecord.findUnique({
           where: {
@@ -382,7 +392,7 @@ export async function recalcEmployeeFromMonth(
             trade: effectiveTrade,
             employeeCode: employee.employeeId || '',
             totalHours: sh.hours,
-            rtPerHour: lowRate,
+            rtPerHour: monthLowRate,
             totalSalary: siteSalary,
             balanceSalary: siteSalary - existingDeduction - existingAdvance,
             deduction: existingDeduction,
@@ -402,7 +412,7 @@ export async function recalcEmployeeFromMonth(
             employeeCode: employee.employeeId || '',
             slNo: 0,
             totalHours: sh.hours,
-            rtPerHour: lowRate,
+            rtPerHour: monthLowRate,
             totalSalary: siteSalary,
             deduction: 0,
             advance: 0,
@@ -468,7 +478,7 @@ export async function recalcEmployeeFromMonth(
           siteAbove,
         });
 
-        totalSalary += siteBelow * lowRate + siteAbove * highRate;
+        totalSalary += siteBelow * monthLowRate + siteAbove * monthHighRate;
       }
 
       const blendedRate = md.hoursWorked > 0 ? totalSalary / md.hoursWorked : 0;
@@ -521,7 +531,7 @@ export async function recalcEmployeeFromMonth(
 
         // Standard (below threshold) record
         if (split.siteBelow > 0.001) {
-          const stdSalary = split.siteBelow * lowRate;
+          const stdSalary = split.siteBelow * monthLowRate;
           const stdDeduction = existingStd?.deduction ?? 0;
           const stdAdvance = existingStd?.advance ?? 0;
 
@@ -542,7 +552,7 @@ export async function recalcEmployeeFromMonth(
               trade: effectiveTrade,
               employeeCode: employee.employeeId || '',
               totalHours: parseFloat(split.siteBelow.toFixed(2)),
-              rtPerHour: lowRate,
+              rtPerHour: monthLowRate,
               totalSalary: parseFloat(stdSalary.toFixed(2)),
               balanceSalary: parseFloat((stdSalary - stdDeduction - stdAdvance).toFixed(2)),
               deduction: stdDeduction,
@@ -562,7 +572,7 @@ export async function recalcEmployeeFromMonth(
               employeeCode: employee.employeeId || '',
               slNo: 0,
               totalHours: parseFloat(split.siteBelow.toFixed(2)),
-              rtPerHour: lowRate,
+              rtPerHour: monthLowRate,
               totalSalary: parseFloat(stdSalary.toFixed(2)),
               deduction: 0,
               advance: 0,
@@ -581,7 +591,7 @@ export async function recalcEmployeeFromMonth(
 
         // Premium (above threshold) record
         if (split.siteAbove > 0.001) {
-          const premSalary = split.siteAbove * highRate;
+          const premSalary = split.siteAbove * monthHighRate;
           const premDeduction = existingPrem?.deduction ?? 0;
           const premAdvance = existingPrem?.advance ?? 0;
 
@@ -602,7 +612,7 @@ export async function recalcEmployeeFromMonth(
               trade: effectiveTrade,
               employeeCode: employee.employeeId || '',
               totalHours: parseFloat(split.siteAbove.toFixed(2)),
-              rtPerHour: highRate,
+              rtPerHour: monthHighRate,
               totalSalary: parseFloat(premSalary.toFixed(2)),
               balanceSalary: parseFloat((premSalary - premDeduction - premAdvance).toFixed(2)),
               deduction: premDeduction,
@@ -622,7 +632,7 @@ export async function recalcEmployeeFromMonth(
               employeeCode: employee.employeeId || '',
               slNo: 0,
               totalHours: parseFloat(split.siteAbove.toFixed(2)),
-              rtPerHour: highRate,
+              rtPerHour: monthHighRate,
               totalSalary: parseFloat(premSalary.toFixed(2)),
               deduction: 0,
               advance: 0,

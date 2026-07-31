@@ -118,6 +118,7 @@ model Employee {
   workLogs             WorkLog[]
   advances             Advance[]
   employeeTrade        EmployeeTrade?
+  rateChangelogs       EmployeeRateChangelog[]
 
   @@index([trade])
   @@index([isTeamLeader])
@@ -125,6 +126,43 @@ model Employee {
   @@index([currentSite])
   @@index([currentSiteId])
   @@index([branchId])
+}
+
+// ---------------------------------------------------------------------------
+// EmployeeRateChangelog — per-month rate history
+// ---------------------------------------------------------------------------
+// When an admin sets a custom hourly rate for an employee, a changelog entry
+// is created with an `effectiveMonth` (YYYY-MM). The rate applies to that
+// month and all future months UNTIL the next changelog entry's effectiveMonth.
+//
+// Past months (before this entry's effectiveMonth) keep whatever rate was
+// effective at that time (from an earlier changelog entry, or the employee's
+// default role/trade rate if no earlier entry exists).
+//
+// Resolution at query time:
+//   For a given (employeeId, monthKey), find the changelog entry with the
+//   LARGEST effectiveMonth that is <= monthKey. If found, that entry's
+//   `rate` overrides the employee's customHourlyRate for that month.
+//
+// This is what makes past months "frozen" at their old rate while future
+// months use the new rate — the recalculation engine reads from this table
+// per-month instead of using a single global rate for all months.
+// ---------------------------------------------------------------------------
+model EmployeeRateChangelog {
+  id             String   @id @default(cuid())
+  employeeId     String
+  rate           Float    // the custom hourly rate (AED/hr)
+  effectiveMonth String   // YYYY-MM — first month this rate applies
+  reason         String   @default("") // optional note from admin
+  createdBy      String?  // admin name/userId who made the change
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, effectiveMonth]) // one change per month per employee
+  @@index([employeeId, effectiveMonth])
+  @@index([employeeId])
 }
 
 // ---------------------------------------------------------------------------

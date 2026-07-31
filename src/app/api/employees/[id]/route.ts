@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { encrypt, decrypt } from '@/lib/crypto';
 import { recalcEmployeeFull } from '@/lib/recalculation';
 import { cascadeSoftDeleteEmployee } from '@/lib/soft-delete';
+import { upsertRateChangelog } from '@/lib/rate-changelog';
 
 function decryptEmployee(employee: Record<string, unknown>) {
   if (employee.passportNumber) {
@@ -278,6 +279,30 @@ export async function PUT(
 
     if (body.customHourlyRate !== undefined) {
       data.customHourlyRate = body.customHourlyRate;
+
+      // ── Rate changelog: record this rate change with an effective month ──
+      // If the caller provides `effectiveMonth` in the body, use it; otherwise
+      // default to the current month. This creates (or updates) a changelog
+      // entry so that future months use the new rate while past months keep
+      // whatever rate was effective at their time.
+      if (body.customHourlyRate !== null && body.customHourlyRate > 0) {
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const effectiveMonth = (typeof body.effectiveMonth === 'string' && /^\d{4}-\d{2}$/.test(body.effectiveMonth))
+          ? body.effectiveMonth
+          : currentMonth;
+        try {
+          await upsertRateChangelog(
+            id,
+            body.customHourlyRate,
+            effectiveMonth,
+            typeof body.rateChangeReason === 'string' ? body.rateChangeReason : '',
+            typeof body.actorUserId === 'string' ? body.actorUserId : null,
+          );
+        } catch (changelogErr) {
+          console.warn('[employees PUT] Failed to create rate changelog entry:', changelogErr instanceof Error ? changelogErr.message : changelogErr);
+        }
+      }
     }
 
     // Encrypt sensitive fields

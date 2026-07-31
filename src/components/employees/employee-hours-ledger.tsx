@@ -568,6 +568,9 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   }, [doSave]);
 
   // ── Custom Rate Save ──
+  // When the user sets a custom rate, we pass `effectiveMonth` to the API
+  // so a rate changelog entry is created. Past months keep their old rate;
+  // the current month and all future months use the new rate.
   const handleSaveCustomRate = async () => {
     const rateValue = customRateInput.trim();
     const numericRate = rateValue ? parseFloat(rateValue) : null;
@@ -577,19 +580,29 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
       return;
     }
 
+    // Default effectiveMonth = current month. This means the new rate applies
+    // from the current month onward. Past months keep whatever rate was
+    // effective at their time (from earlier changelog entries).
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
     setIsSavingRate(true);
     try {
       const res = await fetch(`/api/employees/${employeeId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customHourlyRate: numericRate }),
+        body: JSON.stringify({
+          customHourlyRate: numericRate,
+          effectiveMonth: currentMonth,
+          rateChangeReason: 'Set from Hours Ledger',
+        }),
       });
       const json = await res.json();
       if (json.success) {
         toast({
           title: numericRate ? 'Custom Rate Set' : 'Custom Rate Cleared',
           description: numericRate
-            ? `Custom rate set to ${numericRate} AED/hr`
+            ? `Custom rate set to ${numericRate} AED/hr from ${currentMonth} onward. Past months keep their previous rate.`
             : 'Custom rate removed. Standard tier rates will apply.',
         });
         setIsEditingRate(false);

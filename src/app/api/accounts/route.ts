@@ -5,6 +5,7 @@ import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
 import { safeFindPendingAdvances } from '@/lib/safe-advance';
 import { safeFetchSitesWithBranch } from '@/lib/safe-site';
+import { getRateMapForMonth } from '@/lib/rate-changelog';
 
 export const dynamic = 'force-dynamic';
 
@@ -182,6 +183,13 @@ export async function GET(request: NextRequest) {
       },
     });
     const employeeMap = new Map(employees.map((e) => [e.id, e]));
+
+    // ── Fetch per-month rate overrides from the EmployeeRateChangelog table ──
+    // For the requested month, get the rate that was effective for each employee.
+    // If a changelog entry exists with effectiveMonth <= month, its rate overrides
+    // the employee's customHourlyRate for THIS month. This is what makes past
+    // months keep their old rate while future months use the new rate.
+    const changelogRateMap = await getRateMapForMonth(empIds, month);
 
     // Fetch ALL salary records for these employees (for cumulative hours calculation)
     // Use salary records as the source of truth (consistent with allocation engine)
@@ -382,6 +390,12 @@ export async function GET(request: NextRequest) {
         }
         aggregateHoursMap.set(sr.empId, (aggregateHoursMap.get(sr.empId) || 0) + sr.totalHours);
       }
+
+      // Fetch changelog rates for the missing employees too
+      const missingChangelogRates = await getRateMapForMonth(missingEmpIds, month);
+      for (const [empId, rate] of missingChangelogRates) {
+        changelogRateMap.set(empId, rate);
+      }
     }
 
     // Also fetch working hours for missing employees
@@ -515,7 +529,14 @@ export async function GET(request: NextRequest) {
         const threshold = emp?.hoursThreshold || 1000;
         const previousCumulativeHours = cumulativeHoursMap.get(eId) || 0;
         const aggregateTotal = aggregateHoursMap.get(eId) || 0;
-        const employeeCustomRate = emp?.customHourlyRate ?? null;
+        // ── Rate changelog override ──
+        // If the changelog has a rate for this employee for THIS month, use it
+        // instead of the employee's current customHourlyRate. This makes past
+        // months keep their old rate while future months use the new rate.
+        const changelogRate = changelogRateMap.get(eId) ?? null;
+        const employeeCustomRate = changelogRate !== null
+          ? changelogRate
+          : (emp?.customHourlyRate ?? null);
 
         // Check trade rate (priority: custom rate > trade rate > Helper)
         // NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
@@ -613,7 +634,11 @@ export async function GET(request: NextRequest) {
         const threshold = emp?.hoursThreshold || 1000;
         const previousCumulativeHours = cumulativeHoursMap.get(stub.empId) || 0;
         const aggregateTotal = aggregateHoursMap.get(stub.empId) || 0;
-        const employeeCustomRate = emp?.customHourlyRate ?? null;
+        // ── Rate changelog override (same as records path above) ──
+        const changelogRate = changelogRateMap.get(stub.empId) ?? null;
+        const employeeCustomRate = changelogRate !== null
+          ? changelogRate
+          : (emp?.customHourlyRate ?? null);
 
         // Check trade rate — use EmployeeTrade assignment, fallback to 'Helper'
         // NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
