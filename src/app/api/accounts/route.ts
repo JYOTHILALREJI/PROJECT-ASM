@@ -4,6 +4,7 @@ import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
 import { safeFindPendingAdvances } from '@/lib/safe-advance';
+import { safeFetchSitesWithBranch } from '@/lib/safe-site';
 
 export const dynamic = 'force-dynamic';
 
@@ -441,13 +442,14 @@ export async function GET(request: NextRequest) {
       empCountBySite.get(site.id)!.push({ empId: emp.id, empName: emp.fullName, siteName: site.name });
     }
 
-    // Fetch site info for all sites in the results
+    // Fetch site info for all sites in the results.
+    // IMPORTANT: Use safeFetchSitesWithBranch — it falls back to a branch-less
+    // query if the Branch table or Site.branchId column doesn't exist yet
+    // (pre-migration state). Without this fallback, the entire /api/accounts
+    // route throws a 500 and the Accounts page shows no data.
     const siteIds = Array.from(siteMap.keys());
     const sites = siteIds.length > 0
-      ? await db.site.findMany({
-          where: { id: { in: siteIds } },
-          select: { id: true, name: true, clientName: true, projectName: true, branchId: true, branch: { select: { id: true, name: true, code: true } } },
-        })
+      ? await safeFetchSitesWithBranch({ id: { in: siteIds } })
       : [];
     const siteInfoMap = new Map(sites.map((s) => [s.id, s]));
 
@@ -480,7 +482,14 @@ export async function GET(request: NextRequest) {
 
     // Build the response
     const siteResults: Array<{
-      site: { id: string; name: string; clientName: string | null; projectName: string | null };
+      site: {
+        id: string;
+        name: string;
+        clientName: string | null;
+        projectName: string | null;
+        branchId: string | null;
+        branch: { id: string; name: string; code: string | null } | null;
+      };
       employeeCount: number;
       totalHours: number;
       totalSalary: number;
