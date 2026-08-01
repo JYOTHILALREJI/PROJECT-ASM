@@ -4053,32 +4053,34 @@ function JsonPreview() {
 function PdfPreview() {
   return (
     <PreviewShell title="employees.pdf">
-      <div className="bg-white text-black rounded p-4 mx-auto max-w-sm shadow-md">
+      <div className="bg-white text-black rounded p-4 shadow-md">
         <div className="text-center font-bold text-sm border-b border-black/30 pb-2 mb-2">
           EMPLOYEE LIST
         </div>
-        <table className="w-full text-[9px] border-collapse">
-          <thead>
-            <tr className="bg-gray-200">
-              {PREVIEW_HEADERS.map((h) => (
-                <th key={h} className="border border-black/40 px-1 py-0.5 text-left font-semibold">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {PREVIEW_ROWS.map((row, i) => (
-              <tr key={i}>
-                {row.map((cell, j) => (
-                  <td key={j} className="border border-black/40 px-1 py-0.5">
-                    {cell}
-                  </td>
+        <div className="overflow-x-auto">
+          <table className="text-[9px] border-collapse whitespace-nowrap">
+            <thead>
+              <tr className="bg-gray-200">
+                {PREVIEW_HEADERS.map((h) => (
+                  <th key={h} className="border border-black/40 px-2 py-0.5 text-left font-semibold whitespace-nowrap">
+                    {h}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {PREVIEW_ROWS.map((row, i) => (
+                <tr key={i}>
+                  {row.map((cell, j) => (
+                    <td key={j} className="border border-black/40 px-2 py-0.5 whitespace-nowrap">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <p className="mt-3 text-[10px] text-slate-500 text-center">
         PDF with a tabular layout. Table cells should be aligned in columns so the parser can detect them.
@@ -4090,30 +4092,32 @@ function PdfPreview() {
 function DocxPreview() {
   return (
     <PreviewShell title="employees.docx">
-      <div className="bg-white text-black rounded p-4 mx-auto max-w-sm shadow-md">
+      <div className="bg-white text-black rounded p-4 shadow-md">
         <div className="text-center font-bold text-sm underline mb-2">Employees</div>
-        <table className="w-full text-[9px] border-collapse">
-          <thead>
-            <tr className="bg-gray-100">
-              {PREVIEW_HEADERS.map((h) => (
-                <th key={h} className="border border-black/40 px-1 py-0.5 text-left font-semibold">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {PREVIEW_ROWS.map((row, i) => (
-              <tr key={i}>
-                {row.map((cell, j) => (
-                  <td key={j} className="border border-black/40 px-1 py-0.5">
-                    {cell}
-                  </td>
+        <div className="overflow-x-auto">
+          <table className="text-[9px] border-collapse whitespace-nowrap">
+            <thead>
+              <tr className="bg-gray-100">
+                {PREVIEW_HEADERS.map((h) => (
+                  <th key={h} className="border border-black/40 px-2 py-0.5 text-left font-semibold whitespace-nowrap">
+                    {h}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {PREVIEW_ROWS.map((row, i) => (
+                <tr key={i}>
+                  {row.map((cell, j) => (
+                    <td key={j} className="border border-black/40 px-2 py-0.5 whitespace-nowrap">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <p className="mt-3 text-[10px] text-slate-500 text-center">
         Word document with a table. The parser reads the table cells; plain-text paragraphs may also work if columns are tab-separated.
