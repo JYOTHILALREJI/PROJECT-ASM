@@ -3017,7 +3017,7 @@ export function EmployeePage() {
 
       {/* Batch Add Dialog */}
       <Dialog open={batchDialogOpen} onOpenChange={(open) => { setBatchDialogOpen(open); if (!open) { setBatchFile(null); setBatchResult(null); setBatchFormat(null); } }}>
-        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-white">
               <FileSpreadsheet className="h-5 w-5 text-blue-400" />
@@ -3246,12 +3246,12 @@ export function EmployeePage() {
 // syntax-highlighted JSON, etc.) so the user knows exactly what to upload.
 
 const PREVIEW_HEADERS = [
-  'Full Name', 'Nationality', 'Trade', 'Phone', 'Current Site', 'Employee ID',
+  'Full Name', 'Nationality', 'Trade', 'Phone', 'Email', 'Current Site', 'Employee ID', 'Role', 'Teko', 'Custom Rate', 'Join Date', 'Company', 'Passport Number', 'ID Number', 'Emergency Contact', 'Address',
 ];
 const PREVIEW_ROWS = [
-  ['John Doe', 'Indian', 'Mason', '+971501234567', 'Site A', 'ASM-2024-001'],
-  ['Ahmed Ali', 'Pakistani', 'Electrician', '+971502345678', 'Site B', 'ASM-2024-002'],
-  ['Ravi Kumar', 'Indian', 'Welder', '+971503456789', 'Site A', 'ASM-2024-003'],
+  ['John Doe', 'Indian', 'Mason', '+971501234567', 'john@email.com', 'Site A', 'ASM-2024-001', 'Standard', 'No', '', '2024-01-15', 'ASM Co', 'P1234567', 'ID123456', '+971509998887', 'Riyadh, KSA'],
+  ['Ahmed Ali', 'Pakistani', 'Electrician', '+971502345678', 'ahmed@email.com', 'Site B', 'ASM-2024-002', 'Team Leader', 'No', '6.5', '2024-02-01', 'ASM Co', 'P2345678', 'ID234567', '+971509998886', 'Jeddah, KSA'],
+  ['Ravi Kumar', 'Indian', 'Welder', '+971503456789', 'ravi@email.com', 'Site A', 'ASM-2024-003', 'Teko', 'Yes', '', '2024-03-10', 'ASM Co', 'P3456789', 'ID345678', '+971509998885', 'Riyadh, KSA'],
 ];
 
 function PreviewShell({ title, children }: { title: string; children: React.ReactNode }) {

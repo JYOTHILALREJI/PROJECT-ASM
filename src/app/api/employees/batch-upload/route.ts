@@ -25,6 +25,7 @@ const HEADER_MAP: Record<string, string[]> = {
   currentSite: ['site', 'current site', 'work site', 'current_site', 'work_site', 'project site', 'project'],
   employeeId: ['employee id', 'employee_id', 'custom id', 'custom_id', 'emp id', 'emp_id', 'emp code', 'empcode', 'employee code', 'employee_code', 'id'],
   role: ['role', 'employee role', 'employee_role', 'employee type', 'employee_type'],
+  isTeko: ['teko', 'is teko', 'is_teko', 'teko employee', 'teko_employee'],
   customHourlyRate: ['custom rate', 'custom_rate', 'hourly rate', 'hourly_rate', 'custom hourly rate', 'custom_hourly_rate', 'rate'],
 };
 
@@ -504,6 +505,12 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
+        // Parse isTeko (accepts: yes/no, true/false, 1/0)
+        const tekoRaw = parseString(mappedData.isTeko);
+        const isTeko = tekoRaw
+          ? ['yes', 'true', '1', 'y', 'teko'].includes(tekoRaw.toLowerCase().trim())
+          : false;
+
         // Build create data
         const data: Record<string, unknown> = {
           fullName,
@@ -525,6 +532,7 @@ export async function POST(request: NextRequest) {
           status: 'active',
           isTeamLeader,
           isSupervisor,
+          isTeko,
           role,
           customHourlyRate,
         };
