@@ -7,6 +7,7 @@ import { safeFindPendingAdvances } from '@/lib/safe-advance';
 import { safeFetchSitesWithBranch } from '@/lib/safe-site';
 import { getRateMapForMonth } from '@/lib/rate-changelog';
 import { getEligibleRecurringAdvances, computeMonthlyDeduction } from '@/lib/advance-deduction';
+import { resolveRateSync } from '@/lib/rate-resolver';
 
 export const dynamic = 'force-dynamic';
 
@@ -577,47 +578,34 @@ export async function GET(request: NextRequest) {
           ? changelogRate
           : (emp?.customHourlyRate ?? null);
 
-        // Check trade rate (priority: custom rate > trade rate > Helper)
-        // NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
-        //      if custom rate exists, ONLY that rate is used (no trade, no bonus).
+        // ── Rate resolution via the canonical resolver ──
+        // Priority: changelog > custom > trade(+0.5 if TL/Sup) > BaseRate
         const salaryTrade = eRecords[0]?.trade || null;
         const empTradeInfo = employeeTradeMap.get(eId);
         const effectiveTrade = salaryTrade || empTradeInfo?.trade || 'Helper';
         const isHelper = effectiveTrade.toLowerCase() === 'helper';
-        const tradeRate = !isHelper ? tradeRateMap.get(effectiveTrade) : undefined;
-        const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
-        const hasCustomRate = employeeCustomRate != null;
+        const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTrade) ?? null) : null;
 
-        // Compute the effective rate with TL/Sup +0.5 bonus on trade rate
-        const effectiveTradeRate = hasTradeRate
-          ? (hasBonus ? tradeRate! + 0.5 : tradeRate!)
-          : undefined;
+        const resolvedRate = resolveRateSync(
+          employeeCustomRate,
+          tradeRateVal,
+          emp?.isTeamLeader ?? false,
+          emp?.isSupervisor ?? false,
+          baseRates,
+        );
+        const lowRate = resolvedRate.lowRate;
+        const highRate = resolvedRate.highRate;
+        const isCustom = resolvedRate.isCustom;
+        const hasCustomRate = resolvedRate.source === 'custom' || resolvedRate.source === 'changelog';
+        const hasTradeRate = resolvedRate.source === 'trade';
 
         // Get working hours info
         const empWhRecords = whByEmp.get(eId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
-        const isCustom = hasCustomRate
-          ? true
-          : hasTradeRate
-            ? true
-            : (currentMonthWh?.isCustom ?? empWhRecords.some((wh) => wh.isCustom));
-        const customRtPerHour = hasCustomRate
-          ? employeeCustomRate!
-          : effectiveTradeRate ??
-            (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : baseRates.standardLow));
+        const customRtPerHour = isCustom
+          ? (employeeCustomRate ?? (tradeRateVal !== null ? (hasBonus ? tradeRateVal + 0.5 : tradeRateVal) : lowRate))
+          : (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : baseRates.standardLow));
 
-        // Calculate low/high rates:
-        // 1) Custom rate → only that rate (no bonus, no threshold)
-        // 2) Trade rate → +0.5 if TL/Sup, otherwise just trade rate
-        // 3) Helper → threshold-based defaults
-        const lowRate = hasCustomRate
-          ? employeeCustomRate!
-          : effectiveTradeRate ??
-            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlLow : baseRates.supLow) : baseRates.standardLow);
-        const highRate = hasCustomRate
-          ? employeeCustomRate!
-          : effectiveTradeRate ??
-            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh) : baseRates.standardHigh);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold
@@ -679,41 +667,31 @@ export async function GET(request: NextRequest) {
           ? changelogRate
           : (emp?.customHourlyRate ?? null);
 
-        // Check trade rate — use EmployeeTrade assignment, fallback to 'Helper'
-        // NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
-        //      if custom rate exists, ONLY that rate is used.
+        // ── Rate resolution via the canonical resolver (same as records path) ──
         const stubEmpTradeInfo = employeeTradeMap.get(stub.empId);
         const stubEffectiveTrade = stubEmpTradeInfo?.trade || 'Helper';
         const stubIsHelper = stubEffectiveTrade.toLowerCase() === 'helper';
-        const tradeRate = !stubIsHelper ? tradeRateMap.get(stubEffectiveTrade) : undefined;
-        const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
-        const hasCustomRate = employeeCustomRate != null;
+        const tradeRateVal = !stubIsHelper ? (tradeRateMap.get(stubEffectiveTrade) ?? null) : null;
 
-        // Compute the effective rate with TL/Sup +0.5 bonus on trade rate
-        const effectiveTradeRate = hasTradeRate
-          ? (hasBonus ? tradeRate! + 0.5 : tradeRate!)
-          : undefined;
+        const resolvedRate = resolveRateSync(
+          employeeCustomRate,
+          tradeRateVal,
+          emp?.isTeamLeader ?? false,
+          emp?.isSupervisor ?? false,
+          baseRates,
+        );
+        const lowRate = resolvedRate.lowRate;
+        const highRate = resolvedRate.highRate;
+        const isCustom = resolvedRate.isCustom;
+        const hasCustomRate = resolvedRate.source === 'custom' || resolvedRate.source === 'changelog';
+        const hasTradeRate = resolvedRate.source === 'trade';
 
         const empWhRecords = whByEmp.get(stub.empId) || [];
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
-        const isCustom = hasCustomRate
-          ? true
-          : hasTradeRate
-            ? true
-            : (currentMonthWh?.isCustom ?? false);
-        const customRtPerHour = hasCustomRate
-          ? employeeCustomRate!
-          : effectiveTradeRate ??
-            (currentMonthWh?.rtPerHour ?? baseRates.standardLow);
+        const customRtPerHour = isCustom
+          ? (employeeCustomRate ?? (tradeRateVal !== null ? (hasBonus ? tradeRateVal + 0.5 : tradeRateVal) : lowRate))
+          : (currentMonthWh?.rtPerHour ?? baseRates.standardLow);
 
-        const lowRate = hasCustomRate
-          ? employeeCustomRate!
-          : effectiveTradeRate ??
-            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlLow : baseRates.supLow) : baseRates.standardLow);
-        const highRate = hasCustomRate
-          ? employeeCustomRate!
-          : effectiveTradeRate ??
-            (hasBonus ? (emp?.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh) : baseRates.standardHigh);
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
           : aggregateTotal >= threshold ? highRate : lowRate;

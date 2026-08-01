@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
 import { getRateForMonth } from '@/lib/rate-changelog';
+import { resolveRateSync } from '@/lib/rate-resolver';
 
 // ---------------------------------------------------------------------------
 // Recalculation Engine — Direct Hourly Rates (PRD v2.0)
@@ -43,43 +44,38 @@ export async function getEmployeeRates(
   },
   tradeRateMap?: Map<string, number> | null,
 ): { lowRate: number; highRate: number; isCustom: boolean } {
-  const isLeader = employee.isTeamLeader || employee.isSupervisor || employee.role === 'Team Leader' || employee.role === 'Supervisor';
+  // Delegate to the canonical resolver (rate-resolver.ts).
+  // This ensures the priority logic exists in exactly ONE place.
+  // NOTE: This function does NOT apply the per-month changelog override —
+  // callers that need changelog support should use resolveEmployeeRate()
+  // or resolveRateMapForMonth() from rate-resolver.ts directly.
+  const baseRates = await getBaseRates();
 
-  // 1. Per-employee custom rate (from Hours Ledger) — HIGHEST priority
-  //    ONLY this rate is used. No trade, no +0.5 bonus, no threshold.
-  if (employee.customHourlyRate !== null && employee.customHourlyRate !== undefined) {
-    return {
-      lowRate: employee.customHourlyRate,
-      highRate: employee.customHourlyRate,
-      isCustom: true,
-    };
-  }
-
-  // 2. Trade-based rate (if a TradeRate exists for this employee's trade)
-  //    NEW: if TL/Supervisor, trade rate gets +0.5 bonus.
-  //    NOTE: employee.trade here is the EFFECTIVE trade (overridden by the caller
-  //    to be the SalaryRecord trade, NOT the Employee table trade). The caller
-  //    is responsible for setting it correctly before calling this function.
+  // Resolve the trade rate from the map
+  let tradeRate: number | null = null;
   if (tradeRateMap && employee.trade) {
-    const tradeRate = tradeRateMap.get(employee.trade);
-    if (tradeRate !== undefined && tradeRate > 0) {
-      const effectiveRate = isLeader ? tradeRate + 0.5 : tradeRate;
-      return {
-        lowRate: effectiveRate,
-        highRate: effectiveRate,
-        isCustom: true,
-      };
+    const tr = tradeRateMap.get(employee.trade);
+    if (tr !== undefined && tr > 0) {
+      tradeRate = tr;
     }
   }
 
-  // 3. Role-based rates (Helper / no trade) — use DB base rates
-  const baseRates = await getBaseRates();
-  const isTL = employee.isTeamLeader;
+  // Use the role field as a fallback for TL/Sup detection
+  const isTL = employee.isTeamLeader || employee.role === 'Team Leader';
   const isSup = employee.isSupervisor || employee.role === 'Supervisor';
+
+  const resolved = resolveRateSync(
+    employee.customHourlyRate ?? null,
+    tradeRate,
+    isTL,
+    isSup,
+    baseRates,
+  );
+
   return {
-    lowRate: isTL ? baseRates.tlLow : (isSup ? baseRates.supLow : baseRates.standardLow),
-    highRate: isTL ? baseRates.tlHigh : (isSup ? baseRates.supHigh : baseRates.standardHigh),
-    isCustom: false,
+    lowRate: resolved.lowRate,
+    highRate: resolved.highRate,
+    isCustom: resolved.isCustom,
   };
 }
 

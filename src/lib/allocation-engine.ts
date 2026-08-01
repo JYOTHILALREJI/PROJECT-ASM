@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
+import { resolveRateSync } from '@/lib/rate-resolver';
 
 // ---------------------------------------------------------------------------
 // Cross-Site Monthly Hour Allocation Engine (Shared Module)
@@ -147,49 +148,31 @@ export async function allocateEmployeeHours(
     const hasBonus = employee.isTeamLeader || employee.isSupervisor;
     const employeeCustomRate = employee.customHourlyRate;
 
-    // Direct hourly rates — NEW priority (per project owner):
-    //   1) Employee.customHourlyRate (set from Employee Hours Ledger page)
-    //      → ONLY this rate is used. No trade, no +0.5 bonus, no threshold.
-    //   2) Trade rate (from SalaryRecord.trade or EmployeeTrade junction)
-    //      → If TL/Supervisor: rate = tradeRate + 0.5
-    //      → If NOT TL/Sup:    rate = tradeRate (no bonus)
-    //   3) "Helper" (default, no trade) → threshold-based:
-    //      → below threshold: 2.5 (standard) or 3.0 (TL/Sup)
-    //      → above threshold: 5.0 (standard) or 5.5 (TL/Sup)
-    //
-    // NEVER use Employee.trade — that field is only for ID purposes.
+    // ── Rate resolution: delegate to the canonical resolver ──
+    // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
+    // The changelog override is NOT applied here because the allocation
+    // engine runs per-month and the caller already passes the correct month.
+    // If changelog support is needed, the caller should pre-resolve the
+    // custom rate and pass it as employeeCustomRate.
     const savedTrade = records.length > 0
       ? (records.find(r => r.trade && r.trade.trim() !== '')?.trade || null)
       : null;
     const empTradeInfo = employeeTradeMap.get(empId);
     const effectiveTradeName = savedTrade || empTradeInfo?.trade || 'Helper';
     const isHelper = effectiveTradeName.toLowerCase() === 'helper';
-    const tradeRate = !isHelper ? tradeRateMap.get(effectiveTradeName) : undefined;
-    const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
-    const hasCustomRate = employeeCustomRate !== null && employeeCustomRate !== undefined;
+    const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTradeName) ?? null) : null;
 
-    // ── Compute the effective low/high rates ──
-    let lowRate: number;
-    let highRate: number;
-
-    if (hasCustomRate) {
-      // Priority 1: Custom rate from Hours Ledger → ONLY this rate, no bonus
-      lowRate = employeeCustomRate!;
-      highRate = employeeCustomRate!;
-    } else if (hasTradeRate) {
-      // Priority 2: Trade rate → +0.5 if TL/Sup, otherwise just the trade rate
-      const bonusAdjustedRate = hasBonus ? tradeRate! + 0.5 : tradeRate!;
-      lowRate = bonusAdjustedRate;
-      highRate = bonusAdjustedRate;
-    } else {
-      // Priority 3: Helper (no trade) → threshold-based defaults
-      lowRate = hasBonus
-        ? (employee.isTeamLeader ? baseRates.tlLow : baseRates.supLow)
-        : baseRates.standardLow;
-      highRate = hasBonus
-        ? (employee.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh)
-        : baseRates.standardHigh;
-    }
+    const resolved = resolveRateSync(
+      employeeCustomRate ?? null,
+      tradeRateVal,
+      employee.isTeamLeader,
+      employee.isSupervisor,
+      baseRates,
+    );
+    const lowRate = resolved.lowRate;
+    const highRate = resolved.highRate;
+    const hasCustomRate = resolved.isCustom;
+    const hasTradeRate = resolved.source === 'trade';
 
     // ------------------------------------------------------------------
     // 3a2. Check if employee has a custom rate override

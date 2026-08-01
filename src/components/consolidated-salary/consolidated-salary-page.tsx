@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { useSearchNavigation } from '@/lib/use-search-navigation';
+import { resolveClientRate } from '@/lib/client-rate-resolver';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * IMPORTANT — Single source of truth
@@ -241,40 +242,24 @@ function mergeApiEntries(
     // Custom rate info from workingHours (resolved server-side by /api/accounts)
     const previousCumulativeHours = (baseEntry.workingHours?.previousCumulativeHours as number) || 0;
     const hoursThreshold = (baseEntry.workingHours?.hoursThreshold as number) || 1000;
-    const isCustomRate = (baseEntry.workingHours?.isCustom as boolean) ?? false;
     const customHourlyRate: number | null =
       (baseEntry.workingHours?.customHourlyRate as number | null | undefined) ?? null;
 
-    // ── NEW rate priority (per project owner) ──
-    //   1) customHourlyRate (from Hours Ledger) → ONLY this rate
-    //   2) assignedTradeRate (from EmployeeTrade junction, set via Sites page)
-    //      → +0.5 if TL/Supervisor
-    //   3) Helper default → 2.5/3.0 (below) or 5.0/5.5 (above)
+    // ── Rate resolution via the canonical client-side resolver ──
+    // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
     const assignedTradeRate: number | null = baseEntry.assignedTradeRate ?? null;
-    const hasTradeRate = assignedTradeRate !== null && assignedTradeRate > 0;
 
-    let lowRate: number;
-    let highRate: number;
-
-    if (customHourlyRate !== null) {
-      // Priority 1: Custom rate → only this rate, no bonus
-      lowRate = customHourlyRate;
-      highRate = customHourlyRate;
-    } else if (hasTradeRate) {
-      // Priority 2: Trade rate → +0.5 if TL/Sup
-      const bonusAdjustedRate = hasBonus ? assignedTradeRate! + 0.5 : assignedTradeRate!;
-      lowRate = bonusAdjustedRate;
-      highRate = bonusAdjustedRate;
-    } else {
-      // Priority 3: Helper default — use DB-configured base rates
-      const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
-      lowRate = hasBonus
-        ? (baseEntry.isTeamLeader ? br.tlLow : br.supLow)
-        : br.standardLow;
-      highRate = hasBonus
-        ? (baseEntry.isTeamLeader ? br.tlHigh : br.supHigh)
-        : br.standardHigh;
-    }
+    const resolvedRate = resolveClientRate(
+      customHourlyRate,
+      assignedTradeRate,
+      baseEntry.isTeamLeader,
+      baseEntry.isSupervisor,
+      baseRates,
+    );
+    const lowRate = resolvedRate.lowRate;
+    const highRate = resolvedRate.highRate;
+    const isCustomRate = resolvedRate.isCustom;
+    const hasTradeRate = resolvedRate.source === 'trade';
 
     const lowRateHours = standardEntry?.salaryRecord?.totalHours ?? 0;
     const highRateHours = premiumEntry?.salaryRecord?.totalHours ?? 0;

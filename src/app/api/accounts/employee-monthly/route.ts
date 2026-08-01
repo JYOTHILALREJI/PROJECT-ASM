@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { allocateEmployeeHours } from '@/lib/allocation-engine';
+import { getBaseRates } from '@/lib/base-rates';
+import { buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { resolveRateSync } from '@/lib/rate-resolver';
 
 // GET: Get monthly hours data for a specific employee and year
 export async function GET(request: NextRequest) {
@@ -104,16 +108,26 @@ export async function GET(request: NextRequest) {
       ? allWhRecords[allWhRecords.length - 1].rtPerHour
       : 2.5;
 
-    // Auto-calculate the aggregate rate (direct rates — no divisors)
-    const hasBonus = employee.isTeamLeader || employee.isSupervisor;
+    // Auto-calculate the aggregate rate using the canonical resolver
+    // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
     const empThreshold = employee.hoursThreshold || 1000;
-    // Direct hourly rates (PRD v2.0)
-    const lowRate = employee.customHourlyRate != null
-      ? employee.customHourlyRate
-      : (hasBonus ? 3.0 : 2.5);
-    const highRate = employee.customHourlyRate != null
-      ? employee.customHourlyRate
-      : (hasBonus ? 5.5 : 5.0);
+    const baseRates = await getBaseRates();
+    const tradeRateMap = await buildTradeRateMap();
+    const employeeTradeMap = await buildEmployeeTradeMap();
+    const empTradeInfo = employeeTradeMap.get(empId);
+    const tradeName = empTradeInfo?.trade || 'Helper';
+    const isHelper = tradeName.toLowerCase() === 'helper';
+    const tradeRateVal = !isHelper ? (tradeRateMap.get(tradeName) ?? null) : null;
+
+    const resolvedRate = resolveRateSync(
+      employee.customHourlyRate ?? null,
+      tradeRateVal,
+      employee.isTeamLeader,
+      employee.isSupervisor,
+      baseRates,
+    );
+    const lowRate = resolvedRate.lowRate;
+    const highRate = resolvedRate.highRate;
     const autoRate = aggregateTotalHours >= empThreshold ? highRate : lowRate;
 
     // Build monthly data for all 12 months

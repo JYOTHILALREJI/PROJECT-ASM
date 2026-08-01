@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { getBaseRates } from '@/lib/base-rates';
+import { resolveRateSync } from '@/lib/rate-resolver';
 
 // GET: Returns all active employees with their cumulative hours and effective rate
 export async function GET(request: NextRequest) {
@@ -111,6 +113,7 @@ export async function GET(request: NextRequest) {
     // Build trade rate map + employee trade map
     const tradeRateMap = await buildTradeRateMap();
     const employeeTradeMap = await buildEmployeeTradeMap();
+    const baseRates = await getBaseRates();
 
     // Fetch trade from SalaryRecords for Accounts-edit priority
     const allSalaryRecsForTrade = await db.salaryRecord.findMany({
@@ -133,22 +136,30 @@ export async function GET(request: NextRequest) {
       const hasBonus = emp.isTeamLeader || emp.isSupervisor;
       const threshold = emp.hoursThreshold || 1000;
 
-      // Trade priority: SalaryRecord > EmployeeTrade > "Helper"
+      // ── Rate resolution via the canonical resolver ──
+      // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
       const effectiveTrade = salaryTradeMap.get(emp.id) || employeeTradeMap.get(emp.id)?.trade || 'Helper';
       const isHelper = effectiveTrade.toLowerCase() === 'helper';
-      const tradeRate = !isHelper ? tradeRateMap.get(effectiveTrade) : undefined;
-      const hasTradeRate = tradeRate !== undefined && tradeRate > 0;
-      const lowRate = hasBonus ? 3.0 : 2.5;
-      const highRate = hasBonus ? 5.5 : 5.0;
+      const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTrade) ?? null) : null;
+
+      const resolvedRate = resolveRateSync(
+        emp.customHourlyRate ?? null,
+        tradeRateVal,
+        emp.isTeamLeader,
+        emp.isSupervisor,
+        baseRates,
+      );
+      const lowRate = resolvedRate.lowRate;
+      const highRate = resolvedRate.highRate;
 
       let effectiveRate: number;
       let rateLabel: string;
-      if (emp.customHourlyRate != null) {
-        effectiveRate = emp.customHourlyRate;
+      if (resolvedRate.source === 'custom') {
+        effectiveRate = emp.customHourlyRate!;
         rateLabel = 'Custom';
-      } else if (hasTradeRate) {
-        effectiveRate = tradeRate!;
-        rateLabel = `${effectiveTrade} (${tradeRate})`;
+      } else if (resolvedRate.source === 'trade') {
+        effectiveRate = resolvedRate.lowRate; // includes +0.5 bonus if TL/Sup
+        rateLabel = `${effectiveTrade} (${tradeRateVal}${hasBonus ? ' +0.5' : ''})`;
       } else if (cumulativeHours >= threshold) {
         effectiveRate = highRate;
         rateLabel = String(highRate);
