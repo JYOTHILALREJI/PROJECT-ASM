@@ -135,6 +135,7 @@ interface ApiEmployeeEntry {
     customHourlyRate?: number | null;
   };
   tekoInfo?: { realName: string; workName: string } | null;
+  isTeko?: boolean;
 }
 
 interface ApiSiteResult {
@@ -205,6 +206,7 @@ interface MergedEmployeeRow {
 
   // Teko info — if a teko entry exists for this employee's ID
   tekoInfo?: { realName: string; workName: string } | null;
+  isTeko?: boolean;
 }
 
 /**
@@ -325,6 +327,7 @@ function mergeApiEntries(
       branchId,
       branchName,
       tekoInfo: baseEntry.tekoInfo ?? null,
+      isTeko: baseEntry.isTeko ?? false,
     });
   }
 
@@ -1263,8 +1266,8 @@ export function ConsolidatedSalaryPage() {
                               )}>
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   {emp.empName}
-                                  {emp.tekoInfo && (
-                                    <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[8px] px-1 py-0 font-bold" title={`Teko: ${emp.tekoInfo.realName} is using this ID`}>
+                                  {emp.isTeko && (
+                                    <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[8px] px-1 py-0 font-bold" title="This employee is marked as Teko">
                                       TEKO
                                     </Badge>
                                   )}

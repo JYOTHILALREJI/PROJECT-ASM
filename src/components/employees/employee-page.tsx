@@ -47,8 +47,6 @@ import {
   File as FileIcon,
   Table2,
   FileType2,
-  Ghost,
-  Ban,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -88,7 +86,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
-import { TekoList } from '@/components/employees/teko-list';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -115,6 +112,7 @@ interface Employee {
   teamLeaderSiteId: string | null;
   isSupervisor: boolean;
   supervisorSiteId: string | null;
+  isTeko?: boolean;
   customHourlyRate?: number | null;
   hoursThreshold?: number;
   currentTotalWorkingHours?: number;
@@ -772,15 +770,6 @@ export function EmployeePage() {
   const { user } = useAuthStore();
   const { toast } = useToast();
 
-  // ── View toggle: 'employees' (normal list) or 'teko' (cancelled/ghost list) ──
-  const [viewMode, setViewMode] = useState<'employees' | 'teko'>('employees');
-
-  // ── Cancel-to-Teko dialog state ──
-  const [cancelTekoDialogOpen, setCancelTekoDialogOpen] = useState(false);
-  const [cancellingEmployee, setCancellingEmployee] = useState<Employee | null>(null);
-  const [cancelTekoForm, setCancelTekoForm] = useState({ realName: '', notes: '' });
-  const [cancellingToTeko, setCancellingToTeko] = useState(false);
-
   // ── State ──
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [total, setTotal] = useState(0);
@@ -840,6 +829,7 @@ export function EmployeePage() {
     teamLeaderSiteId: '',
     isSupervisor: false,
     supervisorSiteId: '',
+    isTeko: false,
     customHourlyRate: '' as string,
     currentTotalWorkingHours: '' as string,
   });
@@ -1007,6 +997,7 @@ export function EmployeePage() {
       teamLeaderSiteId: '',
       isSupervisor: false,
       supervisorSiteId: '',
+      isTeko: false,
       customHourlyRate: '',
       currentTotalWorkingHours: '',
     });
@@ -1042,6 +1033,7 @@ export function EmployeePage() {
       teamLeaderSiteId: employee.teamLeaderSiteId || '',
       isSupervisor: employee.isSupervisor || false,
       supervisorSiteId: employee.supervisorSiteId || '',
+      isTeko: (employee as Record<string, unknown>).isTeko === true,
       customHourlyRate: (employee as Record<string, unknown>).customHourlyRate != null ? String((employee as Record<string, unknown>).customHourlyRate) : '',
       currentTotalWorkingHours: (employee as Record<string, unknown>).currentTotalWorkingHours != null ? String((employee as Record<string, unknown>).currentTotalWorkingHours) : '',
     });
@@ -1178,6 +1170,7 @@ export function EmployeePage() {
         teamLeaderSiteId: formData.isTeamLeader ? (formData.teamLeaderSiteId || null) : null,
         isSupervisor: formData.isSupervisor,
         supervisorSiteId: formData.isSupervisor ? (formData.supervisorSiteId || null) : null,
+        isTeko: formData.isTeko,
         customHourlyRate: formData.customHourlyRate ? parseFloat(formData.customHourlyRate) : null,
         currentTotalWorkingHours: formData.currentTotalWorkingHours !== '' ? parseFloat(formData.currentTotalWorkingHours) : 0,
       };
@@ -1273,54 +1266,6 @@ export function EmployeePage() {
       window.open(`https://wa.me/${phone}`, '_blank');
     } else {
       toast({ title: 'No Phone Number', description: 'This employee has no phone number on file.', variant: 'destructive' });
-    }
-  };
-
-  // ── Cancel-to-Teko handler ──
-  // Cancels an employee (marks status='cancelled') and creates a teko entry
-  // mapping their identity (name+ID) to a real person who will take over.
-  const openCancelTekoDialog = (employee: Employee) => {
-    setCancellingEmployee(employee);
-    // Default realName to the employee's own name (admin can change it)
-    setCancelTekoForm({ realName: employee.fullName, notes: '' });
-    setCancelTekoDialogOpen(true);
-  };
-
-  const handleCancelToTeko = async () => {
-    if (!cancellingEmployee) return;
-    if (!cancelTekoForm.realName.trim()) {
-      toast({ title: 'Validation Error', description: 'Real name is required', variant: 'destructive' });
-      return;
-    }
-    setCancellingToTeko(true);
-    try {
-      const res = await fetch('/api/teko', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          realName: cancelTekoForm.realName.trim(),
-          workName: cancellingEmployee.fullName,
-          workEmployeeId: cancellingEmployee.employeeId,
-          notes: cancelTekoForm.notes,
-          cancelledFromEmployeeId: cancellingEmployee.id,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast({
-          title: 'Employee Cancelled → Teko',
-          description: `${cancellingEmployee.fullName} has been cancelled. Teko entry created for ${cancelTekoForm.realName}.`,
-        });
-        setCancelTekoDialogOpen(false);
-        setCancellingEmployee(null);
-        fetchEmployees();
-      } else {
-        toast({ title: 'Error', description: data.error || 'Failed to cancel employee', variant: 'destructive' });
-      }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to cancel employee', variant: 'destructive' });
-    } finally {
-      setCancellingToTeko(false);
     }
   };
 
@@ -1591,33 +1536,6 @@ export function EmployeePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* View Mode Toggle: Employees vs Teko */}
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant={viewMode === 'employees' ? 'default' : 'outline'}
-          onClick={() => setViewMode('employees')}
-          className={viewMode === 'employees' ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'border-slate-600 text-slate-300 hover:bg-slate-700'}
-        >
-          <Users className="h-4 w-4 mr-1.5" />
-          Active Employees
-        </Button>
-        <Button
-          size="sm"
-          variant={viewMode === 'teko' ? 'default' : 'outline'}
-          onClick={() => setViewMode('teko')}
-          className={viewMode === 'teko' ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'border-slate-600 text-slate-300 hover:bg-slate-700'}
-        >
-          <Ghost className="h-4 w-4 mr-1.5" />
-          Teko (Cancelled)
-        </Button>
-      </div>
-
-      {/* ── Teko View ── */}
-      {viewMode === 'teko' ? (
-        <TekoList />
-      ) : (
-        <>
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -1904,9 +1822,8 @@ export function EmployeePage() {
                       <TableCell>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-sm text-slate-300 font-mono">{emp.employeeId}</span>
-                          {(emp as Record<string, unknown>).tekoInfo && (
-                            <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0" title={`Teko: ${(emp as Record<string, { realName: string }>).tekoInfo.realName} is using this ID`}>
-                              <Ghost className="h-2.5 w-2.5 mr-0.5" />
+                          {(emp as Record<string, unknown>).isTeko === true && (
+                            <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0" title="This employee is marked as Teko">
                               TEKO
                             </Badge>
                           )}
@@ -1966,17 +1883,6 @@ export function EmployeePage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10"
-                              onClick={() => openCancelTekoDialog(emp)}
-                              title="Cancel → Teko"
-                            >
-                              <Ban className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {emp.status !== 'pending_deletion' && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
                               className="h-8 w-8 text-slate-400 hover:text-red-400 hover:bg-red-500/10"
                               onClick={() => openDeleteDialog(emp)}
                               title="Delete"
@@ -2021,9 +1927,8 @@ export function EmployeePage() {
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-xs text-slate-500 font-mono">{emp.employeeId}</p>
-                          {(emp as Record<string, unknown>).tekoInfo && (
+                          {(emp as Record<string, unknown>).isTeko === true && (
                             <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0">
-                              <Ghost className="h-2.5 w-2.5 mr-0.5" />
                               TEKO
                             </Badge>
                           )}
@@ -2075,17 +1980,6 @@ export function EmployeePage() {
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      {emp.status !== 'pending_deletion' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-slate-400 hover:text-violet-400"
-                          onClick={() => openCancelTekoDialog(emp)}
-                          title="Cancel → Teko"
-                        >
-                          <Ban className="h-4 w-4" />
-                        </Button>
-                      )}
                       {emp.status !== 'pending_deletion' && (
                         <Button
                           variant="ghost"
@@ -2503,6 +2397,28 @@ export function EmployeePage() {
                       <p className="text-xs text-slate-500">Select the site this employee supervises.</p>
                     </div>
                   )}
+                </div>
+
+                <Separator className="bg-slate-700/50" />
+
+                {/* Teko Toggle */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-violet-400" />
+                    Teko Employee
+                  </h4>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+                    <div>
+                      <Label className="text-slate-300 text-sm">Mark as Teko</Label>
+                      <p className="text-xs text-slate-500">This employee is using another employee's ID to work. A "TEKO" badge will appear next to their name everywhere.</p>
+                    </div>
+                    <Switch
+                      checked={formData.isTeko}
+                      onCheckedChange={(checked) => {
+                        setFormData((prev) => ({ ...prev, isTeko: checked }));
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <Separator className="bg-slate-700/50" />
@@ -3319,61 +3235,6 @@ export function EmployeePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ── Cancel-to-Teko Dialog ── */}
-      <Dialog open={cancelTekoDialogOpen} onOpenChange={setCancelTekoDialogOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Ban className="h-5 w-5 text-violet-400" />
-              Cancel Employee → Teko
-            </DialogTitle>
-            <DialogDescription className="text-slate-400">
-              Cancel <strong className="text-white">{cancellingEmployee?.fullName}</strong> ({cancellingEmployee?.employeeId})
-              and create a teko entry so their identity can be reused by another real employee.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Cancelled Identity (Work Name + ID)</p>
-              <p className="text-sm text-white font-medium">{cancellingEmployee?.fullName}</p>
-              <p className="text-xs text-slate-400 font-mono">{cancellingEmployee?.employeeId}</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-slate-400">Real Name (the actual person who will use this identity) *</Label>
-              <Input
-                value={cancelTekoForm.realName}
-                onChange={(e) => setCancelTekoForm({ ...cancelTekoForm, realName: e.target.value })}
-                className="bg-slate-900 border-slate-600 text-white h-9"
-                placeholder="e.g. John Doe"
-              />
-              <p className="text-[10px] text-slate-500">
-                This is the real name of the person who will take over the cancelled employee's ID. You can link them to an actual Employee record later from the Teko tab.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-slate-400">Notes (optional)</Label>
-              <Input
-                value={cancelTekoForm.notes}
-                onChange={(e) => setCancelTekoForm({ ...cancelTekoForm, notes: e.target.value })}
-                className="bg-slate-900 border-slate-600 text-white h-9"
-                placeholder="e.g. Left the company, ID reassigned"
-              />
-            </div>
-          </div>
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-700/50">
-            <Button variant="outline" onClick={() => setCancelTekoDialogOpen(false)} className="border-slate-600 text-slate-300 hover:bg-slate-700">
-              Cancel
-            </Button>
-            <Button onClick={handleCancelToTeko} disabled={cancellingToTeko} className="bg-violet-600 hover:bg-violet-700 text-white">
-              {cancellingToTeko ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Ban className="h-4 w-4 mr-2" />}
-              Cancel & Create Teko
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-        </>
-      )}
     </div>
   );
 }

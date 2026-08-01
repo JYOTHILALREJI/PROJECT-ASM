@@ -92,6 +92,7 @@ model Employee {
   role             String    @default("Standard") // "Standard", "Team Leader", "Supervisor"
   customHourlyRate Float? // Nullable - overrides standard tier rates for this employee
   hoursThreshold   Int       @default(1000) // Hours threshold for rate switching (basic vs premium)
+  isTeko           Boolean  @default(false) // If true, this employee is a "teko" (using another employee's ID)
   branchId         String?  // FK to Branch — which branch this employee belongs to
   campId           String?  // FK to Camp — which camp the employee lives in
   // Custom current total working hours — manually settable at ANY point in time.
@@ -121,9 +122,6 @@ model Employee {
   advances             Advance[]
   employeeTrade        EmployeeTrade?
   rateChangelogs       EmployeeRateChangelog[]
-  // Back-relation: if this employee is linked to a teko (they took over a
-  // cancelled employee's identity), this is the teko entry.
-  tekoLink             Teko?  @relation("TekoLinkedEmployee")
 
   @@index([trade])
   @@index([isTeamLeader])
@@ -132,6 +130,7 @@ model Employee {
   @@index([currentSiteId])
   @@index([branchId])
   @@index([campId])
+  @@index([isTeko])
 }
 
 // ---------------------------------------------------------------------------
@@ -216,43 +215,6 @@ model Camp {
   employees Employee[]
 
   @@index([isActive])
-  @@index([deletedAt])
-}
-
-// ---------------------------------------------------------------------------
-// Teko — cancelled/ghost employee whose identity is reused
-// ---------------------------------------------------------------------------
-// A "teko" is an employee who has left the company but whose name and
-// employee ID are still used by another real employee who took over.
-//
-// For example: Employee "Ahmed Ali" (ASM-001) left the company. A new
-// employee "John Doe" takes over Ahmed's position and uses Ahmed's ID
-// (ASM-001) in company records. The teko entry records:
-//   - realName: "John Doe" (the actual person now working)
-//   - workName: "Ahmed Ali" (the cancelled employee's name)
-//   - workEmployeeId: "ASM-001" (the ID still in use)
-//   - linkedEmployeeId: the Employee record for "John Doe" (if any)
-//
-// This lets the company keep historical records under the old name/ID
-// while knowing who the actual current worker is.
-// ---------------------------------------------------------------------------
-model Teko {
-  id               String   @id @default(cuid())
-  realName         String   // the actual person who took over (or will take over)
-  workName         String   // the cancelled employee's name (as in company records)
-  workEmployeeId   String   // the employee ID of the cancelled employee (still in use)
-  linkedEmployeeId String?  @unique // FK to Employee — the real employee now using this identity (one-to-one)
-  notes            String   @default("")
-  cancelledAt      DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
-
-  // Optional relation to the Employee who is now using this teko's identity
-  linkedEmployee Employee? @relation("TekoLinkedEmployee", fields: [linkedEmployeeId], references: [id], onDelete: SetNull)
-
-  @@unique([workEmployeeId]) // one teko per work employee ID
-  @@index([realName])
   @@index([deletedAt])
 }
 

@@ -231,6 +231,11 @@ export async function PUT(
       data.supervisorSiteId = body.supervisorSiteId || null;
     }
 
+    // Handle isTeko toggle
+    if (typeof body.isTeko === 'boolean') {
+      data.isTeko = body.isTeko;
+    }
+
     // Handle force replace for team leader
     if (body.forceReplaceTeamLeader && body.teamLeaderSiteId) {
       // Remove existing team leader of this site
