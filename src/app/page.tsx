@@ -66,7 +66,7 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId } = useAppStore();
@@ -158,6 +158,8 @@ function MainLayout() {
       case 'dashboard':
         return <DashboardPage />;
       case 'employees':
+      case 'employee_add':
+      case 'employee_batch_add':
         return <EmployeePage />;
       case 'sites':
         return <SitesPage />;

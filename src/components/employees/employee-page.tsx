@@ -16,6 +16,8 @@ import {
   MessageCircle,
   ChevronLeft,
   ChevronRight,
+  ArrowLeft,
+  Save,
   ChevronsLeft,
   ChevronsRight,
   RotateCcw,
@@ -769,6 +771,13 @@ function compressImage(file: File, maxWidth = 300, quality = 0.8): Promise<strin
 export function EmployeePage() {
   const { user } = useAuthStore();
   const { toast } = useToast();
+  const { currentView, setCurrentView } = useAppStore();
+
+  // ── Full-page view mode: 'list' (normal), 'add' (form), 'batch' (batch add) ──
+  const pageMode: 'list' | 'add' | 'batch' =
+    currentView === 'employee_add' ? 'add'
+    : currentView === 'employee_batch_add' ? 'batch'
+    : 'list';
 
   // ── State ──
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -853,6 +862,7 @@ export function EmployeePage() {
   // example preview shown in the dialog. null = not yet chosen.
   const [batchFormat, setBatchFormat] = useState<'csv' | 'tsv' | 'xlsx' | 'json' | 'pdf' | 'docx' | null>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1004,7 +1014,7 @@ export function EmployeePage() {
     setFormTab('personal');
     setShowNewSiteInput(false);
     setNewSiteName('');
-    setFormDialogOpen(true);
+    setCurrentView('employee_add');
   };
 
   const openEditDialog = (employee: Employee) => {
@@ -1040,7 +1050,7 @@ export function EmployeePage() {
     setFormTab('personal');
     setShowNewSiteInput(false);
     setNewSiteName('');
-    setFormDialogOpen(true);
+    setCurrentView('employee_add');
   };
 
   const openDetailsDialog = (employee: Employee) => {
@@ -1201,6 +1211,7 @@ export function EmployeePage() {
           description: `${formData.fullName} has been ${formMode === 'add' ? 'added' : 'updated'} successfully.`,
         });
         setFormDialogOpen(false);
+        setCurrentView('employees');
         fetchEmployees();
       } else {
         toast({ title: 'Error', description: json.error || 'Operation failed', variant: 'destructive' });
@@ -1274,7 +1285,7 @@ export function EmployeePage() {
     setBatchFile(null);
     setBatchResult(null);
     setBatchFormat(null);
-    setBatchDialogOpen(true);
+    setCurrentView('employee_batch_add');
   };
 
   // Format definitions — keyed by the format id. Used for both the format
@@ -1534,6 +1545,680 @@ export function EmployeePage() {
 
   // ── Render ──
 
+  // ── Full-page Add/Edit Form ──
+  if (pageMode === 'add') {
+    return (
+      <div className="flex flex-col gap-6">
+        {/* Top bar */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <Button
+            variant="ghost"
+            onClick={() => { setFormDialogOpen(false); setCurrentView('employees'); }}
+            className="text-slate-400 hover:text-white hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Employees
+          </Button>
+        </div>
+
+        {/* Form card */}
+        <Card className="bg-slate-800 border-slate-700">
+          <CardContent className="p-6">
+            <h2 className="text-xl font-bold text-white mb-1">
+              {formMode === 'add' ? 'Add New Employee' : `Edit ${editingEmployee?.fullName || 'Employee'}`}
+            </h2>
+            <p className="text-sm text-slate-400 mb-6">
+              {formMode === 'add' ? 'Fill in the employee details below.' : 'Update the employee information.'}
+            </p>
+
+            {/* Tabs */}
+            <Tabs value={formTab} onValueChange={setFormTab} className="w-full">
+              <TabsList className="bg-slate-900/50 w-full">
+                <TabsTrigger value="personal" className="flex-1 data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400">
+                  Personal Information
+                </TabsTrigger>
+                <TabsTrigger value="professional" className="flex-1 data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400">
+                  Professional & Work
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Personal Tab ── */}
+              <TabsContent value="personal" className="space-y-4 pt-4">
+                {/* Photo upload */}
+                <div className="flex items-center gap-4">
+                  <div className="h-20 w-20 rounded-xl bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-600/50 flex-shrink-0">
+                    {formPhoto ? (
+                      <img src={formPhoto} alt="Preview" className="h-full w-full object-cover" />
+                    ) : (
+                      <Upload className="h-6 w-6 text-slate-500" />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Profile Photo</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={photoInputRef}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handlePhotoUpload(file);
+                        }}
+                        className="hidden"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => photoInputRef.current?.click()}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      >
+                        <Upload className="h-4 w-4 mr-1" />
+                        Upload Photo
+                      </Button>
+                      {formPhoto && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setFormPhoto(null)}
+                          className="text-red-400 hover:bg-red-500/10"
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                    {isProcessingImage && <p className="text-xs text-slate-500">Processing image...</p>}
+                  </div>
+                </div>
+
+                <Separator className="bg-slate-700/50" />
+
+                {/* Name & ID */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Full Name *</Label>
+                    <Input
+                      value={formData.fullName}
+                      onChange={(e) => handleFormChange('fullName', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="e.g. John Doe"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Employee ID</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={formData.employeeId}
+                        onChange={(e) => handleFormChange('employeeId', e.target.value)}
+                        className="bg-slate-900 border-slate-600 text-white font-mono"
+                        placeholder="Auto-generated if empty"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleFormChange('employeeId', generateAutoId())}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700 shrink-0"
+                      >
+                        Auto
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Nationality & DOB */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Nationality</Label>
+                    <SearchableNationalitySelect
+                      value={formData.nationality}
+                      onChange={(v) => handleFormChange('nationality', v)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Date of Birth</Label>
+                    <Input
+                      type="date"
+                      value={formData.dateOfBirth}
+                      onChange={(e) => handleFormChange('dateOfBirth', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Phone & Email */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Phone</Label>
+                    <Input
+                      value={formData.phone}
+                      onChange={(e) => handleFormChange('phone', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="+971501234567"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Email</Label>
+                    <Input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => handleFormChange('email', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="john@example.com"
+                    />
+                  </div>
+                </div>
+
+                {/* Address */}
+                <div className="space-y-2">
+                  <Label className="text-slate-300 text-sm">Address</Label>
+                  <Input
+                    value={formData.address}
+                    onChange={(e) => handleFormChange('address', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white"
+                    placeholder="Full residential address"
+                  />
+                </div>
+
+                {/* Emergency Contact */}
+                <div className="space-y-2">
+                  <Label className="text-slate-300 text-sm">Emergency Contact</Label>
+                  <Input
+                    value={formData.emergencyContact}
+                    onChange={(e) => handleFormChange('emergencyContact', e.target.value)}
+                    className="bg-slate-900 border-slate-600 text-white"
+                    placeholder="Name and phone number"
+                  />
+                </div>
+
+                <Separator className="bg-slate-700/50" />
+
+                {/* Passport */}
+                <h4 className="text-sm font-medium text-slate-300">Passport Details</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Passport Number</Label>
+                    <Input
+                      value={formData.passportNumber}
+                      onChange={(e) => handleFormChange('passportNumber', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="Passport number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Passport Status</Label>
+                    <Input
+                      value={formData.passportStatus}
+                      onChange={(e) => handleFormChange('passportStatus', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="e.g. Valid, Expired"
+                    />
+                  </div>
+                </div>
+
+                {/* ID */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">ID Number</Label>
+                    <Input
+                      value={formData.idNumber}
+                      onChange={(e) => handleFormChange('idNumber', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="National ID number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">ID Status</Label>
+                    <Input
+                      value={formData.idStatus}
+                      onChange={(e) => handleFormChange('idStatus', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                      placeholder="e.g. Valid, Expired"
+                    />
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* ── Professional Tab ── */}
+              <TabsContent value="professional" className="space-y-4 pt-4">
+                {/* Trade & Company */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Trade / Position</Label>
+                    <SearchableTradeSelect
+                      value={formData.trade}
+                      onChange={(v) => handleFormChange('trade', v)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Company Name</Label>
+                    <SearchableCompanySelect
+                      value={formData.companyName}
+                      onChange={(v) => handleFormChange('companyName', v)}
+                    />
+                  </div>
+                </div>
+
+                {/* Current Site & Join Date */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Current Site</Label>
+                    <Select
+                      value={formData.currentSite || '__none__'}
+                      onValueChange={(v) => handleFormChange('currentSite', v === '__none__' ? '' : v)}
+                    >
+                      <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                        <SelectValue placeholder="Select a site" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-800 border-slate-700">
+                        <SelectItem value="__none__"><span className="text-slate-500">No site / Idle</span></SelectItem>
+                        {sites.map((s) => (
+                          <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Join Date</Label>
+                    <Input
+                      type="date"
+                      value={formData.joinDate}
+                      onChange={(e) => handleFormChange('joinDate', e.target.value)}
+                      className="bg-slate-900 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+
+                <Separator className="bg-slate-700/50" />
+
+                {/* Team Leader */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <Crown className="h-4 w-4 text-amber-400" />
+                    Team Leader
+                  </h4>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+                    <div>
+                      <Label className="text-slate-300 text-sm">Team Leader</Label>
+                      <p className="text-xs text-slate-500">Designate this employee as a team leader</p>
+                    </div>
+                    <Switch
+                      checked={formData.isTeamLeader}
+                      onCheckedChange={(checked) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          isTeamLeader: checked,
+                          teamLeaderSiteId: checked ? prev.teamLeaderSiteId : '',
+                        }));
+                      }}
+                    />
+                  </div>
+                  {formData.isTeamLeader && (
+                    <div className="space-y-2">
+                      <Label className="text-slate-300 text-sm">Lead Site</Label>
+                      <Select
+                        value={formData.teamLeaderSiteId || '__none__'}
+                        onValueChange={(v) => handleFormChange('teamLeaderSiteId', v === '__none__' ? '' : v)}
+                      >
+                        <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                          <SelectValue placeholder="Select which site they lead" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-800 border-slate-700">
+                          <SelectItem value="__none__"><span className="text-slate-500">No specific site</span></SelectItem>
+                          {sites.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Supervisor */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-blue-400" />
+                    Supervisor
+                  </h4>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+                    <div>
+                      <Label className="text-slate-300 text-sm">Supervisor</Label>
+                      <p className="text-xs text-slate-500">Designate this employee as a supervisor</p>
+                    </div>
+                    <Switch
+                      checked={formData.isSupervisor}
+                      onCheckedChange={(checked) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          isSupervisor: checked,
+                          supervisorSiteId: checked ? prev.supervisorSiteId : '',
+                        }));
+                      }}
+                    />
+                  </div>
+                  {formData.isSupervisor && (
+                    <div className="space-y-2">
+                      <Label className="text-slate-300 text-sm">Supervise Site</Label>
+                      <Select
+                        value={formData.supervisorSiteId || '__none__'}
+                        onValueChange={(v) => handleFormChange('supervisorSiteId', v === '__none__' ? '' : v)}
+                      >
+                        <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                          <SelectValue placeholder="Select which site they supervise" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-800 border-slate-700">
+                          <SelectItem value="__none__"><span className="text-slate-500">No specific site</span></SelectItem>
+                          {sites.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <Separator className="bg-slate-700/50" />
+
+                {/* Teko */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-violet-400" />
+                    Teko Employee
+                  </h4>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+                    <div>
+                      <Label className="text-slate-300 text-sm">Mark as Teko</Label>
+                      <p className="text-xs text-slate-500">This employee is using another employee's ID to work. A "TEKO" badge will appear next to their name everywhere.</p>
+                    </div>
+                    <Switch
+                      checked={formData.isTeko}
+                      onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, isTeko: checked }))}
+                    />
+                  </div>
+                </div>
+
+                <Separator className="bg-slate-700/50" />
+
+                {/* Custom Rate */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <DollarSign className="h-4 w-4 text-violet-400" />
+                    Custom Hourly Rate
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-slate-300 text-sm">Custom Rate (AED/hr)</Label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={formData.customHourlyRate}
+                        onChange={(e) => handleFormChange('customHourlyRate', e.target.value)}
+                        className="bg-slate-900 border-slate-600 text-white"
+                        placeholder="e.g. 6.5"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-300 text-sm">Current Total Working Hours</Label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={formData.currentTotalWorkingHours}
+                        onChange={(e) => handleFormChange('currentTotalWorkingHours', e.target.value)}
+                        className="bg-slate-900 border-slate-600 text-white"
+                        placeholder="e.g. 850"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            {/* Action buttons */}
+            <div className="flex items-center justify-between pt-6 mt-6 border-t border-slate-700/50">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (formTab === 'professional') {
+                    setFormTab('personal');
+                  } else {
+                    setFormDialogOpen(false);
+                    setCurrentView('employees');
+                  }
+                }}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              >
+                {formTab === 'professional' ? (
+                  <><ChevronLeft className="h-4 w-4 mr-1" /> Previous</>
+                ) : (
+                  'Cancel'
+                )}
+              </Button>
+              <div className="flex items-center gap-2">
+                {formTab === 'personal' && (
+                  <Button
+                    onClick={() => setFormTab('professional')}
+                    className="bg-slate-700 hover:bg-slate-600 text-white"
+                  >
+                    Next <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                )}
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                  {formMode === 'add' ? 'Create Employee' : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── Full-page Batch Add ──
+  if (pageMode === 'batch') {
+    return (
+      <div className="flex flex-col gap-6">
+        {/* Top bar */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <Button
+            variant="ghost"
+            onClick={() => { setBatchDialogOpen(false); setCurrentView('employees'); }}
+            className="text-slate-400 hover:text-white hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Employees
+          </Button>
+        </div>
+
+        <Card className="bg-slate-800 border-slate-700">
+          <CardContent className="p-6">
+            <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-blue-400" />
+              Batch Add Employees
+            </h2>
+            <p className="text-sm text-slate-400 mb-6">
+              Upload a file with employee data. The system will parse and create employees automatically.
+            </p>
+
+            {/* Format selector */}
+            {!batchFormat && (
+              <div className="space-y-3">
+                <Label className="text-slate-300 text-sm">Choose a file format</Label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {Object.entries(batchFormatDefs).map(([key, def]) => {
+                    const Icon = def.icon;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setBatchFormat(key as 'csv' | 'tsv' | 'xlsx' | 'json' | 'pdf' | 'docx')}
+                        className={cn(
+                          'flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all hover:scale-105',
+                          def.bgColor, def.borderColor, def.color
+                        )}
+                      >
+                        <Icon className="h-8 w-8" />
+                        <span className="text-xs font-medium">{def.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* File upload + preview */}
+            {batchFormat && (
+              <div className="space-y-4">
+                {/* Format header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const Icon = batchFormatDefs[batchFormat].icon;
+                      return <Icon className={cn('h-5 w-5', batchFormatDefs[batchFormat].color)} />;
+                    })()}
+                    <span className="text-sm font-medium text-white">{batchFormatDefs[batchFormat].label}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setBatchFormat(null); setBatchFile(null); }}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Change Format
+                  </Button>
+                </div>
+
+                {/* File drop zone */}
+                {!batchFile && (
+                  <div
+                    onClick={() => batchFileInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-600 rounded-xl p-12 text-center cursor-pointer hover:border-blue-500/50 hover:bg-blue-500/5 transition-all"
+                  >
+                    <Upload className="h-12 w-12 text-slate-500 mx-auto mb-3" />
+                    <p className="text-slate-300 font-medium">Click to select a file</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Accepted: {batchFormatDefs[batchFormat].exts.join(', ')}
+                    </p>
+                    <input
+                      type="file"
+                      ref={batchFileInputRef}
+                      accept={batchFormatDefs[batchFormat].accept}
+                      onChange={handleBatchFileSelect}
+                      className="hidden"
+                    />
+                  </div>
+                )}
+
+                {/* Selected file */}
+                {batchFile && (
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+                    <FileText className="h-8 w-8 text-blue-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white font-medium truncate">{batchFile.name}</p>
+                      <p className="text-xs text-slate-500">{(batchFile.size / 1024).toFixed(1)} KB</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBatchFile(null)}
+                      className="text-slate-400 hover:text-red-400"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+
+                {/* Upload button */}
+                {batchFile && !batchResult && (
+                  <Button
+                    onClick={handleBatchUpload}
+                    disabled={isBatchUploading}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    {isBatchUploading ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Uploading...</>
+                    ) : (
+                      <><Upload className="h-4 w-4 mr-2" /> Upload & Create Employees</>
+                    )}
+                  </Button>
+                )}
+
+                {/* Result */}
+                {batchResult && (
+                  <div className="space-y-3">
+                    <div className={cn(
+                      'p-4 rounded-lg border',
+                      batchResult.failed > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-emerald-500/10 border-emerald-500/30'
+                    )}>
+                      <div className="flex items-center gap-2 mb-2">
+                        {batchResult.failed > 0 ? (
+                          <AlertTriangle className="h-5 w-5 text-amber-400" />
+                        ) : (
+                          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                        )}
+                        <span className="text-sm font-medium text-white">
+                          {batchResult.created} created, {batchResult.failed} failed (of {batchResult.total})
+                        </span>
+                      </div>
+                      {batchResult.errors.length > 0 && (
+                        <div className="max-h-[200px] overflow-y-auto space-y-1">
+                          {batchResult.errors.map((err, i) => (
+                            <p key={i} className="text-xs text-red-400">
+                              Row {err.row}: {err.message}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => { setBatchFile(null); setBatchResult(null); }}
+                        variant="outline"
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      >
+                        Upload Another File
+                      </Button>
+                      <Button
+                        onClick={() => { setCurrentView('employees'); fetchEmployees(); }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        View Employees
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Example preview */}
+                {!batchFile && !batchResult && (
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 text-sm">Example file format ({batchFormat?.toUpperCase()})</Label>
+                    <p className="text-xs text-slate-500 mb-2">
+                      Your file should have these columns. Only "Full Name" is required; others are optional.
+                    </p>
+                    {batchFormat === 'csv' && <CsvPreview />}
+                    {batchFormat === 'tsv' && <TsvPreview />}
+                    {batchFormat === 'xlsx' && <XlsxPreview />}
+                    {batchFormat === 'json' && <JsonPreview />}
+                    {batchFormat === 'pdf' && <PdfPreview />}
+                    {batchFormat === 'docx' && <DocxPreview />}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── Normal Employee List View ──
   return (
     <div className="flex flex-col gap-6">
       {/* Page Header */}
