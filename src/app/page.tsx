@@ -11,6 +11,8 @@ import { ProfilePage } from '@/components/auth/profile-page';
 import { DashboardPage } from '@/components/dashboard/dashboard-page';
 import { EmployeePage } from '@/components/employees/employee-page';
 import { EmployeeDetailPage } from '@/components/employees/employee-detail-page';
+import { CampPage } from '@/components/camps/camp-page';
+import { CampDetailPage } from '@/components/camps/camp-detail-page';
 import { AttendancePage } from '@/components/attendance/attendance-page';
 import { AttendanceCopyPage } from '@/components/attendance-copy/attendance-copy-page';
 import { AllLogsPage } from '@/components/all-logs/all-logs-page';
@@ -64,7 +66,7 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId } = useAppStore();
@@ -192,6 +194,10 @@ function MainLayout() {
         ) : <EmployeeHoursDirectory />;
       case 'employee_detail':
         return selectedEmployeeId ? <EmployeeDetailPage /> : <EmployeePage />;
+      case 'camps':
+        return <CampPage />;
+      case 'camp_detail':
+        return selectedEmployeeId ? <CampDetailPage /> : <CampPage />;
       case 'profile':
         return <ProfilePage />;
       default:

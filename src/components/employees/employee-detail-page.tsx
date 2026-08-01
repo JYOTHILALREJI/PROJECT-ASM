@@ -439,7 +439,7 @@ function generateEmployeeCV(employee: Employee, sites: Site[]): void {
 // ─── Main Component ──────────────────────────────────────────────────────
 
 export function EmployeeDetailPage() {
-  const { selectedEmployeeId, setCurrentView } = useAppStore();
+  const { selectedEmployeeId, setCurrentView, setSelectedEmployeeId } = useAppStore();
   const { toast } = useToast();
 
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -523,7 +523,17 @@ export function EmployeeDetailPage() {
   // ── Handlers ──
 
   const handleBack = () => {
-    setCurrentView('employees');
+    // If we came from a camp detail page, return there
+    const campReturnId = typeof window !== 'undefined'
+      ? localStorage.getItem('asm_camp_return_id')
+      : null;
+    if (campReturnId) {
+      localStorage.removeItem('asm_camp_return_id');
+      setSelectedEmployeeId(campReturnId);
+      setCurrentView('camp_detail');
+    } else {
+      setCurrentView('employees');
+    }
   };
 
   const handleWhatsApp = () => {

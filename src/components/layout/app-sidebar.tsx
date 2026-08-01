@@ -20,6 +20,7 @@ import {
   Clock,
   Link2,
   History,
+  Tent,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +60,7 @@ const navItems: NavItem[] = [
   { id: 'employees', label: 'Employees', icon: Users, permissionSlug: 'employees', roles: ['super_admin'] },
   { id: 'employee_hours_ledger', label: 'Employee Hours', icon: Clock, permissionSlug: 'employee_hours', roles: ['super_admin'] },
   { id: 'sites', label: 'Sites', icon: Building2, permissionSlug: 'sites', roles: ['super_admin'] },
+  { id: 'camps', label: 'Camps', icon: Tent, permissionSlug: 'camps', roles: ['super_admin'] },
   { id: 'attendance', label: 'Attendance', icon: Calendar, permissionSlug: 'attendance', roles: ['super_admin'] },
   { id: 'attendance_copy', label: 'Attendance Copy', icon: Link2, permissionSlug: 'attendance_copy', roles: ['super_admin'] },
   { id: 'accounts', label: 'Accounts', icon: DollarSign, permissionSlug: 'accounts', roles: ['super_admin'] },
