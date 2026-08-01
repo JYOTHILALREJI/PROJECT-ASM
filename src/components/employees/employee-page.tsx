@@ -1676,7 +1676,6 @@ export function EmployeePage() {
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="pending_deletion">Pending Deletion</SelectItem>
-                  <SelectItem value="cancelled">Cancelled (Teko)</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={tradeFilter} onValueChange={setTradeFilter}>
@@ -1903,7 +1902,15 @@ export function EmployeePage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm text-slate-300 font-mono">{emp.employeeId}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm text-slate-300 font-mono">{emp.employeeId}</span>
+                          {(emp as Record<string, unknown>).tekoInfo && (
+                            <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0" title={`Teko: ${(emp as Record<string, { realName: string }>).tekoInfo.realName} is using this ID`}>
+                              <Ghost className="h-2.5 w-2.5 mr-0.5" />
+                              TEKO
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {emp.currentSite === 'Idle' ? (
@@ -2012,7 +2019,15 @@ export function EmployeePage() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500 font-mono">{emp.employeeId}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs text-slate-500 font-mono">{emp.employeeId}</p>
+                          {(emp as Record<string, unknown>).tekoInfo && (
+                            <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0">
+                              <Ghost className="h-2.5 w-2.5 mr-0.5" />
+                              TEKO
+                            </Badge>
+                          )}
+                        </div>
                         {emp.isTeamLeader && emp.teamLeaderSiteId && (() => {
                           const leadSite = sites.find(s => s.id === emp.teamLeaderSiteId);
                           return leadSite ? (

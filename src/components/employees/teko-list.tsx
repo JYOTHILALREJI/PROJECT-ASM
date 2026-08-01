@@ -13,6 +13,10 @@ import {
   Search,
   AlertTriangle,
   ArrowRight,
+  Eye,
+  Building2,
+  Phone,
+  Globe,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +50,24 @@ interface TekoEntry {
     currentSite: string | null;
     trade: string | null;
     photo: string | null;
+    nationality: string | null;
+    phone: string | null;
+    isTeamLeader: boolean;
+    isSupervisor: boolean;
+  } | null;
+  originalEmployee: {
+    id: string;
+    fullName: string;
+    employeeId: string;
+    nationality: string | null;
+    phone: string | null;
+    trade: string | null;
+    currentSite: string | null;
+    isTeamLeader: boolean;
+    isSupervisor: boolean;
+    status: string;
+    photo: string | null;
+    joinDate: string | null;
   } | null;
 }
 
@@ -88,6 +110,10 @@ export function TekoList() {
   // Link employee dialog
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkingEntry, setLinkingEntry] = useState<TekoEntry | null>(null);
+
+  // Compare (side-by-side) dialog
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
+  const [comparingEntry, setComparingEntry] = useState<TekoEntry | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchEmployee[]>([]);
   const [searching, setSearching] = useState(false);
@@ -381,6 +407,15 @@ export function TekoList() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      onClick={() => { setComparingEntry(entry); setCompareDialogOpen(true); }}
+                      className="h-7 w-7 p-0 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10"
+                      title="Compare side by side"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       onClick={() => openEditDialog(entry)}
                       className="h-7 w-7 p-0 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10"
                       title="Edit"
@@ -554,6 +589,141 @@ export function TekoList() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Compare (Side-by-Side) Dialog ── */}
+      <Dialog open={compareDialogOpen} onOpenChange={(open) => { if (!open) { setCompareDialogOpen(false); setComparingEntry(null); } }}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Eye className="h-5 w-5 text-cyan-400" />
+              Side-by-Side Comparison
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Work ID: <span className="font-mono text-slate-300">{comparingEntry?.workEmployeeId}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          {comparingEntry && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
+              {/* ── Original (cancelled) Employee ── */}
+              <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-violet-500/20">
+                  <Ghost className="h-5 w-5 text-violet-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-white">Original (Cancelled)</p>
+                    <p className="text-[10px] text-violet-400">The employee who left</p>
+                  </div>
+                </div>
+                {comparingEntry.originalEmployee ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="h-12 w-12 rounded-lg bg-violet-500/20 flex items-center justify-center border border-violet-500/30">
+                        {comparingEntry.originalEmployee.photo ? (
+                          <img src={comparingEntry.originalEmployee.photo} alt="" className="h-full w-full rounded-lg object-cover" />
+                        ) : (
+                          <span className="text-sm font-bold text-violet-400">{getInitials(comparingEntry.originalEmployee.fullName)}</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">{comparingEntry.originalEmployee.fullName}</p>
+                        <p className="text-[10px] text-slate-500 font-mono">{comparingEntry.originalEmployee.employeeId}</p>
+                      </div>
+                    </div>
+                    <CompareRow icon={Globe} label="Nationality" value={comparingEntry.originalEmployee.nationality} />
+                    <CompareRow icon={Phone} label="Phone" value={comparingEntry.originalEmployee.phone} />
+                    <CompareRow icon={User} label="Trade" value={comparingEntry.originalEmployee.trade} />
+                    <CompareRow icon={Building2} label="Site" value={comparingEntry.originalEmployee.currentSite} />
+                    <CompareRow icon={User} label="Role" value={comparingEntry.originalEmployee.isTeamLeader ? 'Team Leader' : comparingEntry.originalEmployee.isSupervisor ? 'Supervisor' : 'Standard'} />
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">No cancelled employee record found in the database.</p>
+                )}
+              </div>
+
+              {/* ── Real (current) Employee ── */}
+              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-emerald-500/20">
+                  <User className="h-5 w-5 text-emerald-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-white">Real Employee (Current)</p>
+                    <p className="text-[10px] text-emerald-400">The person now using this ID</p>
+                  </div>
+                </div>
+                {comparingEntry.linkedEmployee ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="h-12 w-12 rounded-lg bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30">
+                        {comparingEntry.linkedEmployee.photo ? (
+                          <img src={comparingEntry.linkedEmployee.photo} alt="" className="h-full w-full rounded-lg object-cover" />
+                        ) : (
+                          <span className="text-sm font-bold text-emerald-400">{getInitials(comparingEntry.linkedEmployee.fullName)}</span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">{comparingEntry.linkedEmployee.fullName}</p>
+                        <p className="text-[10px] text-slate-500 font-mono">{comparingEntry.linkedEmployee.employeeId}</p>
+                      </div>
+                    </div>
+                    <CompareRow icon={User} label="Real Name" value={comparingEntry.realName} />
+                    <CompareRow icon={Globe} label="Nationality" value={comparingEntry.linkedEmployee.nationality} />
+                    <CompareRow icon={Phone} label="Phone" value={comparingEntry.linkedEmployee.phone} />
+                    <CompareRow icon={User} label="Trade" value={comparingEntry.linkedEmployee.trade} />
+                    <CompareRow icon={Building2} label="Site" value={comparingEntry.linkedEmployee.currentSite} />
+                    <CompareRow icon={User} label="Role" value={comparingEntry.linkedEmployee.isTeamLeader ? 'Team Leader' : comparingEntry.linkedEmployee.isSupervisor ? 'Supervisor' : 'Standard'} />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-slate-500 italic mb-2">Not linked to a real employee yet.</p>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="h-12 w-12 rounded-lg bg-slate-700/30 flex items-center justify-center border border-slate-600/30">
+                        <span className="text-sm font-bold text-slate-500">{getInitials(comparingEntry.realName)}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">{comparingEntry.realName}</p>
+                        <p className="text-[10px] text-slate-500">Real name (not yet linked)</p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => { setCompareDialogOpen(false); setLinkingEntry(comparingEntry); setLinkDialogOpen(true); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs"
+                    >
+                      <Link2 className="h-3 w-3 mr-1" />
+                      Link Employee
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          {comparingEntry?.notes && (
+            <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50 mt-2">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Notes</p>
+              <p className="text-xs text-slate-300 italic">"{comparingEntry.notes}"</p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end pt-3 border-t border-slate-700/50">
+            <Button variant="outline" onClick={() => setCompareDialogOpen(false)} className="border-slate-600 text-slate-300 hover:bg-slate-700">
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Compare Row helper ──────────────────────────────────────────────────
+
+function CompareRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string | null | undefined }) {
+  return (
+    <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-slate-800/50">
+      <Icon className="h-3 w-3 text-slate-500 flex-shrink-0" />
+      <span className="text-[10px] uppercase tracking-wider text-slate-500 w-20 flex-shrink-0">{label}</span>
+      <span className="text-xs text-slate-200 font-medium">{value && value.trim() ? value : '—'}</span>
     </div>
   );
 }

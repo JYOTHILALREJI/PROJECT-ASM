@@ -214,6 +214,29 @@ export async function GET(request: NextRequest) {
     });
     const employeeMap = new Map(employees.map((e) => [e.id, e]));
 
+    // ── Fetch teko info for these employees ──
+    // An employee may have a teko using their employeeId. We fetch all teko
+    // entries whose workEmployeeId matches any of the returned employees'
+    // employeeId, so the front-end can show a "TEKO" badge.
+    let tekoInfoMap = new Map<string, { realName: string; workName: string }>();
+    try {
+      const empEmployeeIds = employees.map((e) => e.employeeId).filter(Boolean);
+      if (empEmployeeIds.length > 0) {
+        const tekoEntries = await db.teko.findMany({
+          where: {
+            workEmployeeId: { in: empEmployeeIds },
+            deletedAt: null,
+          },
+          select: { workEmployeeId: true, realName: true, workName: true },
+        });
+        for (const t of tekoEntries) {
+          tekoInfoMap.set(t.workEmployeeId, { realName: t.realName, workName: t.workName });
+        }
+      }
+    } catch {
+      // Teko table might not exist yet
+    }
+
     // ── Fetch per-month rate overrides from the EmployeeRateChangelog table ──
     // For the requested month, get the rate that was effective for each employee.
     // If a changelog entry exists with effectiveMonth <= month, its rate overrides
@@ -532,6 +555,7 @@ export async function GET(request: NextRequest) {
         hoursThreshold: number;
         customHourlyRate: number | null;
       };
+      tekoInfo: { realName: string; workName: string } | null;
     };
 
     // Build the response
@@ -645,6 +669,9 @@ export async function GET(request: NextRequest) {
               hoursThreshold: threshold,
               customHourlyRate: employeeCustomRate,
             },
+            // Teko info — if a teko entry exists for this employee's ID,
+            // the front-end shows a "TEKO" badge next to their name.
+            tekoInfo: tekoInfoMap.get(emp?.employeeId || '') || null,
           });
         }
       }
@@ -753,6 +780,7 @@ export async function GET(request: NextRequest) {
             hoursThreshold: threshold,
             customHourlyRate: employeeCustomRate,
           },
+          tekoInfo: tekoInfoMap.get(emp?.employeeId || '') || null,
         });
       }
 

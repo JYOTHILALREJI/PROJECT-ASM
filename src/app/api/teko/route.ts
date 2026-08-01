@@ -26,33 +26,97 @@ export async function GET() {
             currentSite: true,
             trade: true,
             photo: true,
+            nationality: true,
+            phone: true,
+            isTeamLeader: true,
+            isSupervisor: true,
           },
         },
       },
     });
 
+    // Also fetch the "original" cancelled employee for each teko entry.
+    // The original employee is the one whose status='cancelled' and whose
+    // employeeId matches the teko's workEmployeeId.
+    const workIds = tekoEntries.map((t) => t.workEmployeeId);
+    let originalEmployees: Array<{
+      id: string;
+      fullName: string;
+      employeeId: string;
+      nationality: string | null;
+      phone: string | null;
+      trade: string | null;
+      currentSite: string | null;
+      isTeamLeader: boolean;
+      isSupervisor: boolean;
+      status: string;
+      photo: string | null;
+      joinDate: Date | null;
+    }> = [];
+    try {
+      originalEmployees = await db.employee.findMany({
+        where: {
+          employeeId: { in: workIds },
+          status: 'cancelled',
+        },
+        select: {
+          id: true,
+          fullName: true,
+          employeeId: true,
+          nationality: true,
+          phone: true,
+          trade: true,
+          currentSite: true,
+          isTeamLeader: true,
+          isSupervisor: true,
+          status: true,
+          photo: true,
+          joinDate: true,
+        },
+      });
+    } catch {
+      // Employee table might not have cancelled employees yet
+    }
+    const originalMap = new Map(originalEmployees.map((e) => [e.employeeId, e]));
+
     return NextResponse.json({
       success: true,
       data: {
-        teko: tekoEntries.map((t) => ({
-          id: t.id,
-          realName: t.realName,
-          workName: t.workName,
-          workEmployeeId: t.workEmployeeId,
-          linkedEmployeeId: t.linkedEmployeeId,
-          notes: t.notes,
-          cancelledAt: t.cancelledAt.toISOString(),
-          createdAt: t.createdAt.toISOString(),
-          updatedAt: t.updatedAt.toISOString(),
-          linkedEmployee: t.linkedEmployee
-            ? {
-                ...t.linkedEmployee,
-                photo: t.linkedEmployee.photo ?? null,
-                currentSite: t.linkedEmployee.currentSite ?? null,
-                trade: t.linkedEmployee.trade ?? null,
-              }
-            : null,
-        })),
+        teko: tekoEntries.map((t) => {
+          const original = originalMap.get(t.workEmployeeId);
+          return {
+            id: t.id,
+            realName: t.realName,
+            workName: t.workName,
+            workEmployeeId: t.workEmployeeId,
+            linkedEmployeeId: t.linkedEmployeeId,
+            notes: t.notes,
+            cancelledAt: t.cancelledAt.toISOString(),
+            createdAt: t.createdAt.toISOString(),
+            updatedAt: t.updatedAt.toISOString(),
+            linkedEmployee: t.linkedEmployee
+              ? {
+                  ...t.linkedEmployee,
+                  photo: t.linkedEmployee.photo ?? null,
+                  currentSite: t.linkedEmployee.currentSite ?? null,
+                  trade: t.linkedEmployee.trade ?? null,
+                  nationality: t.linkedEmployee.nationality ?? null,
+                  phone: t.linkedEmployee.phone ?? null,
+                }
+              : null,
+            originalEmployee: original
+              ? {
+                  ...original,
+                  photo: original.photo ?? null,
+                  nationality: original.nationality ?? null,
+                  phone: original.phone ?? null,
+                  trade: original.trade ?? null,
+                  currentSite: original.currentSite ?? null,
+                  joinDate: original.joinDate ? original.joinDate.toISOString() : null,
+                }
+              : null,
+          };
+        }),
       },
     });
   } catch (error: unknown) {

@@ -57,15 +57,13 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
 
+    // ── Cancelled (teko) employees NEVER appear in the normal employee list ──
+    // They are only visible in the Teko list. Even when "All Status" is selected,
+    // cancelled employees are excluded. To see them, use the Teko tab.
     if (status && status !== 'all') {
-      // Explicit status filter (e.g. 'active', 'pending_deletion', 'cancelled')
       where.status = status;
-    } else if (status === 'all') {
-      // When 'all' is explicitly selected, show everything except deleted
-      where.status = { not: 'deleted' };
     } else {
-      // Default (no status param): exclude deleted AND cancelled
-      // (cancelled employees are shown in the separate Teko list)
+      // Default AND "all": exclude deleted AND cancelled
       where.status = { notIn: ['deleted', 'cancelled'] };
     }
 
@@ -156,6 +154,41 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // ── Fetch teko info for these employees ──
+    // An employee may have a teko using their employeeId (someone else working
+    // under the same ID). We fetch all teko entries whose workEmployeeId matches
+    // any of the returned employees' employeeId, and attach the teko info.
+    let tekoMap = new Map<string, { id: string; realName: string; workName: string; workEmployeeId: string; linkedEmployeeId: string | null }>();
+    try {
+      const employeeIds = employees.map((e) => e.employeeId).filter(Boolean);
+      if (employeeIds.length > 0) {
+        const tekoEntries = await db.teko.findMany({
+          where: {
+            workEmployeeId: { in: employeeIds },
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+            realName: true,
+            workName: true,
+            workEmployeeId: true,
+            linkedEmployeeId: true,
+          },
+        });
+        for (const t of tekoEntries) {
+          tekoMap.set(t.workEmployeeId, t);
+        }
+      }
+    } catch {
+      // Teko table might not exist yet — skip silently
+    }
+
+    // Attach teko info to each employee
+    const employeesWithTeko = decryptedEmployees.map((emp) => ({
+      ...emp,
+      tekoInfo: tekoMap.get(emp.employeeId) || null,
+    }));
+
     // Get distinct trades for filter dropdowns
     const trades = await db.employee.findMany({
       where: { trade: { not: null }, status: { not: 'deleted' } },
@@ -188,7 +221,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
-        employees: decryptedEmployees,
+        employees: employeesWithTeko,
         total,
         page,
         limit,

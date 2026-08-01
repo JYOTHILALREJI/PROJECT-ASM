@@ -134,6 +134,7 @@ interface ApiEmployeeEntry {
     hoursThreshold: number;
     customHourlyRate?: number | null;
   };
+  tekoInfo?: { realName: string; workName: string } | null;
 }
 
 interface ApiSiteResult {
@@ -201,6 +202,9 @@ interface MergedEmployeeRow {
   // Branch scoping (for grouping in the flat table)
   branchId: string | null;
   branchName: string | null;
+
+  // Teko info — if a teko entry exists for this employee's ID
+  tekoInfo?: { realName: string; workName: string } | null;
 }
 
 /**
@@ -320,6 +324,7 @@ function mergeApiEntries(
       siteName,
       branchId,
       branchName,
+      tekoInfo: baseEntry.tekoInfo ?? null,
     });
   }
 
@@ -1258,6 +1263,11 @@ export function ConsolidatedSalaryPage() {
                               )}>
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   {emp.empName}
+                                  {emp.tekoInfo && (
+                                    <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[8px] px-1 py-0 font-bold" title={`Teko: ${emp.tekoInfo.realName} is using this ID`}>
+                                      TEKO
+                                    </Badge>
+                                  )}
                                   <RoleBadge emp={emp} />
                                   {emp.customHourlyRate !== null && emp.customHourlyRate > 0 && (
                                     <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[9px] px-1 py-0" title={`Custom rate: ${emp.customHourlyRate}/hr`}>

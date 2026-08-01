@@ -100,6 +100,9 @@ interface MergedEmployeeRow {
   // Site info for save
   siteId: string;
   siteName: string;
+
+  // Teko info — if a teko entry exists for this employee's ID
+  tekoInfo?: { realName: string; workName: string } | null;
 }
 
 interface SiteData {
@@ -165,6 +168,7 @@ interface ApiEmployeeEntry {
     hoursThreshold: number;
     customHourlyRate?: number | null;
   };
+  tekoInfo?: { realName: string; workName: string } | null;
 }
 
 interface ApiSiteResult {
@@ -334,6 +338,7 @@ function mergeApiEntries(
       customHourlyRate,
       siteId,
       siteName,
+      tekoInfo: baseEntry.tekoInfo ?? null,
     });
   }
 
@@ -1748,6 +1753,11 @@ export function AccountsPage() {
                                       {emp.empName || '-'}
                                       {emp.isTeamLeader && <span className="text-amber-400 font-bold ml-1">(TL)</span>}
                                       {emp.isSupervisor && !emp.isTeamLeader && <span className="text-blue-400 font-bold ml-1">(SUP)</span>}
+                                      {emp.tekoInfo && (
+                                        <span className="inline-flex items-center gap-0.5 ml-1 px-1 py-0 rounded bg-violet-500/15 text-violet-400 border border-violet-500/25 text-[8px] font-bold align-middle" title={`Teko: ${emp.tekoInfo.realName} is using this ID`}>
+                                          TEKO
+                                        </span>
+                                      )}
                                     </span>
                                   )}
                                 </td>
