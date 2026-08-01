@@ -55,12 +55,18 @@ export async function GET(request: NextRequest) {
     const supervisorFilter = searchParams.get('supervisors') || '';
     const branchFilter = searchParams.get('branchId') || '';
 
-    const where: Record<string, unknown> = {
-      status: { not: 'deleted' },
-    };
+    const where: Record<string, unknown> = {};
 
     if (status && status !== 'all') {
+      // Explicit status filter (e.g. 'active', 'pending_deletion', 'cancelled')
       where.status = status;
+    } else if (status === 'all') {
+      // When 'all' is explicitly selected, show everything except deleted
+      where.status = { not: 'deleted' };
+    } else {
+      // Default (no status param): exclude deleted AND cancelled
+      // (cancelled employees are shown in the separate Teko list)
+      where.status = { notIn: ['deleted', 'cancelled'] };
     }
 
     if (siteFilter) {
