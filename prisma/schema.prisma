@@ -241,7 +241,7 @@ model Teko {
   realName         String   // the actual person who took over (or will take over)
   workName         String   // the cancelled employee's name (as in company records)
   workEmployeeId   String   // the employee ID of the cancelled employee (still in use)
-  linkedEmployeeId String?  // FK to Employee — the real employee now using this identity
+  linkedEmployeeId String?  @unique // FK to Employee — the real employee now using this identity (one-to-one)
   notes            String   @default("")
   cancelledAt      DateTime @default(now())
   createdAt        DateTime @default(now())
@@ -252,7 +252,6 @@ model Teko {
   linkedEmployee Employee? @relation("TekoLinkedEmployee", fields: [linkedEmployeeId], references: [id], onDelete: SetNull)
 
   @@unique([workEmployeeId]) // one teko per work employee ID
-  @@index([linkedEmployeeId])
   @@index([realName])
   @@index([deletedAt])
 }
