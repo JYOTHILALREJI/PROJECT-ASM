@@ -1748,12 +1748,22 @@ export function EmployeePage() {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-slate-300 text-sm">Passport Status</Label>
-                    <Input
-                      value={formData.passportStatus}
-                      onChange={(e) => handleFormChange('passportStatus', e.target.value)}
-                      className="bg-slate-900 border-slate-600 text-white"
-                      placeholder="e.g. Valid, Expired"
-                    />
+                    <Select
+                      value={formData.passportStatus || '__none__'}
+                      onValueChange={(v) => handleFormChange('passportStatus', v === '__none__' ? '' : v)}
+                    >
+                      <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-800 border-slate-700">
+                        <SelectItem value="__none__"><span className="text-slate-500">—</span></SelectItem>
+                        <SelectItem value="Valid">Valid</SelectItem>
+                        <SelectItem value="Expired">Expired</SelectItem>
+                        <SelectItem value="Lost">Lost</SelectItem>
+                        <SelectItem value="Renewing">Renewing</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
@@ -1770,12 +1780,22 @@ export function EmployeePage() {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-slate-300 text-sm">ID Status</Label>
-                    <Input
-                      value={formData.idStatus}
-                      onChange={(e) => handleFormChange('idStatus', e.target.value)}
-                      className="bg-slate-900 border-slate-600 text-white"
-                      placeholder="e.g. Valid, Expired"
-                    />
+                    <Select
+                      value={formData.idStatus || '__none__'}
+                      onValueChange={(v) => handleFormChange('idStatus', v === '__none__' ? '' : v)}
+                    >
+                      <SelectTrigger className="bg-slate-900 border-slate-600 text-white">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-800 border-slate-700">
+                        <SelectItem value="__none__"><span className="text-slate-500">—</span></SelectItem>
+                        <SelectItem value="Valid">Valid</SelectItem>
+                        <SelectItem value="Expired">Expired</SelectItem>
+                        <SelectItem value="Lost">Lost</SelectItem>
+                        <SelectItem value="Renewing">Renewing</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </TabsContent>
@@ -3180,15 +3200,11 @@ export function EmployeePage() {
                           <SelectValue placeholder="Select status" />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-800 border-slate-700">
-                          <SelectItem value="Valid">
-                            <span className="text-green-400">✓ Valid</span>
-                          </SelectItem>
-                          <SelectItem value="Expired">
-                            <span className="text-red-400">✗ Expired</span>
-                          </SelectItem>
-                          <SelectItem value="N/A">
-                            <span className="text-slate-400">N/A</span>
-                          </SelectItem>
+                          <SelectItem value="Valid"><span className="text-green-400">✓ Valid</span></SelectItem>
+                          <SelectItem value="Expired"><span className="text-red-400">✗ Expired</span></SelectItem>
+                          <SelectItem value="Lost"><span className="text-amber-400">Lost</span></SelectItem>
+                          <SelectItem value="Renewing"><span className="text-blue-400">Renewing</span></SelectItem>
+                          <SelectItem value="Cancelled"><span className="text-slate-400">Cancelled</span></SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -3209,16 +3225,12 @@ export function EmployeePage() {
                           <SelectValue placeholder="Select status" />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-800 border-slate-700">
-                          <SelectItem value="Valid">
-                            <span className="text-green-400">✓ Valid</span>
-                          </SelectItem>
-                          <SelectItem value="Expired">
-                            <span className="text-red-400">✗ Expired</span>
-                          </SelectItem>
-                          <SelectItem value="N/A">
-                            <span className="text-slate-400">N/A</span>
-                          </SelectItem>
-                          </SelectContent>
+                          <SelectItem value="Valid"><span className="text-green-400">✓ Valid</span></SelectItem>
+                          <SelectItem value="Expired"><span className="text-red-400">✗ Expired</span></SelectItem>
+                          <SelectItem value="Lost"><span className="text-amber-400">Lost</span></SelectItem>
+                          <SelectItem value="Renewing"><span className="text-blue-400">Renewing</span></SelectItem>
+                          <SelectItem value="Cancelled"><span className="text-slate-400">Cancelled</span></SelectItem>
+                        </SelectContent>
                       </Select>
                     </div>
                   </div>
