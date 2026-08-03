@@ -158,6 +158,13 @@ export async function GET(request: NextRequest) {
       distinct: ['trade'],
     });
 
+    // Get distinct company names for filter dropdowns
+    const companyRecords = await db.employee.findMany({
+      where: { companyName: { not: null }, status: { not: 'deleted' } },
+      select: { companyName: true },
+      distinct: ['companyName'],
+    });
+
     // Count idle employees
     const idleCount = await db.employee.count({
       where: {
@@ -189,6 +196,7 @@ export async function GET(request: NextRequest) {
         limit,
         totalPages: Math.ceil(total / limit),
         trades: trades.map(t => t.trade).filter(Boolean).sort(),
+        companies: companyRecords.map(c => c.companyName).filter(Boolean).sort(),
         idleCount,
         teamLeaderCount,
         supervisorCount,

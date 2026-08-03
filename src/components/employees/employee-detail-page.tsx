@@ -29,9 +29,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
+
+// ─── Constants ───────────────────────────────────────────────────────────
+
+const STATUS_OPTIONS = [
+  { value: 'Valid', label: '✓ Valid' },
+  { value: 'Expired', label: '✗ Expired' },
+  { value: 'Lost', label: 'Lost' },
+  { value: 'Renewing', label: 'Renewing' },
+  { value: 'Cancelled', label: 'Cancelled' },
+];
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -192,6 +209,51 @@ function EditableField({
           className="bg-slate-900 border-slate-600 text-white h-7 text-sm"
           placeholder={placeholder}
         />
+      </div>
+    </div>
+  );
+}
+
+// ─── Selectable Field Component (inline edit mode with dropdown) ──────────
+
+function SelectableField({
+  icon: Icon,
+  label,
+  field,
+  value,
+  onChange,
+  options,
+  placeholder = 'Select...',
+}: {
+  icon: React.ElementType;
+  label: string;
+  field: string;
+  value: string;
+  onChange: (field: string, value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 py-2 px-3 rounded-lg">
+      <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-slate-700/50 flex-shrink-0 mt-0.5">
+        <Icon className="h-4 w-4 text-slate-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium mb-1">{label}</p>
+        <Select
+          value={value || '__none__'}
+          onValueChange={(v) => onChange(field, v === '__none__' ? '' : v)}
+        >
+          <SelectTrigger className="bg-slate-900 border-slate-600 text-white h-7 text-sm">
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent className="bg-slate-800 border-slate-700">
+            <SelectItem value="__none__"><span className="text-slate-500">—</span></SelectItem>
+            {options.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );
@@ -444,6 +506,8 @@ export function EmployeeDetailPage() {
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
+  const [trades, setTrades] = useState<string[]>([]);
+  const [companies, setCompanies] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [quickHoursValue, setQuickHoursValue] = useState('');
   const [quickHoursSaving, setQuickHoursSaving] = useState(false);
@@ -500,7 +564,7 @@ export function EmployeeDetailPage() {
     }
   }, [selectedEmployeeId, toast]);
 
-  // Fetch sites (for team-leader/supervisor site name resolution)
+  // Fetch sites, trades, and companies (for dropdowns)
   useEffect(() => {
     const fetchSites = async () => {
       try {
@@ -513,7 +577,20 @@ export function EmployeeDetailPage() {
         // silent
       }
     };
+    const fetchTradesAndCompanies = async () => {
+      try {
+        const res = await fetch('/api/employees?limit=1');
+        const data = await res.json();
+        if (data.success) {
+          setTrades(data.trades || []);
+          setCompanies(data.companies || []);
+        }
+      } catch {
+        // silent
+      }
+    };
     fetchSites();
+    fetchTradesAndCompanies();
   }, []);
 
   useEffect(() => {
@@ -958,9 +1035,9 @@ export function EmployeeDetailPage() {
           <div className="space-y-0.5">
             {isEditMode ? (
               <>
-                <EditableField icon={Briefcase} label="Trade" field="trade" value={editForm.trade} onChange={handleEditFieldChange} placeholder="e.g. Mason, Electrician" />
-                <EditableField icon={Building2} label="Company Name" field="companyName" value={editForm.companyName} onChange={handleEditFieldChange} placeholder="Company" />
-                <EditableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} placeholder="Site name" />
+                <SelectableField icon={Briefcase} label="Trade" field="trade" value={editForm.trade} onChange={handleEditFieldChange} options={trades.map(t => ({ value: t, label: t }))} placeholder="Select trade" />
+                <SelectableField icon={Building2} label="Company Name" field="companyName" value={editForm.companyName} onChange={handleEditFieldChange} options={companies.map(c => ({ value: c, label: c }))} placeholder="Select company" />
+                <SelectableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} options={sites.map(s => ({ value: s.name, label: s.name }))} placeholder="Select site" />
                 <EditableField icon={Calendar} label="Join Date" field="joinDate" type="date" value={editForm.joinDate} onChange={handleEditFieldChange} />
               </>
             ) : (
@@ -988,9 +1065,9 @@ export function EmployeeDetailPage() {
             {isEditMode ? (
               <>
                 <EditableField icon={BookOpen} label="Passport Number" field="passportNumber" value={editForm.passportNumber} onChange={handleEditFieldChange} placeholder="Passport No." />
-                <EditableField icon={Shield} label="Passport Status" field="passportStatus" value={editForm.passportStatus} onChange={handleEditFieldChange} placeholder="e.g. Valid" />
+                <SelectableField icon={Shield} label="Passport Status" field="passportStatus" value={editForm.passportStatus} onChange={handleEditFieldChange} options={STATUS_OPTIONS} placeholder="Select status" />
                 <EditableField icon={CreditCard} label="ID Number" field="idNumber" value={editForm.idNumber} onChange={handleEditFieldChange} placeholder="ID No." />
-                <EditableField icon={Shield} label="ID Status" field="idStatus" value={editForm.idStatus} onChange={handleEditFieldChange} placeholder="e.g. Valid" />
+                <SelectableField icon={Shield} label="ID Status" field="idStatus" value={editForm.idStatus} onChange={handleEditFieldChange} options={STATUS_OPTIONS} placeholder="Select status" />
               </>
             ) : (
               <>
