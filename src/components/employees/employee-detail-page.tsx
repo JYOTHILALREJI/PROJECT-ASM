@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/select';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
+import { SearchableCompanySelect, SearchableTradeSelect } from '@/components/employees/searchable-selects';
 import jsPDF from 'jspdf';
 
 // ─── Constants ───────────────────────────────────────────────────────────
@@ -1035,8 +1036,32 @@ export function EmployeeDetailPage() {
           <div className="space-y-0.5">
             {isEditMode ? (
               <>
-                <SelectableField icon={Briefcase} label="Trade" field="trade" value={editForm.trade} onChange={handleEditFieldChange} options={trades.map(t => ({ value: t, label: t }))} placeholder="Select trade" />
-                <SelectableField icon={Building2} label="Company Name" field="companyName" value={editForm.companyName} onChange={handleEditFieldChange} options={companies.map(c => ({ value: c, label: c }))} placeholder="Select company" />
+                <div className="flex items-start gap-3 py-2 px-3 rounded-lg">
+                  <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-slate-700/50 flex-shrink-0 mt-0.5">
+                    <Briefcase className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium mb-1">Trade</p>
+                    <SearchableTradeSelect
+                      value={editForm.trade}
+                      onChange={(v) => handleEditFieldChange('trade', v)}
+                      additionalOptions={trades}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 py-2 px-3 rounded-lg">
+                  <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-slate-700/50 flex-shrink-0 mt-0.5">
+                    <Building2 className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium mb-1">Company Name</p>
+                    <SearchableCompanySelect
+                      value={editForm.companyName}
+                      onChange={(v) => handleEditFieldChange('companyName', v)}
+                      additionalOptions={companies}
+                    />
+                  </div>
+                </div>
                 <SelectableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} options={sites.map(s => ({ value: s.name, label: s.name }))} placeholder="Select site" />
                 <EditableField icon={Calendar} label="Join Date" field="joinDate" type="date" value={editForm.joinDate} onChange={handleEditFieldChange} />
               </>
