@@ -92,6 +92,8 @@ interface Employee {
 interface Site {
   id: string;
   name: string;
+  clientName?: string | null;
+  branch?: { id: string; name: string; code: string | null } | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -1063,9 +1065,18 @@ export function EmployeeDetailPage() {
                   </div>
                 </div>
                 {editForm.currentSite ? (
-                  <EditableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} placeholder="Site name" />
+                  <div className="flex items-start gap-3 py-2 px-3 rounded-lg">
+                    <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-slate-700/50 flex-shrink-0 mt-0.5">
+                      <Building2 className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium mb-1">Current Site</p>
+                      <p className="text-sm text-slate-200 font-medium">{editForm.currentSite}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">Site cannot be changed from here — use the Sites page to reassign</p>
+                    </div>
+                  </div>
                 ) : (
-                  <SelectableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} options={sites.map(s => ({ value: s.name, label: s.name }))} placeholder="Select site" />
+                  <SelectableField icon={Building2} label="Current Site (assign)" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} options={sites.map(s => ({ value: s.name, label: s.branch ? `${s.name} — ${s.branch.name}` : s.name }))} placeholder="Select site" />
                 )}
                 <EditableField icon={Calendar} label="Join Date" field="joinDate" type="date" value={editForm.joinDate} onChange={handleEditFieldChange} />
               </>
