@@ -1062,7 +1062,11 @@ export function EmployeeDetailPage() {
                     />
                   </div>
                 </div>
-                <SelectableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} options={sites.map(s => ({ value: s.name, label: s.name }))} placeholder="Select site" />
+                {editForm.currentSite ? (
+                  <EditableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} placeholder="Site name" />
+                ) : (
+                  <SelectableField icon={Building2} label="Current Site" field="currentSite" value={editForm.currentSite} onChange={handleEditFieldChange} options={sites.map(s => ({ value: s.name, label: s.name }))} placeholder="Select site" />
+                )}
                 <EditableField icon={Calendar} label="Join Date" field="joinDate" type="date" value={editForm.joinDate} onChange={handleEditFieldChange} />
               </>
             ) : (
