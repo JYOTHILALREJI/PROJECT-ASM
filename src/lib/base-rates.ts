@@ -43,7 +43,10 @@ export async function getBaseRates(): Promise<BaseRates> {
     if (!baseRateModel || typeof baseRateModel !== 'object') {
       return DEFAULT_RATES;
     }
-    const model = baseRateModel as { findUnique: Function; create: Function };
+    const model = baseRateModel as {
+      findUnique: (args: Record<string, unknown>) => Promise<Record<string, number> | null>;
+      create: (args: Record<string, unknown>) => Promise<Record<string, number>>;
+    };
     let record = await model.findUnique({ where: { id: 'singleton' } });
     if (!record) {
       // Create with defaults
@@ -75,7 +78,9 @@ export async function updateBaseRates(rates: BaseRates): Promise<void> {
       cachedRates = rates;
       return;
     }
-    const model = baseRateModel as { upsert: Function };
+    const model = baseRateModel as {
+      upsert: (args: Record<string, unknown>) => Promise<unknown>;
+    };
     await model.upsert({
       where: { id: 'singleton' },
       update: {

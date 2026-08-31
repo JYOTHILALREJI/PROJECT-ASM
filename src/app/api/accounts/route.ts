@@ -215,6 +215,13 @@ export async function GET(request: NextRequest) {
     });
     const employeeMap = new Map(employees.map((e) => [e.id, e]));
 
+    // Teko identity map (realName/workName behind a shared employee code).
+    // The data model has no source table for this mapping yet — the UI only
+    // consumes `isTeko`. Kept as an (empty) lookup so the stub-employee path
+    // below stays type-correct and never crashes; wire it up when a real
+    // source for teko identities exists.
+    const tekoInfoMap = new Map<string, { realName: string; workName: string }>();
+
     // ── Fetch per-month rate overrides from the EmployeeRateChangelog table ──
     // For the requested month, get the rate that was effective for each employee.
     // If a changelog entry exists with effectiveMonth <= month, its rate overrides

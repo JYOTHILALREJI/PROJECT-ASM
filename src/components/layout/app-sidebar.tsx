@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   Users,
@@ -46,6 +47,7 @@ import { useAuthStore, type UserRole } from '@/store/auth-store';
 import { useAppStore, type AppView } from '@/store/app-store';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
+import { StaggerContainer, StaggerItem } from '@/components/motion';
 
 interface NavItem {
   id: AppView;
@@ -172,14 +174,16 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
     <div className="flex h-full flex-col bg-slate-900 border-r border-slate-700/50">
       {/* Logo Section */}
       <div className="flex items-center gap-3 px-4 py-5">
-        <img
+        <motion.img
           src="/logo_asm.png"
           alt="ASM"
           className="h-10 w-10 rounded-lg object-contain shrink-0"
+          whileHover={{ rotate: 8, scale: 1.1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 15 }}
         />
         {!collapsed && (
           <div className="flex flex-col min-w-0">
-            <span className="font-bold text-white text-lg leading-tight">ASM</span>
+            <span className="asm-gradient-text font-bold text-lg leading-tight">ASM</span>
             <span className="text-xs text-slate-400 truncate">
               Arabian Shield Manpower
             </span>
@@ -191,42 +195,69 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
 
       {/* Navigation */}
       <ScrollArea className="flex-1 px-3 py-4">
-        <nav className="flex flex-col gap-1">
+        <StaggerContainer
+          stagger={0.035}
+          className="flex flex-col gap-1"
+          key={collapsed ? 'collapsed' : 'expanded'}
+        >
           {filteredNavItems.map((item) => {
             const isActive = currentView === item.id;
             const Icon = item.icon;
 
             return (
-              <button
-                key={item.id}
-                onClick={() => handleNavClick(item.id)}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 w-full text-left',
-                  collapsed && 'justify-center px-2',
-                  isActive
-                    ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent'
-                )}
-              >
-                <Icon className={cn('h-5 w-5 shrink-0', isActive && 'text-blue-400')} />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-                {!collapsed && item.id === 'notifications' && unreadCount > 0 && (
-                  <Badge
-                    variant="default"
-                    className="ml-auto bg-blue-500 text-white text-[10px] px-1.5 py-0 min-w-[20px] h-5 flex items-center justify-center"
+              <StaggerItem key={item.id} className="relative">
+                <button
+                  onClick={() => handleNavClick(item.id)}
+                  className={cn(
+                    'asm-nav-item group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-200 w-full text-left relative',
+                    collapsed && 'justify-center px-2',
+                    isActive
+                      ? 'text-blue-400'
+                      : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                  )}
+                >
+                  {/* Animated active pill (slides between items) */}
+                  {isActive && (
+                    <motion.span
+                      layoutId="asm-nav-active-pill"
+                      className="absolute inset-0 rounded-lg bg-blue-500/15 border border-blue-500/30"
+                      transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                    />
+                  )}
+                  <motion.span
+                    className={cn(
+                      'relative z-10 shrink-0',
+                      !isActive && 'transition-transform duration-200 group-hover:scale-110 group-hover:-translate-y-0.5'
+                    )}
                   >
-                    {unreadCount}
-                  </Badge>
-                )}
-                {collapsed && item.id === 'notifications' && unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[9px] font-bold text-white">
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                    <Icon className={cn('h-5 w-5', isActive && 'text-blue-400')} />
+                  </motion.span>
+                  {!collapsed && <span className="truncate relative z-10">{item.label}</span>}
+                  {!collapsed && item.id === 'notifications' && unreadCount > 0 && (
+                    <Badge
+                      variant="default"
+                      className="ml-auto relative z-10 bg-blue-500 text-white text-[10px] px-1.5 py-0 min-w-[20px] h-5 flex items-center justify-center animate-pulse"
+                    >
+                      {unreadCount}
+                    </Badge>
+                  )}
+                  {collapsed && item.id === 'notifications' && unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[9px] font-bold text-white animate-pulse">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Tooltip when collapsed */}
+                {collapsed && (
+                  <span className="asm-nav-tooltip pointer-events-none absolute left-full ml-2 top-1/2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 opacity-0 shadow-xl transition-all duration-200 group-hover:opacity-100">
+                    {item.label}
                   </span>
                 )}
-              </button>
+              </StaggerItem>
             );
           })}
-        </nav>
+        </StaggerContainer>
       </ScrollArea>
 
       <Separator className="bg-slate-700/50" />

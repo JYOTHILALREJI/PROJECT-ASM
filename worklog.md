@@ -156,3 +156,30 @@ Stage Summary:
 - Files: attendance-page.tsx, attendance-sync.ts
 - Commit: 0dd679d
 - Pushed to origin/main
+
+---
+Task ID: ux-animation-overhaul
+Agent: main (Z.ai Code)
+Task: Clone JYOTHILALREJI/PROJECT-ASM and make it more user-friendly, feature-rich, with more animations and smoothness
+
+Work Log:
+- Cloned the repo, merged it into the sandbox root project (rsync src/, prisma/, scripts/, public/, db/, configs) and preserved its git history by swapping the repo .git into the project root.
+- Installed deps (bun install), pushed Prisma schema (db:push), restarted dev server.
+- Created src/components/motion/index.tsx — reusable framer-motion kit: PageTransition, StaggerContainer/StaggerItem, AnimatedNumber (spring count-up), FadeIn, PulseDot, shared spring physics constants.
+- src/app/page.tsx: AnimatePresence + PageTransition keyed on currentView (smooth blur/fade/slide between ALL views), floating ScrollToTop button (appears after 400px), animated LoadingScreen with shimmer skeletons + spring logo, mounted global CommandPalette.
+- NEW src/components/layout/command-palette.tsx: Ctrl/Cmd+K global palette — navigate all pages, live employee search (debounced /api/employees), site search, quick actions (toggle sidebar, profile, logout); built on cmdk so ↑↓/↵ keyboard nav works; fuzzy-friendly, grouped results, external open event (asm:open-command-palette).
+- app-sidebar.tsx: staggered nav entrance (StaggerContainer), layoutId "asm-nav-active-pill" that springs between active items, icon hover scale/lift, pulsing unread badge, gradient ASM logo text, CSS tooltips when collapsed, logo hover rotate.
+- app-header.tsx: animated title crossfade (AnimatePresence on view change), live clock widget (seconds + date, desktop only), online-presence chip (PulseDot + count via /api/presence/online), Ctrl+K search trigger button with kbd hint, notification bell popover (recent 6, unread highlight, mark-all-read via PUT {markAll:true}, spring badge pop, ring animation when unread), motion avatar.
+- dashboard-page.tsx: AnimatedNumber count-up metrics, staggered metric cards + TL/SUP pills, hover lift/tap on cards, new Quick Actions row (Add Employee / Mark Attendance / Accounts).
+- login-page.tsx: animated ambient gradient blobs (asm-float keyframes), staggered entrance (logo spring → branding → card), gradient ASM wordmark, spring error alert.
+- globals.css: ASM Animation Kit — shimmer, float/blob drift, glow pulse, bell ring, gradient pan keyframes + reduced-motion support, selection color, smooth scroll.
+- UX fixes: mobile sidebar Sheet no longer auto-opens on load (MainLayout closes it once on mobile); fixed palette fuzzy filter flooding results with keyword matches; fixed markAllRead to use bulk API; fixed pre-existing crash in /api/accounts (tekoInfoMap was never defined — stub-employee path threw ReferenceError); cleaned pre-existing lint errors in scripts/seed.ts (require→await import) and src/lib/base-rates.ts (Function→typed).
+- Verified with agent-browser: login → dashboard renders (clock, presence, palette trigger, quick actions, animated stats), Ctrl+K opens palette, live search "john" → John Doe (ASM-2025-001) → Enter navigates to Employee Detail, attendance + employees pages transition cleanly, notification popover opens, mobile viewport renders correctly with closed sidebar. Lint: 0 errors.
+
+Stage Summary:
+- Animation system: src/components/motion/index.tsx + globals.css keyframes (one place to tune feel).
+- New feature: global command palette (Ctrl/Cmd+K) with live employee/site search.
+- Header: live clock, online-presence chip, notification popover with mark-all-read, animated title.
+- Dashboard: count-up stats, staggered cards, quick actions. Login: animated ambient background.
+- Bug fixes: accounts API tekoInfoMap crash, mobile sidebar auto-open, palette filter, pre-existing lint errors.
+- Dev server runs on port 3000. Test account: admin@asm.com / admin123.

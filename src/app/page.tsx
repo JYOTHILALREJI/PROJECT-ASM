@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowUp } from 'lucide-react';
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore, type AppView } from '@/store/app-store';
 import { AppSidebar } from '@/components/layout/app-sidebar';
@@ -30,6 +32,8 @@ import { EmployeeHoursDirectory } from '@/components/employees/employee-hours-di
 import { Skeleton } from '@/components/ui/skeleton';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { usePresenceHeartbeat } from '@/hooks/use-presence-heartbeat';
+import { PageTransition } from '@/components/motion';
+import { CommandPalette } from '@/components/layout/command-palette';
 
 type AppState = 'checking' | 'needs_setup' | 'unauthenticated' | 'authenticated';
 
@@ -38,25 +42,40 @@ function LoadingScreen() {
     <div className="flex min-h-screen items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-6 w-full max-w-sm px-4">
         <div className="flex flex-col items-center gap-3">
-          <img
+          <motion.img
             src="/logo_asm.png"
             alt="ASM"
             className="h-14 w-14 rounded-2xl object-contain shadow-lg"
+            initial={{ scale: 0.6, opacity: 0, rotate: -8 }}
+            animate={{ scale: 1, opacity: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 18 }}
           />
-          <Skeleton className="h-7 w-24 bg-slate-800" />
-          <Skeleton className="h-4 w-48 bg-slate-800" />
+          <motion.div
+            className="flex flex-col items-center gap-2"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+          >
+            <span className="asm-gradient-text text-2xl font-bold">ASM</span>
+            <span className="text-xs text-slate-500">Loading your workspace…</span>
+          </motion.div>
         </div>
-        <div className="w-full bg-slate-800/50 rounded-xl border border-slate-700/50 p-6 space-y-4">
-          <Skeleton className="h-5 w-32 mx-auto bg-slate-700" />
-          <Skeleton className="h-4 w-48 mx-auto bg-slate-700" />
+        <motion.div
+          className="w-full bg-slate-800/50 rounded-xl border border-slate-700/50 p-6 space-y-4"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25, duration: 0.4 }}
+        >
+          <div className="h-5 w-32 mx-auto rounded asm-shimmer" />
+          <div className="h-4 w-48 mx-auto rounded asm-shimmer" />
           <div className="space-y-3 pt-2">
-            <Skeleton className="h-4 w-20 bg-slate-700" />
-            <Skeleton className="h-11 w-full rounded-md bg-slate-700" />
-            <Skeleton className="h-4 w-20 bg-slate-700" />
-            <Skeleton className="h-11 w-full rounded-md bg-slate-700" />
+            <div className="h-4 w-20 rounded asm-shimmer" />
+            <div className="h-11 w-full rounded-md asm-shimmer" />
+            <div className="h-4 w-20 rounded asm-shimmer" />
+            <div className="h-11 w-full rounded-md asm-shimmer" />
           </div>
-          <Skeleton className="h-11 w-full rounded-md bg-slate-700" />
-        </div>
+          <div className="h-11 w-full rounded-md asm-shimmer" />
+        </motion.div>
       </div>
     </div>
   );
@@ -69,7 +88,7 @@ const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
 const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs'];
 
 function MainLayout() {
-  const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId } = useAppStore();
+  const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId, sidebarOpen, setSidebarOpen } = useAppStore();
   const { user } = useAuthStore();
   const isMobile = useIsMobile();
   const [adminPermissions, setAdminPermissions] = useState<string[]>([]);
@@ -77,6 +96,15 @@ function MainLayout() {
   // Send a presence heartbeat every 30s while the app is open so the Admin
   // Management page can show an "online" green dot for this user.
   usePresenceHeartbeat();
+
+  // On mobile the sidebar is a Sheet — never auto-open it on load.
+  const mobileInitialized = useRef(false);
+  React.useEffect(() => {
+    if (isMobile && !mobileInitialized.current) {
+      mobileInitialized.current = true;
+      if (sidebarOpen) setSidebarOpen(false);
+    }
+  }, [isMobile, sidebarOpen, setSidebarOpen]);
 
   // Fetch admin menu permissions dynamically from the Permission system
   React.useEffect(() => {
@@ -212,9 +240,48 @@ function MainLayout() {
       <AppSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <AppHeader />
-        <main className="flex-1 p-4 md:p-6 overflow-auto">{renderView()}</main>
+        <main className="flex-1 p-4 md:p-6 overflow-auto">
+          <AnimatePresence mode="wait" initial={false}>
+            <PageTransition key={currentView}>
+              {renderView()}
+            </PageTransition>
+          </AnimatePresence>
+        </main>
       </div>
+      <CommandPalette />
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Floating button that appears after scrolling down — smooth-scrolls back up.
+function ScrollToTopButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 400);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0.6, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.6, y: 12 }}
+          whileHover={{ y: -3, scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 26 }}
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Scroll to top"
+          className="fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-blue-500 text-white shadow-lg shadow-blue-500/30 hover:bg-blue-400"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }
 

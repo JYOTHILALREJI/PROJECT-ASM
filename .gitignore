@@ -52,3 +52,12 @@ prompt
 server.log
 # Skills directory
 /skills/.git-askpass.sh
+
+# sandbox artifacts (not part of the project)
+.git-sandbox-backup/
+tool-results/
+download/
+dev-server.log
+.zscripts/
+tests/
+skills/

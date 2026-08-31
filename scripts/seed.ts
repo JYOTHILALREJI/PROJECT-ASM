@@ -31,13 +31,10 @@ try {
   process.exit(1);
 }
 
-// Now require the db — after generate so the client is fresh
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { db } = require('../src/lib/db');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { hashPassword } = require('../src/lib/auth');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { encrypt } = require('../src/lib/crypto');
+// Import after generate so the Prisma client is fresh
+const { db } = await import('../src/lib/db');
+const { hashPassword } = await import('../src/lib/auth');
+const { encrypt } = await import('../src/lib/crypto');
 
 async function main() {
   console.log('🌱 Starting seed...\n');

@@ -40,6 +40,9 @@ import {
 } from '@/components/ui/accordion';
 import { format } from 'date-fns';
 import { useAppStore } from '@/store/app-store';
+import { motion } from 'framer-motion';
+import { UserPlus, CalendarPlus, LayoutDashboard as LayoutIcon, ChevronRight } from 'lucide-react';
+import { AnimatedNumber, StaggerContainer, StaggerItem, spring } from '@/components/motion';
 import {
   BarChart,
   Bar,
@@ -565,64 +568,113 @@ export function DashboardPage() {
       </div>
 
       {/* Team Leaders and Supervisors Pills */}
-      <div className="flex flex-wrap gap-3">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+      <StaggerContainer className="flex flex-wrap gap-3" stagger={0.08}>
+        <StaggerItem className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
           <Crown className="h-3.5 w-3.5 text-amber-400" />
           <span className="text-xs font-medium text-amber-400">Team Leaders</span>
           <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px] px-1.5 py-0 h-4 min-w-[20px] justify-center">
             {loadingEmployees ? '...' : teamLeaderCount}
           </Badge>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+        </StaggerItem>
+        <StaggerItem className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
           <span className="text-xs font-medium text-emerald-400">Supervisors</span>
           <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] px-1.5 py-0 h-4 min-w-[20px] justify-center">
             {loadingEmployees ? '...' : supervisorCount}
           </Badge>
-        </div>
-      </div>
+        </StaggerItem>
+      </StaggerContainer>
+
+      {/* Quick Actions */}
+      <StaggerContainer className="flex flex-wrap gap-2" stagger={0.06}>
+        {[
+          {
+            label: 'Add Employee',
+            icon: UserPlus,
+            view: 'employee_add' as const,
+            className: 'hover:border-blue-500/50 hover:text-blue-300',
+          },
+          {
+            label: 'Mark Attendance',
+            icon: CalendarPlus,
+            view: 'attendance' as const,
+            className: 'hover:border-emerald-500/50 hover:text-emerald-300',
+          },
+          {
+            label: 'Accounts',
+            icon: LayoutIcon,
+            view: 'accounts' as const,
+            className: 'hover:border-amber-500/50 hover:text-amber-300',
+          },
+        ].map((action) => {
+          const Icon = action.icon;
+          return (
+            <StaggerItem key={action.label}>
+              <motion.button
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.96 }}
+                transition={spring}
+                onClick={() => setCurrentView(action.view)}
+                className={`flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3.5 py-2 text-xs font-medium text-slate-300 transition-colors ${action.className}`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {action.label}
+                <ChevronRight className="h-3 w-3 opacity-50" />
+              </motion.button>
+            </StaggerItem>
+          );
+        })}
+      </StaggerContainer>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" stagger={0.07}>
         {metrics.map((metric) => {
           const Icon = metric.icon;
           return (
-            <Card
-              key={metric.title}
-              className={`bg-slate-800/50 border-slate-700/50 transition-colors py-4 ${metric.clickable ? 'cursor-pointer hover:border-amber-500/40 hover:bg-slate-800/70' : 'hover:border-slate-600/50'}`}
-              onClick={metric.clickable && metric.onClick ? metric.onClick : undefined}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2 px-4">
-                <CardTitle className="text-sm font-medium text-slate-400">
-                  {metric.title}
-                </CardTitle>
-                <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${metric.bgColor}`}>
-                  <Icon className={`h-4 w-4 ${metric.color}`} />
-                </div>
-              </CardHeader>
-              <CardContent className="px-4 pt-0">
-                {metric.value === null ? (
-                  <Skeleton className="h-8 w-16 bg-slate-700" />
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <div className="text-2xl font-bold text-white">
-                      {metric.value.toLocaleString()}
+            <StaggerItem key={metric.title}>
+              <motion.div
+                whileHover={{ y: -5, scale: 1.015 }}
+                whileTap={metric.clickable ? { scale: 0.98 } : undefined}
+                transition={spring}
+                onClick={metric.clickable && metric.onClick ? metric.onClick : undefined}
+                className={metric.clickable ? 'cursor-pointer' : ''}
+              >
+                <Card
+                  className={`bg-slate-800/50 border-slate-700/50 transition-colors py-4 h-full ${metric.clickable ? 'hover:border-amber-500/40 hover:bg-slate-800/70' : 'hover:border-slate-600/50 hover:bg-slate-800/70'}`}
+                >
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 px-4">
+                    <CardTitle className="text-sm font-medium text-slate-400">
+                      {metric.title}
+                    </CardTitle>
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${metric.bgColor}`}>
+                      <Icon className={`h-4 w-4 ${metric.color}`} />
                     </div>
-                    {metric.clickable && (
-                      <span className="text-[10px] text-amber-400/70 font-medium flex items-center gap-0.5 hover:text-amber-400 transition-colors">
-                        View All <ArrowRight className="h-3 w-3" />
-                      </span>
+                  </CardHeader>
+                  <CardContent className="px-4 pt-0">
+                    {metric.value === null ? (
+                      <Skeleton className="h-8 w-16 bg-slate-700" />
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div className="text-2xl font-bold text-white">
+                          <AnimatedNumber value={metric.value} />
+                        </div>
+                        {metric.clickable && (
+                          <span className="text-[10px] text-amber-400/70 font-medium flex items-center gap-0.5 hover:text-amber-400 transition-colors">
+                            View All <ArrowRight className="h-3 w-3" />
+                          </span>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
-                <p className="text-xs text-slate-500 mt-1">
-                  {metric.subtitle || `${monthLabel} ${year}`}
-                </p>
-              </CardContent>
-            </Card>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {metric.subtitle || `${monthLabel} ${year}`}
+                    </p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </StaggerItem>
           );
         })}
-      </div>
+      </StaggerContainer>
 
       {/* Site-Based Accordion View */}
       <div className="flex flex-col gap-4">
