@@ -878,7 +878,7 @@ function SiteListView({
             {/* Header row: day number + weekday (SUN/MON/...) left to right */}
             <div className="flex items-stretch bg-slate-900/80 border-b border-slate-700 text-xs font-medium text-slate-400 sticky top-0 z-10">
               <div className="w-44 shrink-0 px-3 py-1.5 border-r border-slate-700/50">Employee</div>
-              <div className="w-24 shrink-0 px-2 py-1.5 border-r border-slate-700/50">Emp. Code</div>
+              <div className="w-28 shrink-0 px-2 py-1.5 border-r border-slate-700/50">Emp. Code</div>
               <div className="w-28 shrink-0 px-2 py-1.5 border-r border-slate-700/50">Trade</div>
               <div className="flex-1 flex">
                 {displayDays.map((day) => {
@@ -957,8 +957,8 @@ function SiteListView({
                         </div>
                       </div>
                       {/* Emp code */}
-                      <div className="w-24 shrink-0 px-2 py-0 border-r border-slate-700/40 flex items-center">
-                        <span className="text-[11px] text-slate-400 font-mono truncate">{emp.employeeId}</span>
+                      <div className="w-28 shrink-0 px-2 py-0 border-r border-slate-700/40 flex items-center">
+                        <span className="text-[11px] text-slate-400 font-mono whitespace-nowrap">{emp.employeeId}</span>
                       </div>
                       {/* Trade */}
                       <div className="w-28 shrink-0 px-2 py-0 border-r border-slate-700/40 flex items-center">

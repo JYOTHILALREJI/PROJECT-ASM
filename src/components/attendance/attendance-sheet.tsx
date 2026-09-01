@@ -126,11 +126,11 @@ function chunkRows<T>(items: T[], perPage: number): T[][] {
 function tableHeaderHtml(): string {
   return `
     <tr>
-      <th style="width:8%;">SL. NO</th>
-      <th style="text-align:left; width:40%;">NAME</th>
-      <th style="width:17%;">EMP. CODE</th>
-      <th style="width:20%; text-align:left;">TRADE</th>
-      <th style="width:15%;">SIGNATURE</th>
+      <th style="width:7%;">SL. NO</th>
+      <th style="text-align:left; width:37%;">NAME</th>
+      <th style="width:16%;">EMP. CODE</th>
+      <th style="width:17%; text-align:left;">TRADE</th>
+      <th style="width:23%;">SIGNATURE</th>
     </tr>
   `;
 }
@@ -247,6 +247,23 @@ function buildPageHtml(params: {
     }
   });
 
+  // Blank ruled rows complete the page grid so rows keep a uniform height.
+  // Without them a page with few employees would stretch the last employee
+  // row to fill the whole sheet (the whole table is height:100%).
+  const slotCount = isFirstPage ? FIRST_PAGE_ROWS_COUNT : ROWS_PER_PAGE;
+  const fillerCount = Math.max(0, slotCount - employeeRows.length);
+  for (let i = 0; i < fillerCount; i++) {
+    html += `
+      <tr class="filler-row">
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+    `;
+  }
+
   html += `</tbody></table></div>`;
 
   // Extra Employees Table (only on last page)
@@ -352,6 +369,8 @@ function getPrintCSS(): string {
       text-align: center;
     }
     .even-row { background: #f3f4f6; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    /* Blank ruled rows that complete the page grid */
+    .filler-row td { color: #9ca3af; }
     .team-leader { background: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .supervisor { background: #eff6ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
@@ -917,11 +936,11 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                   <table className="w-full border-collapse text-[13px] uppercase" style={{ tableLayout: 'auto' }}>
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
-                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '8%' }}>SL. NO</th>
-                        <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '40%' }}>NAME</th>
-                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '17%' }}>EMP. CODE</th>
-                        <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '20%' }}>TRADE</th>
-                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '15%' }}>SIGNATURE</th>
+                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '7%' }}>SL. NO</th>
+                        <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '37%' }}>NAME</th>
+                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '16%' }}>EMP. CODE</th>
+                        <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '17%' }}>TRADE</th>
+                        <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '23%' }}>SIGNATURE</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -954,6 +973,17 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                           </tr>
                         );
                       })}
+                      {/* Blank ruled rows complete the page grid so rows keep a
+                          uniform height (mirrors the printed sheet). */}
+                      {Array.from({ length: Math.max(0, (isFirstPage ? FIRST_PAGE_ROWS_COUNT : ROWS_PER_PAGE) - pageEmployeeRows.length) }).map((_, i) => (
+                        <tr key={`filler-${pageIdx}-${i}`} className="bg-white">
+                          <td className="border border-black px-2" style={{ height: '40px' }}>&nbsp;</td>
+                          <td className="border border-black px-1">&nbsp;</td>
+                          <td className="border border-black px-1">&nbsp;</td>
+                          <td className="border border-black px-1">&nbsp;</td>
+                          <td className="border border-black px-2">&nbsp;</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -967,11 +997,11 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                     <table className="w-full border-collapse text-[13px] uppercase">
                       <thead>
                         <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
-                          <th className="border border-black px-2 py-2 text-center font-bold w-12 text-[14px] uppercase">SL. NO</th>
-                          <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase">NAME</th>
-                          <th className="border border-black px-2 py-2 text-center font-bold w-[115px] text-[14px] uppercase">EMP. CODE</th>
-                          <th className="border border-black px-2 py-2 text-left font-bold w-[179px] text-[14px] uppercase">TRADE</th>
-                          <th className="border border-black px-2 py-2 text-center font-bold w-40 text-[14px] uppercase">SIGNATURE</th>
+                          <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '7%' }}>SL. NO</th>
+                          <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '37%' }}>NAME</th>
+                          <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '16%' }}>EMP. CODE</th>
+                          <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '17%' }}>TRADE</th>
+                          <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '23%' }}>SIGNATURE</th>
                         </tr>
                       </thead>
                       <tbody>

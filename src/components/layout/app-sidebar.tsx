@@ -86,7 +86,11 @@ interface SidebarContentProps {
 function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) {
   const { currentView, setCurrentView } = useAppStore();
   const { user, logout } = useAuthStore();
+  // Badge counts: unread notifications + pending leave/cancellation requests.
+  // Each sidebar item shows its own count badge when something comes in.
   const [unreadCount, setUnreadCount] = React.useState(0);
+  const [pendingLeaveCount, setPendingLeaveCount] = React.useState(0);
+  const [pendingCancellationCount, setPendingCancellationCount] = React.useState(0);
   const [adminPermissions, setAdminPermissions] = React.useState<string[]>([]);
   const [logoutDialogOpen, setLogoutDialogOpen] = React.useState(false);
   // Online users count (presence) — shown below the company logo in both
@@ -109,20 +113,41 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
   }, []);
 
   React.useEffect(() => {
-    const fetchCount = async () => {
+    // Refresh badge counts: every 30s, when the window regains focus, and
+    // instantly when any page dispatches 'asm:refresh-badge-counts'
+    // (e.g. after a leave/cancellation request is created or reviewed).
+    const fetchCounts = async () => {
       try {
-        const res = await fetch('/api/notifications?limit=1');
-        const data = await res.json();
-        if (data.success) {
-          setUnreadCount(data.data.unreadCount || 0);
+        const [notifRes, leaveRes, cancelRes] = await Promise.all([
+          fetch('/api/notifications?limit=1'),
+          fetch('/api/leave-requests?status=pending'),
+          fetch('/api/cancellation-requests?status=pending'),
+        ]);
+        const notifData = await notifRes.json();
+        if (notifData.success) {
+          setUnreadCount(notifData.data.unreadCount || 0);
+        }
+        const leaveData = await leaveRes.json();
+        if (leaveData.success) {
+          setPendingLeaveCount((leaveData.data.leaveRequests || []).length);
+        }
+        const cancelData = await cancelRes.json();
+        if (cancelData.success) {
+          setPendingCancellationCount((cancelData.data.cancellationRequests || []).length);
         }
       } catch {
         // silent
       }
     };
-    fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => clearInterval(interval);
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30000);
+    window.addEventListener('focus', fetchCounts);
+    window.addEventListener('asm:refresh-badge-counts', fetchCounts);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchCounts);
+      window.removeEventListener('asm:refresh-badge-counts', fetchCounts);
+    };
   }, []);
 
   // Fetch admin permissions from the new Permission system
@@ -239,6 +264,16 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
           {filteredNavItems.map((item) => {
             const isActive = currentView === item.id;
             const Icon = item.icon;
+            // Count badge per item: unread notifications, pending leave
+            // requests, pending cancellation requests.
+            const badge =
+              item.id === 'notifications' && unreadCount > 0
+                ? { count: unreadCount, className: 'bg-blue-500' }
+                : item.id === 'leave_requests' && pendingLeaveCount > 0
+                ? { count: pendingLeaveCount, className: 'bg-amber-500' }
+                : item.id === 'cancellation_requests' && pendingCancellationCount > 0
+                ? { count: pendingCancellationCount, className: 'bg-red-500' }
+                : null;
 
             return (
               <StaggerItem key={item.id} className="relative">
@@ -269,17 +304,25 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
                     <Icon className={cn('h-5 w-5', isActive && 'text-blue-400')} />
                   </motion.span>
                   {!collapsed && <span className="truncate relative z-10">{item.label}</span>}
-                  {!collapsed && item.id === 'notifications' && unreadCount > 0 && (
+                  {!collapsed && badge && (
                     <Badge
                       variant="default"
-                      className="ml-auto relative z-10 bg-blue-500 text-white text-[10px] px-1.5 py-0 min-w-[20px] h-5 flex items-center justify-center animate-pulse"
+                      className={cn(
+                        'ml-auto relative z-10 text-white text-[10px] px-1.5 py-0 min-w-[20px] h-5 flex items-center justify-center animate-pulse',
+                        badge.className
+                      )}
                     >
-                      {unreadCount}
+                      {badge.count > 99 ? '99+' : badge.count}
                     </Badge>
                   )}
-                  {collapsed && item.id === 'notifications' && unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[9px] font-bold text-white animate-pulse">
-                      {unreadCount > 9 ? '9+' : unreadCount}
+                  {collapsed && badge && (
+                    <span
+                      className={cn(
+                        'absolute -top-1 -right-1 z-10 flex h-4 min-w-4 px-1 items-center justify-center rounded-full text-[9px] font-bold text-white animate-pulse',
+                        badge.className
+                      )}
+                    >
+                      {badge.count > 9 ? '9+' : badge.count}
                     </span>
                   )}
                 </button>

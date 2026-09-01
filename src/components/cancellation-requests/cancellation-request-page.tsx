@@ -367,6 +367,7 @@ export function CancellationRequestPage() {
         resetForm();
         fetchCancellationRequests();
         fetchEmployees(); // Refresh employees as status may have changed
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to create cancellation request', variant: 'destructive' });
       }
@@ -403,6 +404,7 @@ export function CancellationRequestPage() {
         setReviewingRequest(null);
         fetchCancellationRequests();
         fetchEmployees();
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to review request', variant: 'destructive' });
       }

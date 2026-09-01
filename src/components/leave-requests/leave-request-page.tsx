@@ -660,6 +660,7 @@ export function LeaveRequestPage() {
         setCreateDialogOpen(false);
         resetForm();
         fetchLeaveRequests();
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to create leave request', variant: 'destructive' });
       }
@@ -693,6 +694,7 @@ export function LeaveRequestPage() {
         setReviewDialogOpen(false);
         setReviewingRequest(null);
         fetchLeaveRequests();
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to review request', variant: 'destructive' });
       }
