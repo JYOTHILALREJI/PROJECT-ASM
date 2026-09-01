@@ -876,23 +876,24 @@ model EmployeeTrade {
 // ---------------------------------------------------------------------------
 // BaseRate — configurable base hourly rates (not hardcoded)
 // ---------------------------------------------------------------------------
-// Instead of hardcoding 2.5/5.0 for standard workers and 3.0/5.5 for
-// Team Leaders/Supervisors, these values are stored in the DB and can be
-// edited from the Accounts page > "Manage Rates" button.
+// Instead of hardcoding the pay tiers, these values are stored in the DB and
+// can be edited from the Accounts page > "Manage Rates" button.
+//
+//   baseLow    — below-threshold base rate, applies to EVERY employee
+//   helperHigh — above-threshold premium rate for Helpers (default 6.0)
+//   tradeHigh  — above-threshold premium rate for other trades (default 7.0)
 //
 // There is only ONE row in this table (singleton). The app reads it on
 // startup and uses the values everywhere rates are calculated.
 //
-// Priority: employee.customHourlyRate > TradeRate (+0.5 if TL/Sup) >
-// BaseRate (standardLow/standardHigh or tlLow/tlHigh)
+// Priority: changelog override > employee.customHourlyRate > TradeRate
+// (+0.5 if TL/Sup) > BaseRate (baseLow below threshold; helperHigh/tradeHigh
+// above threshold depending on the employee's trade).
 // ---------------------------------------------------------------------------
 model BaseRate {
-  id            String   @id @default("singleton")
-  standardLow   Float    @default(2.5)  // Below threshold rate for standard workers
-  standardHigh  Float    @default(5.0)  // Above threshold rate for standard workers
-  tlLow         Float    @default(3.0)  // Below threshold rate for Team Leaders
-  tlHigh        Float    @default(5.5)  // Above threshold rate for Team Leaders
-  supLow        Float    @default(3.0)  // Below threshold rate for Supervisors
-  supHigh       Float    @default(5.5)  // Above threshold rate for Supervisors
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default("singleton")
+  baseLow    Float    @default(3.5) // Below-threshold base rate (all employees)
+  helperHigh Float    @default(6.0) // Above-threshold premium rate for Helpers
+  tradeHigh  Float    @default(7.0) // Above-threshold premium rate for other trades
+  updatedAt  DateTime @updatedAt
 }

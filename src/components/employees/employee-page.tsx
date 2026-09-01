@@ -3137,7 +3137,7 @@ export function EmployeePage() {
                   <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
                     <Label className="text-slate-300 text-sm">Custom Rate Override (AED/hr)</Label>
                     <p className="text-xs text-slate-500 mb-2">
-                      If set, this overrides the standard tier rates (2.5/3.0/5.0/5.5) for this employee across all calculations.
+                      If set, this overrides ALL tier rates (base rate + helper/trade premiums) for this employee across all calculations.
                     </p>
                     <Input
                       type="number"

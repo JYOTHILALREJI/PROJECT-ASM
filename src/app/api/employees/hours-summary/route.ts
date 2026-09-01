@@ -148,6 +148,7 @@ export async function GET(request: NextRequest) {
         emp.isTeamLeader,
         emp.isSupervisor,
         baseRates,
+        isHelper,
       );
       const lowRate = resolvedRate.lowRate;
       const highRate = resolvedRate.highRate;
@@ -162,10 +163,10 @@ export async function GET(request: NextRequest) {
         rateLabel = `${effectiveTrade} (${tradeRateVal}${hasBonus ? ' +0.5' : ''})`;
       } else if (cumulativeHours >= threshold) {
         effectiveRate = highRate;
-        rateLabel = String(highRate);
+        rateLabel = isHelper ? `Helper premium (${highRate})` : `${effectiveTrade} premium (${highRate})`;
       } else {
         effectiveRate = lowRate;
-        rateLabel = String(lowRate);
+        rateLabel = `Base (${lowRate})`;
       }
 
       // Resolve current site: prefer latest deployment, fallback to employee.currentSite
@@ -188,6 +189,7 @@ export async function GET(request: NextRequest) {
         employeeId: emp.employeeId,
         currentSite,
         trade: effectiveTrade,
+        isHelper,
         isTeamLeader: emp.isTeamLeader,
         isSupervisor: emp.isSupervisor,
         customHourlyRate: emp.customHourlyRate,
@@ -206,11 +208,21 @@ export async function GET(request: NextRequest) {
 
     if (rateFilter) {
       filtered = filtered.filter((emp) => {
+        // Semantic rate tiers (independent of the configured amounts):
+        //   base          → below threshold, no custom/trade rate (baseLow)
+        //   helper_premium→ above threshold, Helper (helperHigh)
+        //   trade_premium → above threshold, other trade (tradeHigh)
+        //   Custom        → any per-employee flat rate
         if (rateFilter === 'Custom') return emp.customHourlyRate != null;
-        if (rateFilter === '2.5') return emp.customHourlyRate == null && !emp.isTeamLeader && !emp.isSupervisor && emp.thresholdStatus === 'below';
-        if (rateFilter === '5.0') return emp.customHourlyRate == null && !emp.isTeamLeader && !emp.isSupervisor && emp.thresholdStatus === 'above';
-        if (rateFilter === '3.0') return emp.customHourlyRate == null && (emp.isTeamLeader || emp.isSupervisor) && emp.thresholdStatus === 'below';
-        if (rateFilter === '5.5') return emp.customHourlyRate == null && (emp.isTeamLeader || emp.isSupervisor) && emp.thresholdStatus === 'above';
+        if (rateFilter === 'base') {
+          return emp.customHourlyRate == null && emp.thresholdStatus === 'below';
+        }
+        if (rateFilter === 'helper_premium') {
+          return emp.customHourlyRate == null && emp.thresholdStatus === 'above' && emp.isHelper;
+        }
+        if (rateFilter === 'trade_premium') {
+          return emp.customHourlyRate == null && emp.thresholdStatus === 'above' && !emp.isHelper;
+        }
         return true;
       });
     }

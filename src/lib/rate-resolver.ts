@@ -9,19 +9,20 @@
 //   2. Employee.customHourlyRate — if set, this is the ONLY rate used.
 //   3. Trade rate (from EmployeeTrade → TradeRate.hourlyRate) + 0.5 bonus
 //      if the employee is a Team Leader or Supervisor.
-//   4. Base rate (from BaseRate singleton in DB: standardLow/High,
-//      tlLow/High, supLow/High) — fallback for employees with no custom
-//      rate and no trade assignment.
+//   4. Base rate (from BaseRate singleton in DB: baseLow below threshold;
+//      helperHigh above threshold for Helpers, tradeHigh for other trades)
+//      — fallback for employees with no custom rate and no trade rate.
 //
 // Every page and every calculation involving rates MUST call one of the
 // functions in this file. Do NOT re-implement the priority logic inline.
 // ---------------------------------------------------------------------------
 
 import { db } from '@/lib/db';
-import { getBaseRates, type BaseRates } from '@/lib/base-rates';
+import { getBaseRates, getTradeBasedRates, type BaseRates } from '@/lib/base-rates';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap, type EmployeeTradeInfo } from '@/lib/employee-trade';
 import { getRateForMonth, getRateMapForMonth } from '@/lib/rate-changelog';
+import { isHelperTrade } from '@/lib/trade-utils';
 
 export interface ResolvedRate {
   lowRate: number;
@@ -46,11 +47,12 @@ function applyPriority(
   isTeamLeader: boolean,
   isSupervisor: boolean,
   baseRates: BaseRates,
+  isHelper: boolean,
 ): ResolvedRate {
   const hasBonus = isTeamLeader || isSupervisor;
 
   // 2. Custom rate
-  if (customRate !== null && customRate !== undefined) {
+  if (customRate !== null && customRate !== undefined && Number.isFinite(customRate)) {
     return {
       lowRate: customRate,
       highRate: customRate,
@@ -70,13 +72,9 @@ function applyPriority(
     };
   }
 
-  // 4. Base rate from DB
-  const lowRate = hasBonus
-    ? (isTeamLeader ? baseRates.tlLow : baseRates.supLow)
-    : baseRates.standardLow;
-  const highRate = hasBonus
-    ? (isTeamLeader ? baseRates.tlHigh : baseRates.supHigh)
-    : baseRates.standardHigh;
+  // 4. Base rate from DB — below threshold: baseLow for everyone.
+  //    Above threshold: helperHigh for Helpers, tradeHigh for other trades.
+  const { lowRate, highRate } = getTradeBasedRates(isHelper, baseRates);
   return {
     lowRate,
     highRate,
@@ -94,7 +92,7 @@ function applyPriority(
  *   1. Checks the rate changelog for a per-month override
  *   2. Falls back to Employee.customHourlyRate
  *   3. Falls back to TradeRate (+0.5 if TL/Sup)
- *   4. Falls back to BaseRate from DB
+ *   4. Falls back to BaseRate from DB (baseLow / helperHigh / tradeHigh)
  *
  * Use this when you need the rate for a single employee+month.
  * For bulk lookups (e.g. /api/accounts), use resolveRateMapForMonth instead.
@@ -139,11 +137,11 @@ export async function resolveEmployeeRate(
 
   // Determine the trade rate
   let tradeRate: number | null = null;
+  let effectiveTrade = employee.trade ?? null;
   if (options?.tradeRateOverride !== undefined) {
     tradeRate = options.tradeRateOverride;
   } else {
     // Use the employee's trade if provided, or look it up from EmployeeTradeMap
-    let effectiveTrade = employee.trade ?? null;
     if (!effectiveTrade && options?.employeeTradeMap) {
       const tradeInfo = options.employeeTradeMap.get(employee.id);
       if (tradeInfo) {
@@ -155,7 +153,7 @@ export async function resolveEmployeeRate(
       tradeRate = options.tradeRateMap.get(effectiveTrade) ?? null;
     }
     // If trade is "Helper", tradeRate stays null (falls through to base rate)
-    if (effectiveTrade && effectiveTrade.toLowerCase() === 'helper') {
+    if (isHelperTrade(effectiveTrade)) {
       tradeRate = null;
     }
   }
@@ -166,6 +164,7 @@ export async function resolveEmployeeRate(
     employee.isTeamLeader,
     employee.isSupervisor,
     baseRates,
+    isHelperTrade(effectiveTrade),
   );
 }
 
@@ -229,7 +228,7 @@ export async function resolveRateMapForMonth(
     if (effectiveTrade && tradeRate === null && options?.tradeRateMap) {
       tradeRate = options.tradeRateMap.get(effectiveTrade) ?? null;
     }
-    if (effectiveTrade && effectiveTrade.toLowerCase() === 'helper') {
+    if (isHelperTrade(effectiveTrade)) {
       tradeRate = null;
     }
 
@@ -241,6 +240,7 @@ export async function resolveRateMapForMonth(
         emp.isTeamLeader,
         emp.isSupervisor,
         baseRates,
+        isHelperTrade(effectiveTrade),
       ),
     );
   }
@@ -259,7 +259,11 @@ export async function resolveRateMapForMonth(
  *     resolved the effective custom rate)
  *   - You're in a client-side component that received all data from the API
  *
- * This is the pure priority function: Custom > Trade(+0.5) > BaseRate.
+ * This is the pure priority function:
+ *   Custom > Trade(+0.5) > BaseRate (baseLow below; helperHigh/tradeHigh above)
+ *
+ * @param isHelper Whether the employee's effective trade is "Helper".
+ *                 Determines the above-threshold premium (6.0 vs 7.0).
  */
 export function resolveRateSync(
   customRate: number | null,
@@ -267,6 +271,7 @@ export function resolveRateSync(
   isTeamLeader: boolean,
   isSupervisor: boolean,
   baseRates: BaseRates,
+  isHelper: boolean,
 ): ResolvedRate {
   return applyPriority(
     customRate,
@@ -274,10 +279,11 @@ export function resolveRateSync(
     isTeamLeader,
     isSupervisor,
     baseRates,
+    isHelper,
   );
 }
 
 // ─── Re-export the helpers so callers can import everything from here ─────
 
-export { getBaseRates, buildTradeRateMap, buildEmployeeTradeMap, getRateForMonth, getRateMapForMonth };
+export { getBaseRates, getTradeBasedRates, buildTradeRateMap, buildEmployeeTradeMap, getRateForMonth, getRateMapForMonth };
 export type { BaseRates, EmployeeTradeInfo };

@@ -156,16 +156,16 @@ function formatCurrency(amount: number): string {
 //
 // Compares the given rate against the DB-configured base rates to decide
 // which badge color to use. If baseRates is not yet loaded (null), falls
-// back to the default values (2.5/3.0 below, 5.0/5.5 above).
+// back to the default values (3.5 below, 6.0 helper / 7.0 trade above).
 //
-//   - emerald = below-threshold rate (standardLow, tlLow, or supLow)
-//   - green   = above-threshold rate (standardHigh, tlHigh, or supHigh)
+//   - emerald = below-threshold base rate (baseLow)
+//   - green   = above-threshold premium (helperHigh or tradeHigh)
 //   - violet  = custom rate or any rate that doesn't match the base rates
 
 interface BaseRatesForColor {
-  standardLow: number; standardHigh: number;
-  tlLow: number; tlHigh: number;
-  supLow: number; supHigh: number;
+  baseLow: number;
+  helperHigh: number;
+  tradeHigh: number;
 }
 
 function getRateColor(
@@ -176,23 +176,18 @@ function getRateColor(
   if (isCustomRate) return 'violet';
 
   const br = baseRates ?? {
-    standardLow: 2.5, standardHigh: 5.0,
-    tlLow: 3.0, tlHigh: 5.5,
-    supLow: 3.0, supHigh: 5.5,
+    baseLow: 3.5,
+    helperHigh: 6.0,
+    tradeHigh: 7.0,
   };
 
-  // Below-threshold rates (emerald)
-  if (
-    Math.abs(rate - br.standardLow) < 0.01 ||
-    Math.abs(rate - br.tlLow) < 0.01 ||
-    Math.abs(rate - br.supLow) < 0.01
-  ) return 'emerald';
+  // Below-threshold base rate (emerald)
+  if (Math.abs(rate - br.baseLow) < 0.01) return 'emerald';
 
-  // Above-threshold rates (green)
+  // Above-threshold premiums (green)
   if (
-    Math.abs(rate - br.standardHigh) < 0.01 ||
-    Math.abs(rate - br.tlHigh) < 0.01 ||
-    Math.abs(rate - br.supHigh) < 0.01
+    Math.abs(rate - br.helperHigh) < 0.01 ||
+    Math.abs(rate - br.tradeHigh) < 0.01
   ) return 'green';
 
   return 'violet';
@@ -261,11 +256,11 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   const [changedMonths, setChangedMonths] = useState<Set<string>>(new Set());
 
   // ── Base rates (fetched from /api/base-rates, same as Accounts page) ──
-  // Used as fallbacks instead of hardcoded 2.5/5.0/3.0/5.5.
+  // Used as fallbacks instead of hardcoded 3.5/6.0/7.0.
   const [baseRates, setBaseRates] = useState<{
-    standardLow: number; standardHigh: number;
-    tlLow: number; tlHigh: number;
-    supLow: number; supHigh: number;
+    baseLow: number;
+    helperHigh: number;
+    tradeHigh: number;
   } | null>(null);
 
   // ── Paid-month confirmation state ──
@@ -338,7 +333,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
   }, [fetchWorkLogs]);
 
   // Fetch base rates on mount (same pattern as Accounts & Consolidated Salary
-  // pages). Used as fallbacks instead of hardcoded 2.5/5.0/3.0/5.5.
+  // pages). Used as fallbacks instead of hardcoded 3.5/6.0/7.0.
   useEffect(() => {
     const fetchBaseRates = async () => {
       try {
@@ -397,8 +392,8 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
           deductions: 0,
           cumulativeBefore: 0,
           cumulativeAfter: 0,
-          lowRate: employeeInfo?.lowRate ?? baseRates?.standardLow ?? 2.5,
-          highRate: employeeInfo?.highRate ?? baseRates?.standardHigh ?? 5.0,
+          lowRate: employeeInfo?.lowRate ?? baseRates?.baseLow ?? 3.5,
+          highRate: employeeInfo?.highRate ?? baseRates?.helperHigh ?? 6.0,
           isCustom: employeeInfo?.isCustom ?? false,
           belowHours: 0,
           aboveHours: 0,

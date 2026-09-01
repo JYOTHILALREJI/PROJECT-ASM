@@ -3,28 +3,34 @@ import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
 import { resolveRateSync } from '@/lib/rate-resolver';
+import { isHelperTrade } from '@/lib/trade-utils';
+import {
+  computeThresholdSplit,
+  composeSalaryRecord,
+  computeSalary,
+  computeBalance,
+  roundHours,
+  roundMoney,
+  EPSILON,
+} from '@/lib/payroll-math';
 
 // ---------------------------------------------------------------------------
 // Cross-Site Monthly Hour Allocation Engine (Shared Module)
 // ---------------------------------------------------------------------------
-// Business Rules (Divisor-Based Formula from PRD):
-//   Wages = Σ (Hours Worked Within Tier × Tier Rate / Role Divisor)
+// Business Rules (Threshold-Based Direct Rates):
+//   Wages = Σ (Hours Worked Within Tier × Tier Rate)
 //
-//   Tier Rates are ALWAYS the same regardless of role:
-//     - Below threshold (standard): Tier Rate = 2.5
-//     - Above threshold (premium):  Tier Rate = 5.0
+//   Tier Rates come from the BaseRate singleton in the DB:
+//     - Below threshold (standard): baseLow (default 3.5) — EVERY employee
+//     - Above threshold (premium):  helperHigh (default 6.0) for Helpers,
+//                                   tradeHigh (default 7.0) for other trades
 //
-//   Divisor Reference Rules:
-//     | Role            | Below Threshold Divisor | Above Threshold Divisor |
-//     | Standard        | 1.0                     | 1.0                     |
-//     | Team Leader     | 3.0                     | 5.5                     |
-//     | Supervisor      | 3.0                     | 5.5                     |
-//
-//   Effective Rate = Tier Rate / Divisor:
-//     | Role            | Below (2.5/div) | Above (5.0/div) |
-//     | Standard        | 2.5000          | 5.0000           |
-//     | Team Leader     | 0.8333          | 0.9091           |
-//     | Supervisor      | 0.8333          | 0.9091           |
+//   Effective Rate Table (defaults):
+//     | Employee type | Below (baseLow) | Above threshold        |
+//     | Helper        | 3.5             | 6.0                    |
+//     | Other trade   | 3.5             | 7.0                    |
+//     | Custom rate   | customRate      | customRate (flat)      |
+//     | TradeRate row | tradeRate (+0.5 TL/Sup, flat)                  |
 //
 //   Where N = employee's hoursThreshold (default 1000).
 //   KEY: The threshold is CUMULATIVE across all months, NOT per-month.
@@ -36,6 +42,32 @@ import { resolveRateSync } from '@/lib/rate-resolver';
 //     4. Walk sites sequentially, consuming the remaining threshold
 //     5. Split each site's hours into lowRate (standard) and highRate (premium)
 // ---------------------------------------------------------------------------
+
+/** True when the employee's trade is "Helper" (case-insensitive). */
+function isHelperTradeLocal(trade: string | null | undefined): boolean {
+  return (trade ?? '').trim().toLowerCase() === 'helper';
+}
+
+/**
+ * Rates that have ever shipped as system defaults. A stored rate matching
+ * one of these (or the current configured rates) is treated as a stale
+ * default — NOT a deliberate user edit — so it gets re-priced to the
+ * current trade-aware rate on every allocation run. Any other value is a
+ * genuine manual override and is preserved.
+ */
+const LEGACY_DEFAULT_RATES = [2.5, 3.0, 5.0, 5.5];
+function isDefaultLikeRate(
+  rate: number | null | undefined,
+  baseRates: { baseLow: number; helperHigh: number; tradeHigh: number },
+): boolean {
+  if (rate === null || rate === undefined) return true;
+  return (
+    LEGACY_DEFAULT_RATES.some((d) => Math.abs(rate - d) < EPSILON) ||
+    Math.abs(rate - baseRates.baseLow) < EPSILON ||
+    Math.abs(rate - baseRates.helperHigh) < EPSILON ||
+    Math.abs(rate - baseRates.tradeHigh) < EPSILON
+  );
+}
 
 export interface SiteAllocation {
   siteId: string;
@@ -168,6 +200,7 @@ export async function allocateEmployeeHours(
       employee.isTeamLeader,
       employee.isSupervisor,
       baseRates,
+      isHelperTrade(effectiveTradeName),
     );
     const lowRate = resolved.lowRate;
     const highRate = resolved.highRate;
@@ -185,10 +218,12 @@ export async function allocateEmployeeHours(
     const isCustomRate = hasCustomRate || hasTradeRate
       ? true
       : (currentMonthWhRecord?.isCustom ?? false);
+    // NOTE: for trade-rate employees the resolver already includes the
+    // +0.5 TL/Sup bonus in lowRate/highRate, so we reuse lowRate here.
     const customRate = hasCustomRate
       ? employeeCustomRate!
       : hasTradeRate
-        ? (hasBonus ? tradeRate! + 0.5 : tradeRate!)
+        ? lowRate
         : (currentMonthWhRecord?.rtPerHour ?? lowRate);
 
     // ------------------------------------------------------------------
@@ -215,11 +250,11 @@ export async function allocateEmployeeHours(
     });
 
     // Previous cumulative = sum of ALL hours from salary records in months BEFORE current month
-    // This spans ALL years, not just the current year.
-    const previousCumulative = previousSalaryRecords.reduce(
+    // This spans ALL years, not just the current year. Rounded to 2dp.
+    const previousCumulative = roundHours(previousSalaryRecords.reduce(
       (sum, sr) => sum + sr.totalHours,
       0,
-    );
+    ));
 
     // ------------------------------------------------------------------
     // 3c. Group by site, calculate rawHours per site
@@ -250,7 +285,8 @@ export async function allocateEmployeeHours(
         });
       }
       const siteData = siteMap.get(record.siteId)!;
-      siteData.rawHours += record.totalHours;
+      // Round each addition so accumulating many sites can never drift.
+      siteData.rawHours = roundHours(siteData.rawHours + record.totalHours);
 
       // Track existing records by rateTier for carry-forward
       if (record.rateTier === 'standard') {
@@ -275,9 +311,9 @@ export async function allocateEmployeeHours(
     // ------------------------------------------------------------------
     // 3f. Apply sequential allocation algorithm with cumulative threshold
     // ------------------------------------------------------------------
-    // KEY CHANGE: Start consumedThreshold from previous cumulative hours
+    // KEY: Start consumedThreshold from previous cumulative hours.
     // This means if the employee already has 800 hours from previous months,
-    // only 200 more hours can be at the low rate in this month
+    // only 200 more hours can be at the low rate in this month.
     //
     // If the employee has a custom rate, skip the split entirely —
     // all hours go at the custom rate as a single "standard" record.
@@ -299,35 +335,18 @@ export async function allocateEmployeeHours(
         continue;
       }
 
-      const remainingThreshold = threshold - consumedThreshold;
-      let lowRateHours = 0;
-      let highRateHours = 0;
-
-      if (site.rawHours <= 0) {
-        lowRateHours = 0;
-        highRateHours = 0;
-      } else if (remainingThreshold >= site.rawHours) {
-        // Case 1: Site fully inside remaining threshold → all hours at low rate
-        lowRateHours = site.rawHours;
-        highRateHours = 0;
-        consumedThreshold += site.rawHours;
-      } else if (remainingThreshold > 0) {
-        // Case 2: Site crosses the threshold → split
-        lowRateHours = remainingThreshold;
-        highRateHours = site.rawHours - remainingThreshold;
-        consumedThreshold = threshold;
-      } else {
-        // Case 3: Threshold already exhausted → all hours at high rate
-        lowRateHours = 0;
-        highRateHours = site.rawHours;
-      }
+      // Canonical drift-free split (payroll-math) — the running consumed
+      // threshold is passed as "cumulativeBefore" so each site consumes its
+      // share of the remaining threshold in deterministic (alphabetical) order.
+      const split = computeThresholdSplit(site.rawHours, consumedThreshold, threshold);
+      consumedThreshold = Math.min(threshold, consumedThreshold + split.belowHours);
 
       siteAllocations.push({
         siteId: site.siteId,
         siteName: site.siteName,
         rawHours: site.rawHours,
-        lowRateHours,
-        highRateHours,
+        lowRateHours: split.belowHours,
+        highRateHours: split.aboveHours,
         lowRate,
         highRate,
       });
@@ -351,13 +370,21 @@ export async function allocateEmployeeHours(
         const existingStdRate = siteData.existingStandard?.rtPerHour;
         const effectiveLowRate = isCustomRate
           ? customRate
-          : (existingStdRate && existingStdRate !== lowRate)
-            ? existingStdRate
-            : alloc.lowRate;
-        const totalSalary = alloc.lowRateHours * effectiveLowRate;
+          : isDefaultLikeRate(existingStdRate, baseRates)
+            ? alloc.lowRate
+            : existingStdRate!;
+        // Compose every derived value (hours/rate/salary/balance) through the
+        // canonical payroll math — rounded, clamped, drift-free.
+        const composed = composeSalaryRecord({
+          hours: alloc.lowRateHours,
+          rate: effectiveLowRate,
+          deduction: siteData.existingStandard?.deduction ?? 0,
+          advance: siteData.existingStandard?.advance ?? 0,
+        });
+        const totalSalary = composed.totalSalary;
         const carryDeduction = siteData.existingStandard?.deduction ?? 0;
         const carryAdvance = siteData.existingStandard?.advance ?? 0;
-        const balanceSalary = Math.max(0, totalSalary - carryDeduction - carryAdvance);
+        const balanceSalary = composed.balanceSalary;
 
         await db.salaryRecord.upsert({
           where: {
@@ -438,13 +465,20 @@ export async function allocateEmployeeHours(
         const existingPremRate = siteData.existingPremium?.rtPerHour;
         const effectiveHighRate = isCustomRate
           ? customRate
-          : (existingPremRate && existingPremRate !== highRate)
-            ? existingPremRate
-            : alloc.highRate;
-        const totalSalary = alloc.highRateHours * effectiveHighRate;
+          : isDefaultLikeRate(existingPremRate, baseRates)
+            ? alloc.highRate
+            : existingPremRate!;
+        // Compose every derived value through the canonical payroll math.
+        const composedPrem = composeSalaryRecord({
+          hours: alloc.highRateHours,
+          rate: effectiveHighRate,
+          deduction: siteData.existingPremium?.deduction ?? 0,
+          advance: siteData.existingPremium?.advance ?? 0,
+        });
+        const totalSalary = composedPrem.totalSalary;
         const carryDeduction = siteData.existingPremium?.deduction ?? 0;
         const carryAdvance = siteData.existingPremium?.advance ?? 0;
-        const balanceSalary = Math.max(0, totalSalary - carryDeduction - carryAdvance);
+        const balanceSalary = composedPrem.balanceSalary;
 
         await db.salaryRecord.upsert({
           where: {
@@ -518,21 +552,21 @@ export async function allocateEmployeeHours(
     // ------------------------------------------------------------------
     // 3h. Validation checks
     // ------------------------------------------------------------------
-    const totalLowRateHours = siteAllocations.reduce(
+    const totalLowRateHours = roundHours(siteAllocations.reduce(
       (sum, s) => sum + s.lowRateHours,
       0,
-    );
-    const totalHighRateHours = siteAllocations.reduce(
+    ));
+    const totalHighRateHours = roundHours(siteAllocations.reduce(
       (sum, s) => sum + s.highRateHours,
       0,
-    );
+    ));
 
     const perSiteMatch = siteAllocations.every(
-      (s) => Math.abs(s.lowRateHours + s.highRateHours - s.rawHours) < 0.01,
+      (s) => Math.abs(s.lowRateHours + s.highRateHours - s.rawHours) < EPSILON,
     );
 
     const totalMatch =
-      Math.abs(totalLowRateHours + totalHighRateHours - currentMonthTotal) < 0.01;
+      Math.abs(totalLowRateHours + totalHighRateHours - roundHours(currentMonthTotal)) < EPSILON;
 
     const noNegative = siteAllocations.every(
       (s) => s.lowRateHours >= 0 && s.highRateHours >= 0 && s.rawHours >= 0,
@@ -544,12 +578,12 @@ export async function allocateEmployeeHours(
       threshold,
       previousCumulative,
       currentMonthTotal,
-      totalRawHours: previousCumulative + currentMonthTotal,
+      totalRawHours: roundHours(previousCumulative + currentMonthTotal),
       sites: siteAllocations,
       validation: {
         totalLowRateHours,
         totalHighRateHours,
-        lowRateHoursWithinThreshold: (previousCumulative + totalLowRateHours) <= threshold + 0.01,
+        lowRateHoursWithinThreshold: (previousCumulative + totalLowRateHours) <= threshold + EPSILON,
         hoursMatch: perSiteMatch && totalMatch && noNegative,
       },
     });
@@ -598,23 +632,22 @@ export async function allocateEmployeeHours(
       },
     });
 
-    const empHasBonus =
-      empInfo?.isTeamLeader || empInfo?.isSupervisor || false;
     const empThreshold = empInfo?.hoursThreshold || 1000;
 
-    // Direct hourly rates (PRD v2.0 — no divisors)
+    // Direct hourly rates — trade-aware premium (Helper 6.0 / other trades 7.0)
     const employeeCustomRateCheck = await db.employee.findUnique({
       where: { id: allocation.empId },
-      select: { customHourlyRate: true },
+      select: { customHourlyRate: true, trade: true },
     });
     const empCustomRate = employeeCustomRateCheck?.customHourlyRate;
-    
+    const empIsHelper = isHelperTrade(employeeCustomRateCheck?.trade);
+
     const calculatedRt =
       empCustomRate !== null && empCustomRate !== undefined
         ? empCustomRate
         : (aggregateTotal >= empThreshold
-          ? (empHasBonus ? (employee.isTeamLeader ? baseRates.tlHigh : baseRates.supHigh) : baseRates.standardHigh)
-          : (empHasBonus ? (employee.isTeamLeader ? baseRates.tlLow : baseRates.supLow) : baseRates.standardLow));
+          ? (empIsHelper ? baseRates.helperHigh : baseRates.tradeHigh)
+          : baseRates.baseLow);
 
     const isCustom = currentMonthWhRecord?.isCustom ?? false;
     const effectiveRt = isCustom
@@ -659,7 +692,7 @@ export async function allocateEmployeeHours(
           empName: allocation.empName,
           month: m,
           totalWorkingHours: monthTotal,
-          rtPerHour: baseRates.standardLow,
+          rtPerHour: baseRates.baseLow,
           isCustom: false,
         },
       });
@@ -683,19 +716,23 @@ export function computeAllocationSplit(params: {
   previousCumulative: number;
   currentMonthSiteHours: Array<{ siteId: string; siteName: string; rawHours: number }>;
   threshold: number;
-  isTeamLeader: boolean;
-  isSupervisor: boolean;
+  isTeamLeader?: boolean;
+  isSupervisor?: boolean;
+  /** The employee's effective trade — decides helper (6.0) vs trade (7.0) premium */
+  trade?: string | null;
   isCustomRate?: boolean;
   customRate?: number;
   customHourlyRate?: number | null;
-  baseRates?: { standardLow: number; standardHigh: number; tlLow: number; tlHigh: number; supLow: number; supHigh: number };
+  baseRates?: { baseLow: number; helperHigh: number; tradeHigh: number };
 }): SiteAllocation[] {
-  const { previousCumulative, currentMonthSiteHours, threshold, isTeamLeader, isSupervisor, isCustomRate = false, customRate, customHourlyRate = null, baseRates } = params;
-  const hasBonus = isTeamLeader || isSupervisor;
-  // Direct hourly rates (PRD v2.0 — no divisors)
-  const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
-  const baseLow = hasBonus ? (isTeamLeader ? br.tlLow : br.supLow) : br.standardLow;
-  const baseHigh = hasBonus ? (isTeamLeader ? br.tlHigh : br.supHigh) : br.standardHigh;
+  const { previousCumulative, currentMonthSiteHours, threshold, isCustomRate = false, customRate, customHourlyRate = null, baseRates, trade } = params;
+  // Trade-aware base rates: baseLow below threshold; helperHigh (Helpers)
+  // or tradeHigh (other trades) above threshold. TL/Sup flags no longer
+  // change the base tiers — only a defined TradeRate (+0.5) can override.
+  const br = baseRates ?? { baseLow: 3.5, helperHigh: 6.0, tradeHigh: 7.0 };
+  const isHelper = isHelperTrade(trade);
+  const baseLow = br.baseLow;
+  const baseHigh = isHelper ? br.helperHigh : br.tradeHigh;
   const effectiveCustomRate = customHourlyRate != null ? customHourlyRate : (customRate ?? baseLow);
   const effectiveIsCustom = isCustomRate || customHourlyRate != null;
   const lowRate = effectiveIsCustom && effectiveCustomRate
@@ -705,7 +742,7 @@ export function computeAllocationSplit(params: {
     ? effectiveCustomRate
     : baseHigh;
 
-  let consumedThreshold = Math.min(previousCumulative, threshold);
+  let consumedThreshold = Math.min(roundHours(previousCumulative), threshold);
   const siteAllocations: SiteAllocation[] = [];
 
   // Sort sites alphabetically by name for deterministic allocation
@@ -728,35 +765,16 @@ export function computeAllocationSplit(params: {
       continue;
     }
 
-    const remainingThreshold = threshold - consumedThreshold;
-    let lowRateHours = 0;
-    let highRateHours = 0;
-
-    if (site.rawHours <= 0) {
-      lowRateHours = 0;
-      highRateHours = 0;
-    } else if (remainingThreshold >= site.rawHours) {
-      // Case 1: Site fully inside remaining threshold
-      lowRateHours = site.rawHours;
-      highRateHours = 0;
-      consumedThreshold += site.rawHours;
-    } else if (remainingThreshold > 0) {
-      // Case 2: Site crosses the threshold
-      lowRateHours = remainingThreshold;
-      highRateHours = site.rawHours - remainingThreshold;
-      consumedThreshold = threshold;
-    } else {
-      // Case 3: Threshold already exhausted
-      lowRateHours = 0;
-      highRateHours = site.rawHours;
-    }
+    // Canonical drift-free split (payroll-math)
+    const split = computeThresholdSplit(site.rawHours, consumedThreshold, threshold);
+    consumedThreshold = Math.min(threshold, consumedThreshold + split.belowHours);
 
     siteAllocations.push({
       siteId: site.siteId,
       siteName: site.siteName,
       rawHours: site.rawHours,
-      lowRateHours,
-      highRateHours,
+      lowRateHours: split.belowHours,
+      highRateHours: split.aboveHours,
       lowRate,
       highRate,
     });

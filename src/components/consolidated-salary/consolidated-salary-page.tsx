@@ -48,6 +48,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useSearchNavigation } from '@/lib/use-search-navigation';
 import { resolveClientRate } from '@/lib/client-rate-resolver';
+import { computeSalary, computeBalance, roundMoney } from '@/lib/payroll-math';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * IMPORTANT — Single source of truth
@@ -56,7 +57,8 @@ import { resolveClientRate } from '@/lib/client-rate-resolver';
  * (`/api/accounts?month=...&year=...`). The Accounts endpoint already
  * resolves trade-specific rates via `buildTradeRateMap()` +
  * `buildEmployeeTradeMap()` (priority: customHourlyRate > trade rate >
- * role-based default 2.5/5.0 or 3.0/5.5). It also merges pending advances
+ * trade-aware base rates: baseLow below threshold, helperHigh/tradeHigh
+ * above). It also merges pending advances
  * and computes per-month working hours correctly.
  *
  * Previously this page fetched from `/api/salary-records` which had its OWN
@@ -221,7 +223,7 @@ function mergeApiEntries(
   siteName: string,
   branchId: string | null = null,
   branchName: string | null = null,
-  baseRates?: { standardLow: number; standardHigh: number; tlLow: number; tlHigh: number; supLow: number; supHigh: number } | null,
+  baseRates?: { baseLow: number; helperHigh: number; tradeHigh: number } | null,
 ): MergedEmployeeRow[] {
   const grouped = new Map<string, ApiEmployeeEntry[]>();
   for (const entry of entries) {
@@ -253,14 +255,18 @@ function mergeApiEntries(
 
     // ── Rate resolution via the canonical client-side resolver ──
     // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
+    // The effective trade decides the above-threshold premium:
+    // helperHigh (Helpers) vs tradeHigh (other trades).
     const assignedTradeRate: number | null = baseEntry.assignedTradeRate ?? null;
+    const effectiveTradeName = baseEntry.salaryRecord?.trade || baseEntry.assignedTrade || baseEntry.trade || 'Helper';
 
     const resolvedRate = resolveClientRate(
       customHourlyRate,
       assignedTradeRate,
       baseEntry.isTeamLeader,
       baseEntry.isSupervisor,
-      baseRates,
+      baseRates ?? null,
+      effectiveTradeName,
     );
     const lowRate = resolvedRate.lowRate;
     const highRate = resolvedRate.highRate;
@@ -275,10 +281,11 @@ function mergeApiEntries(
     // ALWAYS recompute salary from hours × rate using the live rates.
     // Do NOT use salaryRecord.totalSalary from the DB — it may be stale
     // (computed with an old rate before the trade was changed).
-    const standardSalary = lowRateHours * lowRate;
-    const premiumSalary = highRateHours * highRate;
-    const campSalary = campHours * lowRate; // camp_sitting uses the low rate
-    const totalSalary = standardSalary + premiumSalary + campSalary;
+    // All values go through the canonical payroll math.
+    const standardSalary = computeSalary(lowRateHours, lowRate);
+    const premiumSalary = computeSalary(highRateHours, highRate);
+    const campSalary = computeSalary(campHours, lowRate); // camp_sitting uses the low rate
+    const totalSalary = roundMoney(standardSalary + premiumSalary + campSalary);
 
     const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
     const advance = standardEntry?.salaryRecord?.advance ?? 0;
@@ -315,7 +322,7 @@ function mergeApiEntries(
       deduction,
       advance,
       // Clamp: salary never goes below 0
-      balanceSalary: Math.max(0, totalSalary - deduction - advance),
+      balanceSalary: computeBalance(totalSalary, deduction, advance),
       isPaid,
       standardRecordId: standardEntry?.salaryRecord?.id ?? null,
       premiumRecordId: premiumEntry?.salaryRecord?.id ?? null,
@@ -478,7 +485,7 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
       aboveSalaryComponent: totalAboveComponent,
       deduction: totalDeduction,
       advance: totalAdvance,
-      balanceSalary: totalGross - totalDeduction - totalAdvance,
+      balanceSalary: computeBalance(totalGross, totalDeduction, totalAdvance),
       isPaid,
       sites,
       branchId: primaryBranchRow?.branchId ?? null,
@@ -599,9 +606,9 @@ export function ConsolidatedSalaryPage() {
 
   // Base rates (fetched from /api/base-rates)
   const [baseRates, setBaseRates] = useState<{
-    standardLow: number; standardHigh: number;
-    tlLow: number; tlHigh: number;
-    supLow: number; supHigh: number;
+    baseLow: number;
+    helperHigh: number;
+    tradeHigh: number;
   } | null>(null);
 
   const yearOptions = useMemo(() => {

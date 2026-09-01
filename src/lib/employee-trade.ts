@@ -9,11 +9,13 @@ import { db } from '@/lib/db';
 // Trade priority for rate calculation:
 //   1. SalaryRecord trade (set by admin in Accounts) — HIGHEST priority
 //   2. EmployeeTrade (assigned from Sites page) — uses TradeRate.hourlyRate
-//   3. "Helper" (default) — uses threshold-based rates (2.5/5.0 or 3.0/5.5)
+//   3. "Helper" (default) — uses threshold-based base rates
+//      (baseLow below threshold; helperHigh / tradeHigh above)
 //
 // If the trade is "Helper", the rate is determined by the threshold
-// (below: 2.5/3.0, above: 5.0/5.5). For all other trades, the TradeRate
-// hourlyRate is used for both below and above threshold.
+// (below: baseLow for everyone, above: helperHigh). For all other trades,
+// the TradeRate hourlyRate is used when defined; otherwise the trade-aware
+// base rates apply (baseLow below, tradeHigh above).
 // ---------------------------------------------------------------------------
 
 export interface EmployeeTradeInfo {

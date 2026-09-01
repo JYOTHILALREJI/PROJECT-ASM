@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
     const hasCustom = allWhRecords.some(r => r.isCustom);
     const latestRate = allWhRecords.length > 0
       ? allWhRecords[allWhRecords.length - 1].rtPerHour
-      : 2.5;
+      : (await getBaseRates()).baseLow;
 
     // Auto-calculate the aggregate rate using the canonical resolver
     // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
@@ -125,6 +125,7 @@ export async function GET(request: NextRequest) {
       employee.isTeamLeader,
       employee.isSupervisor,
       baseRates,
+      isHelper,
     );
     const lowRate = resolvedRate.lowRate;
     const highRate = resolvedRate.highRate;

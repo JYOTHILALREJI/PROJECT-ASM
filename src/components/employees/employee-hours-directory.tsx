@@ -52,6 +52,7 @@ interface EmployeeHoursSummary {
   employeeId: string;
   currentSite: string | null;
   trade: string | null;
+  isHelper?: boolean;
   isTeamLeader: boolean;
   isSupervisor: boolean;
   customHourlyRate: number | null;
@@ -350,23 +351,21 @@ export function EmployeeHoursDirectory() {
     }
   }, [changedRowIds, editableRows, toast, fetchData]);
 
-  // ── Compute effective rate from direct rate table (PRD v2.0) ──
+  // ── Effective rate — use the API-resolved value (canonical resolver),
+  // which accounts for custom rates, trade rates and the trade-aware
+  // premium (helperHigh for Helpers, tradeHigh for other trades). ──
   const getEffectiveRate = (emp: EmployeeHoursSummary): number => {
-    if (emp.customHourlyRate != null) return emp.customHourlyRate;
-    const hasBonus = emp.isTeamLeader || emp.isSupervisor;
-    const lowRate = hasBonus ? 3.0 : 2.5;
-    const highRate = hasBonus ? 5.5 : 5.0;
-    return emp.thresholdStatus === 'above' ? highRate : lowRate;
+    return emp.effectiveRate;
   };
 
   // ── Rate badge ──
   const RateBadge = ({ emp }: { emp: EmployeeHoursSummary }) => {
-    const rate = getEffectiveRate(emp);
     const display = emp.customHourlyRate != null
       ? `Custom (${emp.customHourlyRate})`
-      : String(rate);
+      : (emp.rateLabel || String(emp.effectiveRate));
 
-    // Color coding: 2.5/3.0 = emerald (below threshold), 5.0/5.5 = amber (above threshold), custom = violet
+    // Color coding: base = emerald (below threshold), premium = amber (above
+    // threshold — helper or trade), custom = violet
     let badgeClass: string;
     if (emp.customHourlyRate != null) {
       badgeClass = 'bg-violet-500/15 text-violet-400 border-violet-500/25';
@@ -577,10 +576,9 @@ export function EmployeeHoursDirectory() {
                 </SelectTrigger>
                 <SelectContent className="bg-slate-800 border-slate-700">
                   <SelectItem value="all">All Rates</SelectItem>
-                  <SelectItem value="2.5">2.5 (Std Below)</SelectItem>
-                  <SelectItem value="3.0">3.0 (TL Below)</SelectItem>
-                  <SelectItem value="5.0">5.0 (Std Above)</SelectItem>
-                  <SelectItem value="5.5">5.5 (TL Above)</SelectItem>
+                  <SelectItem value="base">Base (Below Threshold)</SelectItem>
+                  <SelectItem value="helper_premium">Helper Premium (Above)</SelectItem>
+                  <SelectItem value="trade_premium">Trade Premium (Above)</SelectItem>
                   <SelectItem value="Custom">Custom</SelectItem>
                 </SelectContent>
               </Select>

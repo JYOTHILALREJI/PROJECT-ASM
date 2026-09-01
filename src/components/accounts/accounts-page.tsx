@@ -53,6 +53,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { useSearchNavigation } from '@/lib/use-search-navigation';
 import { resolveClientRate } from '@/lib/client-rate-resolver';
+import { computeSalary, computeBalance, roundMoney, computeThresholdSplit } from '@/lib/payroll-math';
 
 /* ───────── Types ───────── */
 
@@ -234,7 +235,7 @@ function mergeApiEntries(
   entries: ApiEmployeeEntry[],
   siteId: string,
   siteName: string,
-  baseRates?: { standardLow: number; standardHigh: number; tlLow: number; tlHigh: number; supLow: number; supHigh: number } | null,
+  baseRates?: { baseLow: number; helperHigh: number; tradeHigh: number } | null,
 ): MergedEmployeeRow[] {
   const grouped = new Map<string, ApiEmployeeEntry[]>();
   for (const entry of entries) {
@@ -268,14 +269,18 @@ function mergeApiEntries(
 
     // ── Rate resolution via the canonical client-side resolver ──
     // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
+    // The effective trade decides the above-threshold premium:
+    // helperHigh (Helpers) vs tradeHigh (other trades).
     const assignedTradeRate: number | null = baseEntry.assignedTradeRate ?? null;
+    const effectiveTradeName = baseEntry.salaryRecord?.trade || baseEntry.assignedTrade || baseEntry.trade || 'Helper';
 
     const resolvedRate = resolveClientRate(
       customHourlyRate,
       assignedTradeRate,
       baseEntry.isTeamLeader,
       baseEntry.isSupervisor,
-      baseRates,
+      baseRates ?? null,
+      effectiveTradeName,
     );
     const lowRate = resolvedRate.lowRate;
     const highRate = resolvedRate.highRate;
@@ -291,11 +296,11 @@ function mergeApiEntries(
     // Do NOT use salaryRecord.totalSalary from the DB — it may be stale
     // (computed with an old rate before the trade was changed).
     // The admin can still edit deduction/advance/balance; totalSalary is
-    // always hours × rate.
-    const standardSalary = lowRateHours * lowRate;
-    const premiumSalary = highRateHours * highRate;
-    const campSalary = campHours * lowRate; // camp_sitting uses the low rate
-    const totalSalary = standardSalary + premiumSalary + campSalary;
+    // always hours × rate. All values go through the canonical payroll math.
+    const standardSalary = computeSalary(lowRateHours, lowRate);
+    const premiumSalary = computeSalary(highRateHours, highRate);
+    const campSalary = computeSalary(campHours, lowRate); // camp_sitting uses the low rate
+    const totalSalary = roundMoney(standardSalary + premiumSalary + campSalary);
 
     const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
     const advance = standardEntry?.salaryRecord?.advance ?? 0;
@@ -331,7 +336,7 @@ function mergeApiEntries(
       advance,
       // Clamp: salary never goes below 0. If advance + deduction > totalSalary,
       // cap the advance at totalSalary - deduction so balance = 0.
-      balanceSalary: Math.max(0, totalSalary - deduction - advance),
+      balanceSalary: computeBalance(totalSalary, deduction, advance),
       isPaid,
       standardRecordId: standardEntry?.salaryRecord?.id ?? null,
       premiumRecordId: premiumEntry?.salaryRecord?.id ?? null,
@@ -456,16 +461,16 @@ export function AccountsPage() {
 
   // Base rates (configurable from Manage Rates dialog)
   const [baseRates, setBaseRates] = useState<{
-    standardLow: number; standardHigh: number;
-    tlLow: number; tlHigh: number;
-    supLow: number; supHigh: number;
+    baseLow: number;
+    helperHigh: number;
+    tradeHigh: number;
   } | null>(null);
   const [showRatesDialog, setShowRatesDialog] = useState(false);
   const [ratesSaving, setRatesSaving] = useState(false);
   const [ratesForm, setRatesForm] = useState({
-    standardLow: 2.5, standardHigh: 5.0,
-    tlLow: 3.0, tlHigh: 5.5,
-    supLow: 3.0, supHigh: 5.5,
+    baseLow: 3.5,
+    helperHigh: 6.0,
+    tradeHigh: 7.0,
   });
 
   const yearOptions = useMemo(() => {
@@ -640,69 +645,61 @@ export function AccountsPage() {
         // TypeScript's view and break the SetStateAction type).
         const u: MergedEmployeeRow = { ...emp, [field]: value } as MergedEmployeeRow;
 
-        // Recalculate salary fields when relevant fields change
+        // Recalculate salary fields when relevant fields change — all
+        // computations go through the canonical payroll math (rounded,
+        // clamped, drift-free).
         if (field === 'totalHours') {
           if (u.isCustomRate) {
             u.lowRateHours = u.totalHours;
             u.highRateHours = 0;
-            u.totalSalary = u.lowRateHours * u.lowRate;
-            u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+            u.totalSalary = computeSalary(u.lowRateHours, u.lowRate);
+            u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
             u.rateTier = 'standard';
           } else {
+            // Canonical drift-free threshold split (same as allocation engine)
             const threshold = u.hoursThreshold || 1000;
-            const cumulativeBefore = u.previousCumulativeHours;
-            const remainingThreshold = threshold - cumulativeBefore;
-            const totalHrs = u.totalHours;
+            const split = computeThresholdSplit(u.totalHours, u.previousCumulativeHours, threshold);
+            u.lowRateHours = split.belowHours;
+            u.highRateHours = split.aboveHours;
 
-            if (remainingThreshold <= 0) {
-              u.lowRateHours = 0;
-              u.highRateHours = totalHrs;
-            } else if (remainingThreshold >= totalHrs) {
-              u.lowRateHours = totalHrs;
-              u.highRateHours = 0;
-            } else {
-              u.lowRateHours = remainingThreshold;
-              u.highRateHours = totalHrs - remainingThreshold;
-            }
-
-            u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-            u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+            u.totalSalary = roundMoney(computeSalary(u.lowRateHours, u.lowRate) + computeSalary(u.highRateHours, u.highRate));
+            u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
             u.rateTier = u.highRateHours > 0 ? (u.lowRateHours > 0 ? 'split' : 'premium') : 'standard';
           }
         }
 
         if (field === 'deduction') {
-          u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
+          u.totalSalary = roundMoney(computeSalary(u.lowRateHours, u.lowRate) + computeSalary(u.highRateHours, u.highRate));
           // Clamp balanceSalary to never go below 0.
           // The advance + deduction should never exceed totalSalary.
           // If it does, cap the deduction so balance = 0 (salary never negative).
           const maxDeduction = Math.max(0, u.totalSalary - u.advance);
           u.deduction = Math.min(u.deduction, maxDeduction);
-          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+          u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
         }
 
         if (field === 'lowRateHours') {
-          u.totalHours = u.lowRateHours + u.highRateHours;
-          u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+          u.totalHours = roundMoney(u.lowRateHours + u.highRateHours);
+          u.totalSalary = roundMoney(computeSalary(u.lowRateHours, u.lowRate) + computeSalary(u.highRateHours, u.highRate));
+          u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
           u.rateTier = u.highRateHours > 0 ? (u.lowRateHours > 0 ? 'split' : 'premium') : 'standard';
         }
 
         if (field === 'highRateHours') {
-          u.totalHours = u.lowRateHours + u.highRateHours;
-          u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+          u.totalHours = roundMoney(u.lowRateHours + u.highRateHours);
+          u.totalSalary = roundMoney(computeSalary(u.lowRateHours, u.lowRate) + computeSalary(u.highRateHours, u.highRate));
+          u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
           u.rateTier = u.highRateHours > 0 ? (u.lowRateHours > 0 ? 'split' : 'premium') : 'standard';
         }
 
         if (field === 'lowRate') {
-          u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+          u.totalSalary = roundMoney(computeSalary(u.lowRateHours, u.lowRate) + computeSalary(u.highRateHours, u.highRate));
+          u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
         }
 
         if (field === 'highRate') {
-          u.totalSalary = u.lowRateHours * u.lowRate + u.highRateHours * u.highRate;
-          u.balanceSalary = Math.max(0, u.totalSalary - u.deduction - u.advance);
+          u.totalSalary = roundMoney(computeSalary(u.lowRateHours, u.lowRate) + computeSalary(u.highRateHours, u.highRate));
+          u.balanceSalary = computeBalance(u.totalSalary, u.deduction, u.advance);
         }
 
         // Also clamp for the 'totalHours' field case (non-custom rate)
@@ -861,8 +858,8 @@ export function AccountsPage() {
             highRateHours: 0,
             previousCumulativeHours: 0,
             hoursThreshold: 1000,
-            lowRate: baseRates?.standardLow ?? 2.5,
-            highRate: baseRates?.standardHigh ?? 5.0,
+            lowRate: baseRates?.baseLow ?? 3.5,
+            highRate: baseRates?.helperHigh ?? 6.0,
             totalSalary: 0,
             deduction: 0,
             advance: 0,
@@ -1250,8 +1247,8 @@ export function AccountsPage() {
   }, []);
 
   // ── Column headers ──
-  const lowRateHeader = `Rate ${baseRates?.standardLow ?? 2.5}/${baseRates?.tlLow ?? 3.0}`;
-  const highRateHeader = `Rate ${baseRates?.standardHigh ?? 5.0}/${baseRates?.tlHigh ?? 5.5}`;
+  const lowRateHeader = `Base Rate ${baseRates?.baseLow ?? 3.5}`;
+  const highRateHeader = `Premium ${baseRates?.helperHigh ?? 6.0} (Helper) / ${baseRates?.tradeHigh ?? 7.0} (Trade)`;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1797,11 +1794,13 @@ export function AccountsPage() {
                                           handleCellChange(site.id, index, 'lowRate', tr.hourlyRate);
                                           handleCellChange(site.id, index, 'highRate', tr.hourlyRate);
                                         } else {
-                                          // Reset to standard rates if no trade rate
-                                          const hasBonus = emp.isTeamLeader || emp.isSupervisor;
-                                          const br = baseRates ?? { standardLow: 2.5, standardHigh: 5.0, tlLow: 3.0, tlHigh: 5.5, supLow: 3.0, supHigh: 5.5 };
-                                          handleCellChange(site.id, index, 'lowRate', hasBonus ? (emp.isTeamLeader ? br.tlLow : br.supLow) : br.standardLow);
-                                          handleCellChange(site.id, index, 'highRate', hasBonus ? (emp.isTeamLeader ? br.tlHigh : br.supHigh) : br.standardHigh);
+                                          // Reset to the trade-aware base rates:
+                                          // baseLow below threshold; helperHigh for
+                                          // Helpers, tradeHigh for other trades.
+                                          const br = baseRates ?? { baseLow: 3.5, helperHigh: 6.0, tradeHigh: 7.0 };
+                                          const isHelper = newTrade.trim().toLowerCase() === 'helper';
+                                          handleCellChange(site.id, index, 'lowRate', br.baseLow);
+                                          handleCellChange(site.id, index, 'highRate', isHelper ? br.helperHigh : br.tradeHigh);
                                         }
                                       }}
                                       className="h-6 text-[11px] bg-slate-900/80 border-slate-600/50 text-white w-full py-0 px-1.5 rounded"
@@ -2081,51 +2080,44 @@ export function AccountsPage() {
               Manage Base Rates
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Set the base hourly rates for standard workers, Team Leaders, and Supervisors.
-              These rates are used when no trade rate or custom rate is set.
+              Set the base hourly rate (below threshold) and the premium rates
+              after the threshold. Helpers earn the helper premium; every other
+              trade earns the trade premium. Custom and trade rates still
+              override these defaults.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {/* Standard Workers */}
+            {/* Base rate — everyone below threshold */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Standard Workers</div>
+              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Base Rate (Below Threshold)</div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-400 w-24">Below Threshold</label>
-                <Input type="number" step="0.1" min="0" value={ratesForm.standardLow}
-                  onChange={(e) => setRatesForm({ ...ratesForm, standardLow: parseFloat(e.target.value) || 0 })}
+                <label className="text-xs text-slate-400 w-40">All Employees</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.baseLow}
+                  onChange={(e) => setRatesForm({ ...ratesForm, baseLow: parseFloat(e.target.value) || 0 })}
                   className="bg-slate-900 border-slate-600 text-white h-8" />
-                <label className="text-xs text-slate-400 w-24">Above Threshold</label>
-                <Input type="number" step="0.1" min="0" value={ratesForm.standardHigh}
-                  onChange={(e) => setRatesForm({ ...ratesForm, standardHigh: parseFloat(e.target.value) || 0 })}
-                  className="bg-slate-900 border-slate-600 text-white h-8" />
+                <span className="text-xs text-slate-500">/hr</span>
               </div>
             </div>
-            {/* Team Leaders */}
+            {/* Above threshold — helper premium */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Team Leaders</div>
+              <div className="text-xs font-semibold text-amber-300 uppercase tracking-wide">After Threshold — Helpers</div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-400 w-24">Below Threshold</label>
-                <Input type="number" step="0.1" min="0" value={ratesForm.tlLow}
-                  onChange={(e) => setRatesForm({ ...ratesForm, tlLow: parseFloat(e.target.value) || 0 })}
+                <label className="text-xs text-slate-400 w-40">Helper Premium</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.helperHigh}
+                  onChange={(e) => setRatesForm({ ...ratesForm, helperHigh: parseFloat(e.target.value) || 0 })}
                   className="bg-slate-900 border-slate-600 text-white h-8" />
-                <label className="text-xs text-slate-400 w-24">Above Threshold</label>
-                <Input type="number" step="0.1" min="0" value={ratesForm.tlHigh}
-                  onChange={(e) => setRatesForm({ ...ratesForm, tlHigh: parseFloat(e.target.value) || 0 })}
-                  className="bg-slate-900 border-slate-600 text-white h-8" />
+                <span className="text-xs text-slate-500">/hr</span>
               </div>
             </div>
-            {/* Supervisors */}
+            {/* Above threshold — trade premium */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Supervisors</div>
+              <div className="text-xs font-semibold text-sky-300 uppercase tracking-wide">After Threshold — Other Trades</div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-400 w-24">Below Threshold</label>
-                <Input type="number" step="0.1" min="0" value={ratesForm.supLow}
-                  onChange={(e) => setRatesForm({ ...ratesForm, supLow: parseFloat(e.target.value) || 0 })}
+                <label className="text-xs text-slate-400 w-40">Trade Premium</label>
+                <Input type="number" step="0.1" min="0" value={ratesForm.tradeHigh}
+                  onChange={(e) => setRatesForm({ ...ratesForm, tradeHigh: parseFloat(e.target.value) || 0 })}
                   className="bg-slate-900 border-slate-600 text-white h-8" />
-                <label className="text-xs text-slate-400 w-24">Above Threshold</label>
-                <Input type="number" step="0.1" min="0" value={ratesForm.supHigh}
-                  onChange={(e) => setRatesForm({ ...ratesForm, supHigh: parseFloat(e.target.value) || 0 })}
-                  className="bg-slate-900 border-slate-600 text-white h-8" />
+                <span className="text-xs text-slate-500">/hr</span>
               </div>
             </div>
           </div>

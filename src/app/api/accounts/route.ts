@@ -602,6 +602,7 @@ export async function GET(request: NextRequest) {
           emp?.isTeamLeader ?? false,
           emp?.isSupervisor ?? false,
           baseRates,
+          isHelper,
         );
         const lowRate = resolvedRate.lowRate;
         const highRate = resolvedRate.highRate;
@@ -614,7 +615,7 @@ export async function GET(request: NextRequest) {
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
         const customRtPerHour = isCustom
           ? (employeeCustomRate ?? (tradeRateVal !== null ? (hasBonus ? tradeRateVal + 0.5 : tradeRateVal) : lowRate))
-          : (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : baseRates.standardLow));
+          : (currentMonthWh?.rtPerHour ?? (empWhRecords.length > 0 ? empWhRecords[empWhRecords.length - 1].rtPerHour : baseRates.baseLow));
 
         const calculatedRtPerHour = isCustom
           ? customRtPerHour
@@ -693,6 +694,7 @@ export async function GET(request: NextRequest) {
           emp?.isTeamLeader ?? false,
           emp?.isSupervisor ?? false,
           baseRates,
+          stubIsHelper,
         );
         const lowRate = resolvedRate.lowRate;
         const highRate = resolvedRate.highRate;
@@ -704,7 +706,7 @@ export async function GET(request: NextRequest) {
         const currentMonthWh = empWhRecords.find((wh) => wh.month === month);
         const customRtPerHour = isCustom
           ? (employeeCustomRate ?? (tradeRateVal !== null ? (hasBonus ? tradeRateVal + 0.5 : tradeRateVal) : lowRate))
-          : (currentMonthWh?.rtPerHour ?? baseRates.standardLow);
+          : (currentMonthWh?.rtPerHour ?? baseRates.baseLow);
 
         const calculatedRtPerHour = isCustom
           ? customRtPerHour

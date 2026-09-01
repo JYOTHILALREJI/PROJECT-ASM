@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { allocateEmployeeHours } from '@/lib/allocation-engine';
 import { safeFindPendingAdvances } from '@/lib/safe-advance';
+import { getBaseRates } from '@/lib/base-rates';
+import { buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { resolveRateSync } from '@/lib/rate-resolver';
+import { isHelperTrade, normalizeTrade } from '@/lib/trade-utils';
+import { roundMoney, roundHours, computeBalance, computeSalary } from '@/lib/payroll-math';
 
 // GET /api/salary-records?siteId=xxx&month=YYYY-MM&year=YYYY
 // If siteId is not provided, returns all records for the month (for consolidated view)
@@ -166,6 +172,12 @@ export async function GET(request: NextRequest) {
         siteMap.get(key)!.push(record);
       }
 
+      // Base rates + trade rates for canonical gross-salary computation
+      const [baseRates, tradeRateMap] = await Promise.all([
+        getBaseRates(),
+        buildTradeRateMap(),
+      ]);
+
       // Fetch site details
       const sites = await db.site.findMany({
         where: { id: { in: Array.from(siteMap.keys()) } },
@@ -173,16 +185,19 @@ export async function GET(request: NextRequest) {
       });
       const siteInfoMap = new Map(sites.map(s => [s.id, s]));
 
-      // Helper: compute divisor-based gross salary for a set of records
+      // Helper: compute gross salary for a set of records using the
+      // canonical rate resolution (custom > trade(+0.5 TL/Sup) > base rates
+      // with trade-aware premium: helperHigh for Helpers, tradeHigh for trades).
       const computeGrossSalary = (recs: typeof records) => {
         // Merge records by empId
-        const empMap = new Map<string, { belowHours: number; aboveHours: number; isTL: boolean; isSup: boolean; customRate: number | null }>();
+        const empMap = new Map<string, { belowHours: number; aboveHours: number; trade: string | null; isTL: boolean; isSup: boolean; customRate: number | null }>();
         for (const r of recs) {
           const empKey = r.empId;
           if (!empMap.has(empKey)) {
             empMap.set(empKey, {
               belowHours: 0,
               aboveHours: 0,
+              trade: r.trade || r.employee?.trade || null,
               isTL: r.employee?.isTeamLeader ?? false,
               isSup: r.employee?.isSupervisor ?? false,
               customRate: r.employee?.customHourlyRate ?? null,
@@ -190,21 +205,32 @@ export async function GET(request: NextRequest) {
           }
           const entry = empMap.get(empKey)!;
           if (r.rateTier === 'standard') {
-            entry.belowHours += r.totalHours;
+            entry.belowHours = roundHours(entry.belowHours + r.totalHours);
           } else if (r.rateTier === 'premium') {
-            entry.aboveHours += r.totalHours;
+            entry.aboveHours = roundHours(entry.aboveHours + r.totalHours);
           }
         }
 
         let gross = 0;
         for (const [, emp] of empMap) {
           if (emp.customRate !== null && emp.customRate > 0) {
-            gross += (emp.belowHours + emp.aboveHours) * emp.customRate;
+            gross = roundMoney(gross + (emp.belowHours + emp.aboveHours) * emp.customRate);
           } else {
-            const hasBonus = emp.isTL || emp.isSup;
-            const lowDivisor = hasBonus ? 3.0 : 1.0;
-            const highDivisor = hasBonus ? 5.5 : 1.0;
-            gross += (emp.belowHours * 2.5) / lowDivisor + (emp.aboveHours * 5.0) / highDivisor;
+            const isHelper = isHelperTrade(emp.trade);
+            const tradeRateVal = !isHelper && emp.trade
+              ? (tradeRateMap.get(normalizeTrade(emp.trade)) ?? null)
+              : null;
+            const resolved = resolveRateSync(
+              null,
+              tradeRateVal,
+              emp.isTL,
+              emp.isSup,
+              baseRates,
+              isHelper,
+            );
+            gross = roundMoney(
+              gross + computeSalary(emp.belowHours, resolved.lowRate) + computeSalary(emp.aboveHours, resolved.highRate),
+            );
           }
         }
         return gross;
@@ -402,7 +428,16 @@ export async function POST(request: NextRequest) {
     let created = 0;
     let slNo = 1;
 
-    for (const emp of employees) {
+      // Determine rate via the canonical resolver — replaces the old
+      // hardcoded 2.5/divisor formula. The allocation engine re-splits these
+      // records into standard/premium with trade-aware rates right after.
+      const [baseRates, tradeRateMap, employeeTradeMap] = await Promise.all([
+        getBaseRates(),
+        buildTradeRateMap(),
+        buildEmployeeTradeMap(),
+      ]);
+
+      for (const emp of employees) {
       // Get total hours: prefer working hours table, fallback to attendance calculation
       const whData = workingHoursMap.get(emp.id);
       const attData = attendanceHoursMap.get(emp.id);
@@ -410,24 +445,61 @@ export async function POST(request: NextRequest) {
       let totalHours = 0;
 
       if (whData) {
-        totalHours = whData.totalWorkingHours;
+        totalHours = roundHours(whData.totalWorkingHours);
       } else if (attData) {
         // Estimate: each present day = 8 hours + overtime hours
-        totalHours = attData.presentDays * 8 + attData.overtimeHours;
+        totalHours = roundHours(attData.presentDays * 8 + attData.overtimeHours);
       }
 
-      // Determine rate based on employee type (divisor-based formula)
-      const hasBonus = emp.isTeamLeader || emp.isSupervisor;
-      const lowDivisor = hasBonus ? 3.0 : 1.0;
-      const rtPerHour = 2.5 / lowDivisor;  // Standard: 2.5, TL/Sup: 0.8333
+      // Resolve the low rate: custom > trade(+0.5 if TL/Sup) > baseLow
+      const tradeInfo = employeeTradeMap.get(emp.id);
+      const effectiveTrade = normalizeTrade(emp.trade || tradeInfo?.trade);
+      const isHelper = isHelperTrade(effectiveTrade);
+      const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTrade) ?? null) : null;
+      const resolved = resolveRateSync(
+        emp.customHourlyRate ?? null,
+        tradeRateVal,
+        emp.isTeamLeader,
+        emp.isSupervisor,
+        baseRates,
+        isHelper,
+      );
+      const rtPerHour = resolved.lowRate;
 
-      const totalSalary = totalHours * rtPerHour;
+      const totalSalary = computeSalary(totalHours, rtPerHour);
       const deduction = 0;
       const advance = 0;
-      const balanceSalary = totalSalary - deduction - advance;
+      const balanceSalary = totalSalary;
 
-      await db.salaryRecord.create({
-        data: {
+      // Upsert (not blind create): a soft-deleted record for the same
+      // (empId, siteId, month, year, rateTier) still occupies the unique
+      // key, so a plain create() would crash. Revive it instead.
+      await db.salaryRecord.upsert({
+        where: {
+          empId_siteId_month_year_rateTier: {
+            empId: emp.id,
+            siteId,
+            month,
+            year,
+            rateTier: 'standard',
+          },
+        },
+        update: {
+          empName: emp.fullName,
+          siteName: site.name,
+          nationality: emp.nationality || '',
+          trade: effectiveTrade,
+          employeeCode: emp.employeeId,
+          totalHours,
+          rtPerHour,
+          totalSalary,
+          deduction,
+          advance,
+          balanceSalary,
+          isDeleted: false,
+          deletedAt: null,
+        },
+        create: {
           empId: emp.id,
           empName: emp.fullName,
           siteId,
@@ -435,7 +507,7 @@ export async function POST(request: NextRequest) {
           month,
           year,
           nationality: emp.nationality || '',
-          trade: 'Helper',
+          trade: effectiveTrade, // resolved from employee/EmployeeTrade — not hardcoded
           employeeCode: emp.employeeId,
           slNo,
           totalHours,
@@ -518,14 +590,14 @@ export async function PUT(request: NextRequest) {
     }
 
     // Recalculate totalSalary and balanceSalary using new values if provided
-    const newTotalHours = typeof totalHours === 'number' ? Math.max(0, totalHours) : existing.totalHours;
-    const newRtPerHour = typeof rtPerHour === 'number' ? Math.max(0, rtPerHour) : existing.rtPerHour;
-    const newDeduction = typeof deduction === 'number' ? Math.max(0, deduction) : existing.deduction;
-    const newAdvance = typeof advance === 'number' ? Math.max(0, advance) : existing.advance;
+    const newTotalHours = typeof totalHours === 'number' ? roundHours(totalHours) : existing.totalHours;
+    const newRtPerHour = typeof rtPerHour === 'number' ? roundMoney(Math.max(0, rtPerHour)) : existing.rtPerHour;
+    const newDeduction = typeof deduction === 'number' ? Math.max(0, roundMoney(deduction)) : existing.deduction;
+    const newAdvance = typeof advance === 'number' ? Math.max(0, roundMoney(advance)) : existing.advance;
 
-    const newTotalSalary = newTotalHours * newRtPerHour;
+    const newTotalSalary = computeSalary(newTotalHours, newRtPerHour);
     // Clamp: salary never goes below 0
-    const newBalanceSalary = Math.max(0, newTotalSalary - newDeduction - newAdvance);
+    const newBalanceSalary = computeBalance(newTotalSalary, newDeduction, newAdvance);
 
     updateData.totalSalary = newTotalSalary;
     updateData.balanceSalary = newBalanceSalary;

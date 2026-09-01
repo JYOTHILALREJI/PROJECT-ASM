@@ -275,6 +275,7 @@ export async function syncEmployeeSalaryFromAttendance(
     employee.isTeamLeader,
     employee.isSupervisor,
     baseRates,
+    isHelper,
   );
   const defaultLowRate = resolvedRate.lowRate;
 

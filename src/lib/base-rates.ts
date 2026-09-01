@@ -4,27 +4,27 @@ import { db } from '@/lib/db';
 // Base Rate Helper
 // ---------------------------------------------------------------------------
 // Reads the singleton BaseRate record from the DB. If it doesn't exist,
-// creates it with default values (2.5/5.0 for standard, 3.0/5.5 for TL/Sup).
+// creates it with default values:
+//   baseLow    = 3.5  → below-threshold rate for EVERY employee
+//   helperHigh = 6.0  → above-threshold rate for Helpers
+//   tradeHigh  = 7.0  → above-threshold rate for other trades
 //
 // Used by all rate-calculation code paths instead of hardcoded values.
 // ---------------------------------------------------------------------------
 
 export interface BaseRates {
-  standardLow: number;
-  standardHigh: number;
-  tlLow: number;
-  tlHigh: number;
-  supLow: number;
-  supHigh: number;
+  /** Below-threshold base rate — applies to every employee */
+  baseLow: number;
+  /** Above-threshold premium rate for Helpers */
+  helperHigh: number;
+  /** Above-threshold premium rate for other trades */
+  tradeHigh: number;
 }
 
-const DEFAULT_RATES: BaseRates = {
-  standardLow: 2.5,
-  standardHigh: 5.0,
-  tlLow: 3.0,
-  tlHigh: 5.5,
-  supLow: 3.0,
-  supHigh: 5.5,
+export const DEFAULT_RATES: BaseRates = {
+  baseLow: 3.5,
+  helperHigh: 6.0,
+  tradeHigh: 7.0,
 };
 
 let cachedRates: BaseRates | null = null;
@@ -37,33 +37,20 @@ export async function getBaseRates(): Promise<BaseRates> {
   if (cachedRates) return cachedRates;
 
   try {
-    // Check if db.baseRate exists (might not if prisma generate wasn't run
-    // after the schema change that added the BaseRate model)
-    const baseRateModel = (db as Record<string, unknown>).baseRate;
-    if (!baseRateModel || typeof baseRateModel !== 'object') {
-      return DEFAULT_RATES;
-    }
-    const model = baseRateModel as {
-      findUnique: (args: Record<string, unknown>) => Promise<Record<string, number> | null>;
-      create: (args: Record<string, unknown>) => Promise<Record<string, number>>;
-    };
-    let record = await model.findUnique({ where: { id: 'singleton' } });
+    let record = await db.baseRate.findUnique({ where: { id: 'singleton' } });
     if (!record) {
       // Create with defaults
-      record = await model.create({ data: { id: 'singleton' } });
+      record = await db.baseRate.create({ data: { id: 'singleton' } });
     }
     cachedRates = {
-      standardLow: record.standardLow,
-      standardHigh: record.standardHigh,
-      tlLow: record.tlLow,
-      tlHigh: record.tlHigh,
-      supLow: record.supLow,
-      supHigh: record.supHigh,
+      baseLow: Number(record.baseLow) || DEFAULT_RATES.baseLow,
+      helperHigh: Number(record.helperHigh) || DEFAULT_RATES.helperHigh,
+      tradeHigh: Number(record.tradeHigh) || DEFAULT_RATES.tradeHigh,
     };
     return cachedRates;
   } catch {
     // If BaseRate table doesn't exist yet (before prisma db push), use defaults
-    return DEFAULT_RATES;
+    return { ...DEFAULT_RATES };
   }
 }
 
@@ -72,46 +59,41 @@ export async function getBaseRates(): Promise<BaseRates> {
  * are used immediately.
  */
 export async function updateBaseRates(rates: BaseRates): Promise<void> {
+  const safeRates: BaseRates = {
+    baseLow: Number(rates.baseLow) || DEFAULT_RATES.baseLow,
+    helperHigh: Number(rates.helperHigh) || DEFAULT_RATES.helperHigh,
+    tradeHigh: Number(rates.tradeHigh) || DEFAULT_RATES.tradeHigh,
+  };
   try {
-    const baseRateModel = (db as Record<string, unknown>).baseRate;
-    if (!baseRateModel || typeof baseRateModel !== 'object') {
-      cachedRates = rates;
-      return;
-    }
-    const model = baseRateModel as {
-      upsert: (args: Record<string, unknown>) => Promise<unknown>;
-    };
-    await model.upsert({
+    await db.baseRate.upsert({
       where: { id: 'singleton' },
       update: {
-        standardLow: rates.standardLow,
-        standardHigh: rates.standardHigh,
-        tlLow: rates.tlLow,
-        tlHigh: rates.tlHigh,
-        supLow: rates.supLow,
-        supHigh: rates.supHigh,
+        baseLow: safeRates.baseLow,
+        helperHigh: safeRates.helperHigh,
+        tradeHigh: safeRates.tradeHigh,
       },
       create: {
         id: 'singleton',
-        ...rates,
+        ...safeRates,
       },
     });
   } catch {
     // Table doesn't exist — ignore
   }
-  cachedRates = rates; // Always update cache
+  cachedRates = safeRates; // Always update cache
 }
 
 /**
- * Get the low/high rates for an employee based on their role.
- * Uses BaseRate from DB (not hardcoded).
+ * Get the low/high rates for an employee based on their trade.
+ *   - Below threshold: baseLow (same for everyone)
+ *   - Above threshold: helperHigh for Helpers, tradeHigh for other trades
  */
-export async function getRoleBasedRates(
-  isTeamLeader: boolean,
-  isSupervisor: boolean,
-): Promise<{ lowRate: number; highRate: number }> {
-  const base = await getBaseRates();
-  if (isTeamLeader) return { lowRate: base.tlLow, highRate: base.tlHigh };
-  if (isSupervisor) return { lowRate: base.supLow, highRate: base.supHigh };
-  return { lowRate: base.standardLow, highRate: base.standardHigh };
+export function getTradeBasedRates(
+  isHelper: boolean,
+  baseRates: BaseRates,
+): { lowRate: number; highRate: number } {
+  return {
+    lowRate: baseRates.baseLow,
+    highRate: isHelper ? baseRates.helperHigh : baseRates.tradeHigh,
+  };
 }

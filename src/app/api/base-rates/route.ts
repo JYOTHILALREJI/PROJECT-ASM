@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { getBaseRates, updateBaseRates } from '@/lib/base-rates';
+import { updateBaseRates, getBaseRates } from '@/lib/base-rates';
+import { roundMoney } from '@/lib/payroll-math';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,32 +19,37 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { standardLow, standardHigh, tlLow, tlHigh, supLow, supHigh } = body;
+    const { baseLow, helperHigh, tradeHigh } = body;
 
     if (
-      typeof standardLow !== 'number' ||
-      typeof standardHigh !== 'number' ||
-      typeof tlLow !== 'number' ||
-      typeof tlHigh !== 'number' ||
-      typeof supLow !== 'number' ||
-      typeof supHigh !== 'number'
+      typeof baseLow !== 'number' ||
+      typeof helperHigh !== 'number' ||
+      typeof tradeHigh !== 'number' ||
+      !Number.isFinite(baseLow) ||
+      !Number.isFinite(helperHigh) ||
+      !Number.isFinite(tradeHigh)
     ) {
       return NextResponse.json(
-        { success: false, error: 'All rate fields must be numbers' },
+        { success: false, error: 'All rate fields must be valid numbers' },
+        { status: 400 },
+      );
+    }
+
+    if (baseLow <= 0 || helperHigh <= 0 || tradeHigh <= 0) {
+      return NextResponse.json(
+        { success: false, error: 'All rate fields must be greater than 0' },
         { status: 400 },
       );
     }
 
     await updateBaseRates({
-      standardLow,
-      standardHigh,
-      tlLow,
-      tlHigh,
-      supLow,
-      supHigh,
+      baseLow: roundMoney(baseLow),
+      helperHigh: roundMoney(helperHigh),
+      tradeHigh: roundMoney(tradeHigh),
     });
 
-    return NextResponse.json({ success: true, data: { updated: true } });
+    const updated = await getBaseRates();
+    return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });

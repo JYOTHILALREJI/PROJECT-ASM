@@ -1,5 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getBaseRates } from '@/lib/base-rates';
+import { buildTradeRateMap } from '@/lib/recalculation';
+import { buildEmployeeTradeMap } from '@/lib/employee-trade';
+import { resolveRateSync } from '@/lib/rate-resolver';
+import { isHelperTrade, normalizeTrade } from '@/lib/trade-utils';
+import { roundHours, roundMoney } from '@/lib/payroll-math';
+
+/**
+ * Resolve the employee's default (below-threshold) hourly rate using the
+ * canonical priority: custom > trade (+0.5 if TL/Sup) > base rate.
+ * Replaces the old hardcoded `?? 2.5` fallbacks.
+ */
+async function resolveDefaultLowRate(
+  empId: string,
+): Promise<number> {
+  try {
+    const employee = await db.employee.findUnique({
+      where: { id: empId },
+      select: {
+        customHourlyRate: true,
+        isTeamLeader: true,
+        isSupervisor: true,
+        trade: true,
+      },
+    });
+    if (!employee) return (await getBaseRates()).baseLow;
+
+    const [baseRates, tradeRateMap, employeeTradeMap] = await Promise.all([
+      getBaseRates(),
+      buildTradeRateMap(),
+      buildEmployeeTradeMap(),
+    ]);
+
+    const tradeInfo = employeeTradeMap.get(empId);
+    const effectiveTrade = normalizeTrade(employee.trade || tradeInfo?.trade);
+    const isHelper = isHelperTrade(effectiveTrade);
+    const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTrade) ?? null) : null;
+
+    const resolved = resolveRateSync(
+      employee.customHourlyRate ?? null,
+      tradeRateVal,
+      employee.isTeamLeader,
+      employee.isSupervisor,
+      baseRates,
+      isHelper,
+    );
+    return resolved.lowRate;
+  } catch {
+    return (await getBaseRates()).baseLow;
+  }
+}
 
 /**
  * Helper: Sync WorkLog entry from TotalEmployeeWorkingHours data.
@@ -145,12 +196,15 @@ export async function POST(request: NextRequest) {
 
     if (existing && !existing.isDeleted) {
       // Update existing record
-      const resolvedRtPerHour = isCustom ? (rtPerHour ?? existing.rtPerHour) : (rtPerHour ?? 2.5);
+      const defaultLowRate = await resolveDefaultLowRate(empId);
+      const resolvedRtPerHour = isCustom
+        ? roundMoney(rtPerHour ?? existing.rtPerHour)
+        : roundMoney(rtPerHour ?? defaultLowRate);
 
       const workingHour = await db.totalEmployeeWorkingHours.update({
         where: { id: existing.id },
         data: {
-          totalWorkingHours: totalWorkingHours ?? existing.totalWorkingHours,
+          totalWorkingHours: totalWorkingHours != null ? roundHours(totalWorkingHours) : existing.totalWorkingHours,
           rtPerHour: resolvedRtPerHour,
           isCustom: isCustom ?? existing.isCustom,
           empName: empName || existing.empName,
@@ -172,11 +226,12 @@ export async function POST(request: NextRequest) {
       });
     } else if (existing && existing.isDeleted) {
       // Reactivate soft-deleted record
+      const defaultLowRate = await resolveDefaultLowRate(empId);
       const workingHour = await db.totalEmployeeWorkingHours.update({
         where: { id: existing.id },
         data: {
-          totalWorkingHours: totalWorkingHours ?? 0,
-          rtPerHour: rtPerHour ?? 2.5,
+          totalWorkingHours: totalWorkingHours != null ? roundHours(totalWorkingHours) : 0,
+          rtPerHour: roundMoney(rtPerHour ?? defaultLowRate),
           isCustom: isCustom ?? false,
           empName: empName || existing.empName,
           isDeleted: false,
@@ -198,13 +253,14 @@ export async function POST(request: NextRequest) {
       });
     } else {
       // Create new record
+      const defaultLowRate = await resolveDefaultLowRate(empId);
       const workingHour = await db.totalEmployeeWorkingHours.create({
         data: {
           empId,
           empName: empName || employee.fullName,
           month,
-          totalWorkingHours: totalWorkingHours ?? 0,
-          rtPerHour: rtPerHour ?? 2.5,
+          totalWorkingHours: totalWorkingHours != null ? roundHours(totalWorkingHours) : 0,
+          rtPerHour: roundMoney(rtPerHour ?? defaultLowRate),
           isCustom: isCustom ?? false,
           isDeleted: false,
         },

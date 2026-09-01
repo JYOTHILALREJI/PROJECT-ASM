@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import * as XLSX from 'xlsx';
 import { safeFindPendingAdvances } from '@/lib/safe-advance';
+import { getBaseRates, type BaseRates } from '@/lib/base-rates';
+import { buildTradeRateMap } from '@/lib/recalculation';
+import { resolveRateSync } from '@/lib/rate-resolver';
+import { isHelperTrade, normalizeTrade } from '@/lib/trade-utils';
+import { roundMoney, computeBalance, computeSalary } from '@/lib/payroll-math';
 
 /**
  * GET /api/salary-records/export-excel?month=YYYY-MM&year=YYYY
@@ -12,11 +17,6 @@ import { safeFindPendingAdvances } from '@/lib/safe-advance';
  * details for that site are listed, followed by a site subtotal row. A grand
  * total row is appended at the bottom.
  */
-
-const RATE_STANDARD_BELOW = 2.5;
-const RATE_STANDARD_ABOVE = 5.0;
-const RATE_TL_BELOW = 3.0;
-const RATE_TL_ABOVE = 5.5;
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -84,23 +84,44 @@ interface MergedEmployee {
 function computeGrossSalary(
   belowHours: number,
   aboveHours: number,
+  trade: string | null | undefined,
   isTeamLeader: boolean,
   isSupervisor: boolean,
   customHourlyRate: number | null,
+  baseRates: BaseRates,
+  tradeRateMap: Map<string, number>,
 ): { gross: number; belowComponent: number; aboveComponent: number } {
   if (customHourlyRate !== null && customHourlyRate > 0) {
-    const gross = (belowHours + aboveHours) * customHourlyRate;
-    return { gross, belowComponent: belowHours * customHourlyRate, aboveComponent: aboveHours * customHourlyRate };
+    const gross = roundMoney((belowHours + aboveHours) * customHourlyRate);
+    return {
+      gross,
+      belowComponent: computeSalary(belowHours, customHourlyRate),
+      aboveComponent: computeSalary(aboveHours, customHourlyRate),
+    };
   }
-  const isLeader = isTeamLeader || isSupervisor;
-  const lowRate = isLeader ? RATE_TL_BELOW : RATE_STANDARD_BELOW;
-  const highRate = isLeader ? RATE_TL_ABOVE : RATE_STANDARD_ABOVE;
-  const belowComponent = belowHours * lowRate;
-  const aboveComponent = aboveHours * highRate;
-  return { gross: belowComponent + aboveComponent, belowComponent, aboveComponent };
+  // Canonical resolution: trade(+0.5 if TL/Sup) > base rates with
+  // trade-aware premium (helperHigh for Helpers, tradeHigh for other trades)
+  const normalizedTrade = normalizeTrade(trade);
+  const isHelper = isHelperTrade(normalizedTrade);
+  const tradeRateVal = !isHelper ? (tradeRateMap.get(normalizedTrade) ?? null) : null;
+  const resolved = resolveRateSync(
+    null,
+    tradeRateVal,
+    isTeamLeader,
+    isSupervisor,
+    baseRates,
+    isHelper,
+  );
+  const belowComponent = computeSalary(belowHours, resolved.lowRate);
+  const aboveComponent = computeSalary(aboveHours, resolved.highRate);
+  return { gross: roundMoney(belowComponent + aboveComponent), belowComponent, aboveComponent };
 }
 
-function mergeSalaryRecords(records: RawRecord[]): MergedEmployee[] {
+function mergeSalaryRecords(
+  records: RawRecord[],
+  baseRates: BaseRates,
+  tradeRateMap: Map<string, number>,
+): MergedEmployee[] {
   const empMap = new Map<string, RawRecord[]>();
   for (const record of records) {
     const key = `${record.empId}::${record.siteId}`;
@@ -127,13 +148,17 @@ function mergeSalaryRecords(records: RawRecord[]): MergedEmployee[] {
     const isTeamLeader = baseRecord.employee?.isTeamLeader ?? false;
     const isSupervisor = baseRecord.employee?.isSupervisor ?? false;
     const customHourlyRate = baseRecord.employee?.customHourlyRate ?? null;
+    const effectiveTrade = baseRecord.trade || baseRecord.employee?.trade || null;
 
     const { gross: grossSalary, belowComponent, aboveComponent } = computeGrossSalary(
       belowThresholdHours,
       aboveThresholdHours,
+      effectiveTrade,
       isTeamLeader,
       isSupervisor,
       customHourlyRate,
+      baseRates,
+      tradeRateMap,
     );
 
     const deduction = standardRecord?.deduction ?? 0;
@@ -163,7 +188,7 @@ function mergeSalaryRecords(records: RawRecord[]): MergedEmployee[] {
       aboveSalaryComponent: aboveComponent,
       deduction,
       advance,
-      balanceSalary: grossSalary - deduction - advance,
+      balanceSalary: computeBalance(grossSalary, deduction, advance),
       isPaid,
       rateTier,
     });
@@ -280,6 +305,12 @@ export async function GET(request: NextRequest) {
     });
     const siteInfoMap = new Map(sites.map((s) => [s.id, s]));
 
+    // Base rates + trade rates for canonical gross-salary computation
+    const [baseRates, tradeRateMap] = await Promise.all([
+      getBaseRates(),
+      buildTradeRateMap(),
+    ]);
+
     // Build the worksheet as an array-of-arrays (AOA)
     // Columns:
     // 0:#  1:EmpCode  2:Name  3:Nationality  4:Trade  5:Role
@@ -352,7 +383,7 @@ export async function GET(request: NextRequest) {
       cursor++;
 
       // Employee rows
-      const mergedEmployees = mergeSalaryRecords(siteRecords);
+      const mergedEmployees = mergeSalaryRecords(siteRecords, baseRates, tradeRateMap);
       const siteTotals = {
         belowHours: 0,
         aboveHours: 0,
