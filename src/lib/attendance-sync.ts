@@ -436,7 +436,10 @@ export async function syncEmployeeSalaryFromAttendance(
           month,
           year,
           nationality: employee.nationality || '',
-          trade: 'Helper',
+          // Use the employee's real trade — hardcoding 'Helper' here poisons
+          // the trade used by the allocation engine for above-threshold rates
+          // (a Mason would be paid 6.0 instead of 7.0).
+          trade: employee.trade || 'Helper',
           employeeCode,
           slNo,
           totalHours: siteData.regularHours,
@@ -499,7 +502,8 @@ export async function syncEmployeeSalaryFromAttendance(
           month,
           year,
           nationality: employee.nationality || '',
-          trade: 'Helper',
+          // Same healing as the standard record above
+          trade: employee.trade || 'Helper',
           employeeCode,
           slNo,
           totalHours: siteData.campSittingHours,

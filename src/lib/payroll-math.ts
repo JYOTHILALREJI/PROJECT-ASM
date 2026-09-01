@@ -136,6 +136,38 @@ export function computeTierSplit(
 }
 
 // ---------------------------------------------------------------------------
+// Manual starting balance seed (lifetime hours floor)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the "starting balance" portion of an employee's lifetime hours that
+ * is NOT tracked in monthly salary records / work logs.
+ *
+ * Business rule (canonical — mirrors the worklogs API and the hours-summary
+ * endpoint): the admin-set lifetime total (Employee.currentTotalWorkingHours)
+ * is a FLOOR on the employee's tracked hours. Any excess above the tracked
+ * total represents hours worked before the system was set up (or a manual
+ * correction) and MUST count toward the cumulative threshold — otherwise an
+ * employee whose manual total already crossed the threshold would keep being
+ * paid at the below-threshold base rate forever.
+ *
+ *   seed = max(0, manualTotal − trackedAllMonths)
+ *   cumulativeBefore(month M) = seed + trackedHoursBefore(M)
+ *
+ * Returns 0 when the manual total is missing or lower than the tracked hours
+ * (tracked data wins — never subtract real worked hours).
+ */
+export function computeStartingBalanceSeed(
+  manualTotalHours: number | null | undefined,
+  trackedHoursAllMonths: number,
+): number {
+  const manual = Math.max(0, roundHours(manualTotalHours ?? 0));
+  if (manual <= 0) return 0;
+  const tracked = Math.max(0, roundHours(trackedHoursAllMonths));
+  return Math.max(0, roundHours(manual - tracked));
+}
+
+// ---------------------------------------------------------------------------
 // Salary composition
 // ---------------------------------------------------------------------------
 

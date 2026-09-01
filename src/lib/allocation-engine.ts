@@ -2,13 +2,14 @@ import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
-import { resolveRateSync } from '@/lib/rate-resolver';
+import { resolveRateSync, resolveEffectiveTradeName } from '@/lib/rate-resolver';
 import { isHelperTrade } from '@/lib/trade-utils';
 import {
   computeThresholdSplit,
   composeSalaryRecord,
   computeSalary,
   computeBalance,
+  computeStartingBalanceSeed,
   roundHours,
   roundMoney,
   EPSILON,
@@ -169,6 +170,7 @@ export async function allocateEmployeeHours(
         nationality: true,
         trade: true,
         customHourlyRate: true,
+        currentTotalWorkingHours: true,
         role: true,
       },
     });
@@ -190,7 +192,14 @@ export async function allocateEmployeeHours(
       ? (records.find(r => r.trade && r.trade.trim() !== '')?.trade || null)
       : null;
     const empTradeInfo = employeeTradeMap.get(empId);
-    const effectiveTradeName = savedTrade || empTradeInfo?.trade || 'Helper';
+    // Healed trade resolution: a non-Helper Accounts edit wins; otherwise the
+    // HR trade (Employee.trade) heals attendance-sync "Helper" placeholders so
+    // a Mason is paid 7.0 — not 6.0 — above the threshold.
+    const effectiveTradeName = resolveEffectiveTradeName({
+      savedRecordTrade: savedTrade,
+      employeeTrade: employee.trade,
+      assignedTrade: empTradeInfo?.trade ?? null,
+    });
     const isHelper = effectiveTradeName.toLowerCase() === 'helper';
     const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTradeName) ?? null) : null;
 
@@ -251,10 +260,36 @@ export async function allocateEmployeeHours(
 
     // Previous cumulative = sum of ALL hours from salary records in months BEFORE current month
     // This spans ALL years, not just the current year. Rounded to 2dp.
-    const previousCumulative = roundHours(previousSalaryRecords.reduce(
+    const trackedBeforeMonth = roundHours(previousSalaryRecords.reduce(
       (sum, sr) => sum + sr.totalHours,
       0,
     ));
+
+    // ── Manual starting balance seed (canonical lifetime-hours floor) ──
+    // The admin-set currentTotalWorkingHours is a FLOOR on tracked hours.
+    // The untracked excess (hours from before the system was set up, or a
+    // manual correction) MUST count toward the threshold — otherwise an
+    // employee whose lifetime total already crossed the threshold keeps
+    // being paid at the below-threshold base rate (3.5) forever, even
+    // though the Hours Ledger shows them as "After 1000h".
+    //
+    // seed = max(0, manualTotal − trackedAllMonths)
+    // previousCumulative = trackedBeforeMonth + seed
+    // (identical to the per-month cumulative seeding in the worklogs API)
+    const allMonthsSalaryRecords = await db.salaryRecord.findMany({
+      where: {
+        empId,
+        isDeleted: false,
+        rateTier: { in: ['standard', 'premium'] },
+      },
+      select: { totalHours: true },
+    });
+    const trackedAllMonths = roundHours(allMonthsSalaryRecords.reduce(
+      (sum, sr) => sum + sr.totalHours,
+      0,
+    ));
+    const seedHours = computeStartingBalanceSeed(employee.currentTotalWorkingHours, trackedAllMonths);
+    const previousCumulative = roundHours(trackedBeforeMonth + seedHours);
 
     // ------------------------------------------------------------------
     // 3c. Group by site, calculate rawHours per site
@@ -400,12 +435,11 @@ export async function allocateEmployeeHours(
             empName: employee.fullName,
             siteName: alloc.siteName,
             nationality: employee.nationality || '',
-            // Preserve the trade from the existing salary record — don't
-            // overwrite with employee.trade. The admin may have changed the
-            // trade in Accounts (e.g. from "Labor" to "Hilti") and that
-            // change must survive the allocation engine. Fall back to
-            // 'Helper' if no trade is set.
-            trade: siteData.existingStandard?.trade || effectiveTradeName,
+            // Stamp the healed effective trade on every allocation run.
+            // Non-Helper Accounts edits are preserved by the resolver itself
+            // (a saved non-Helper trade wins); Helper placeholders from
+            // attendance-sync get healed to the employee's real trade.
+            trade: effectiveTradeName,
             employeeCode: employee.employeeId || '',
             totalHours: alloc.lowRateHours,
             rtPerHour: effectiveLowRate,
@@ -495,7 +529,7 @@ export async function allocateEmployeeHours(
             siteName: alloc.siteName,
             nationality: employee.nationality || '',
             // Preserve trade from existing record (see standard record comment above)
-            trade: siteData.existingPremium?.trade || effectiveTradeName,
+            trade: effectiveTradeName,
             employeeCode: employee.employeeId || '',
             totalHours: alloc.highRateHours,
             rtPerHour: effectiveHighRate,

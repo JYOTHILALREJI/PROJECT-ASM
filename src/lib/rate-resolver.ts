@@ -248,6 +248,42 @@ export async function resolveRateMapForMonth(
   return result;
 }
 
+// ─── Effective trade name resolution ─────────────────────────────────────
+
+/**
+ * Resolve the employee's effective trade name used for rate decisions
+ * (helper 6.0 vs other-trade 7.0 above the threshold) and for stamping
+ * salary records.
+ *
+ * Priority:
+ *   1. A NON-Helper trade saved on the salary record — this is an explicit
+ *      Accounts edit (e.g. "Labor" → "Hilti") and must survive.
+ *   2. Employee.trade — the HR-authoritative trade. This HEALS records that
+ *      were created with the attendance-sync "Helper" placeholder for
+ *      employees whose real trade is something else (a Mason must be paid
+ *      7.0 above the threshold, not 6.0).
+ *   3. EmployeeTrade assigned trade.
+ *   4. The saved record trade as-is (genuinely Helper) or "Helper".
+ *
+ * EVERY rate-calculation path (allocation engine, /api/accounts, hours
+ * summary) MUST use this helper so all views agree on the trade rate.
+ */
+export function resolveEffectiveTradeName(params: {
+  savedRecordTrade?: string | null;
+  employeeTrade?: string | null;
+  assignedTrade?: string | null;
+}): string {
+  const saved = (params.savedRecordTrade ?? '').trim();
+  const empTrade = (params.employeeTrade ?? '').trim();
+  const assigned = (params.assignedTrade ?? '').trim();
+
+  if (saved && saved.toLowerCase() !== 'helper') return saved;
+  if (empTrade) return empTrade;
+  if (assigned) return assigned;
+  if (saved) return saved; // genuinely Helper
+  return 'Helper';
+}
+
 // ─── Synchronous resolver (no changelog, no DB calls) ────────────────────
 
 /**

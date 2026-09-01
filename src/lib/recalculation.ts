@@ -8,6 +8,7 @@ import {
   computeThresholdSplit,
   computeSalary,
   computeBalance,
+  computeStartingBalanceSeed,
   roundMoney,
   roundHours,
 } from '@/lib/payroll-math';
@@ -154,6 +155,7 @@ export async function recalcEmployeeFromMonth(
       hoursThreshold: true,
       nationality: true,
       trade: true,
+      currentTotalWorkingHours: true,
     },
   });
 
@@ -291,6 +293,16 @@ export async function recalcEmployeeFromMonth(
     if (md.year < fromYear || (md.year === fromYear && md.month < fromMonth)) {
       cumulative += md.hoursWorked;
     }
+  }
+
+  // ── Manual starting balance seed (canonical lifetime-hours floor) ──
+  // Same rule as the allocation engine / worklogs API: the admin-set
+  // currentTotalWorkingHours is a FLOOR on tracked hours; the untracked
+  // excess counts toward the cumulative threshold.
+  {
+    const trackedAllMonths = roundHours(allMonthsData.reduce((sum, md) => sum + md.hoursWorked, 0));
+    const seed = computeStartingBalanceSeed(employee.currentTotalWorkingHours, trackedAllMonths);
+    cumulative = roundHours(cumulative + seed);
   }
 
   let monthsRecalculated = 0;

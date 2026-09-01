@@ -5,6 +5,7 @@ import { getBaseRates } from '@/lib/base-rates';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { resolveRateSync } from '@/lib/rate-resolver';
+import { computeStartingBalanceSeed, roundHours } from '@/lib/payroll-math';
 
 // GET: Get monthly hours data for a specific employee and year
 export async function GET(request: NextRequest) {
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
         isSupervisor: true,
         hoursThreshold: true,
         customHourlyRate: true,
+        currentTotalWorkingHours: true,
         role: true,
       },
     });
@@ -69,11 +71,21 @@ export async function GET(request: NextRequest) {
     });
     const aggregateTotalHours = allSalaryRecords.reduce((sum, r) => sum + r.totalHours, 0);
 
+    // ── Manual starting balance seed (canonical lifetime-hours floor) ──
+    // The admin-set currentTotalWorkingHours is a FLOOR on tracked hours.
+    // The untracked excess counts toward the cumulative threshold so that an
+    // employee whose lifetime total already crossed the threshold is shown
+    // (and paid) at the above-threshold rate. Same rule as the allocation
+    // engine, /api/accounts and the worklogs API.
+    const seedHours = computeStartingBalanceSeed(employee.currentTotalWorkingHours, aggregateTotalHours);
+    const lifetimeTotalHours = roundHours(aggregateTotalHours + seedHours);
+
     // Compute cumulative hours from ALL months before the current month (cross-year)
     // This is the same logic used in the allocation engine
-    const previousCumulativeHours = allSalaryRecords
+    const trackedPreviousCumulativeHours = allSalaryRecords
       .filter(r => r.month < `${year}-01`)
       .reduce((sum, r) => sum + r.totalHours, 0);
+    const previousCumulativeHours = roundHours(trackedPreviousCumulativeHours + seedHours);
 
     // Also compute cumulative hours within the selected year up to the current month
     // This is used for the per-month cumulative display
@@ -129,7 +141,7 @@ export async function GET(request: NextRequest) {
     );
     const lowRate = resolvedRate.lowRate;
     const highRate = resolvedRate.highRate;
-    const autoRate = aggregateTotalHours >= empThreshold ? highRate : lowRate;
+    const autoRate = lifetimeTotalHours >= empThreshold ? highRate : lowRate;
 
     // Build monthly data for all 12 months
     // Use SalaryRecord as source of truth for per-month hours (sum of standard + premium)

@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { buildTradeRateMap } from '@/lib/recalculation';
 import { buildEmployeeTradeMap } from '@/lib/employee-trade';
 import { getBaseRates } from '@/lib/base-rates';
-import { resolveRateSync } from '@/lib/rate-resolver';
+import { resolveRateSync, resolveEffectiveTradeName } from '@/lib/rate-resolver';
 
 // GET: Returns all active employees with their cumulative hours and effective rate
 export async function GET(request: NextRequest) {
@@ -138,7 +138,13 @@ export async function GET(request: NextRequest) {
 
       // ── Rate resolution via the canonical resolver ──
       // Priority: Custom > Trade(+0.5 if TL/Sup) > BaseRate
-      const effectiveTrade = salaryTradeMap.get(emp.id) || employeeTradeMap.get(emp.id)?.trade || 'Helper';
+      // Healed trade: non-Helper record trades win; Employee.trade heals the
+      // attendance-sync "Helper" placeholder (Mason → 7.0, not 6.0).
+      const effectiveTrade = resolveEffectiveTradeName({
+        savedRecordTrade: salaryTradeMap.get(emp.id) ?? null,
+        employeeTrade: emp.trade ?? null,
+        assignedTrade: employeeTradeMap.get(emp.id)?.trade ?? null,
+      });
       const isHelper = effectiveTrade.toLowerCase() === 'helper';
       const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTrade) ?? null) : null;
 

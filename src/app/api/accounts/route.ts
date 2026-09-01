@@ -7,7 +7,8 @@ import { safeFindPendingAdvances } from '@/lib/safe-advance';
 import { safeFetchSitesWithBranch } from '@/lib/safe-site';
 import { getRateMapForMonth } from '@/lib/rate-changelog';
 import { getEligibleRecurringAdvances, computeMonthlyDeduction } from '@/lib/advance-deduction';
-import { resolveRateSync } from '@/lib/rate-resolver';
+import { resolveRateSync, resolveEffectiveTradeName } from '@/lib/rate-resolver';
+import { computeStartingBalanceSeed, roundHours } from '@/lib/payroll-math';
 
 export const dynamic = 'force-dynamic';
 
@@ -210,6 +211,7 @@ export async function GET(request: NextRequest) {
         nationality: true,
         trade: true,
         customHourlyRate: true,
+        currentTotalWorkingHours: true,
         role: true,
       },
     });
@@ -344,10 +346,12 @@ export async function GET(request: NextRequest) {
             currentSite: true,
             isTeamLeader: true,
             isSupervisor: true,
+            isTeko: true,
             hoursThreshold: true,
             nationality: true,
             trade: true,
             customHourlyRate: true,
+            currentTotalWorkingHours: true,
             role: true,
           },
         })
@@ -407,6 +411,7 @@ export async function GET(request: NextRequest) {
           nationality: true,
           trade: true,
           customHourlyRate: true,
+          currentTotalWorkingHours: true,
           role: true,
         },
       });
@@ -443,6 +448,28 @@ export async function GET(request: NextRequest) {
           pendingByEmp.set(empId, (pendingByEmp.get(empId) || 0) + deduction.totalDeduction);
           recurringAdvancesMap.set(empId, deduction);
         }
+      }
+    }
+
+    // ── Manual starting balance seed (canonical lifetime-hours floor) ──
+    // The admin-set currentTotalWorkingHours is a FLOOR on tracked salary-record
+    // hours. The untracked excess (hours from before the system was set up) must
+    // count toward the cumulative threshold — otherwise an employee whose
+    // lifetime total already crossed the threshold keeps being paid at the
+    // below-threshold base rate (3.5) on the Accounts / Consolidated Salary
+    // pages, even though the Hours Ledger shows them as "After 1000h".
+    //
+    // seed = max(0, manualTotal − trackedAllMonths)
+    // previousCumulative += seed ; aggregateTotal = max(trackedAll, manualTotal)
+    // (identical to the seeding in the allocation engine + worklogs API)
+    for (const emp of employeeMap.values()) {
+      const manualTotal = (emp as { currentTotalWorkingHours?: number | null }).currentTotalWorkingHours ?? 0;
+      if (!manualTotal || manualTotal <= 0) continue;
+      const trackedAll = aggregateHoursMap.get(emp.id) || 0;
+      const seed = computeStartingBalanceSeed(manualTotal, trackedAll);
+      if (seed > 0) {
+        cumulativeHoursMap.set(emp.id, roundHours((cumulativeHoursMap.get(emp.id) || 0) + seed));
+        aggregateHoursMap.set(emp.id, roundHours(trackedAll + seed));
       }
     }
 
@@ -592,7 +619,13 @@ export async function GET(request: NextRequest) {
         // Priority: changelog > custom > trade(+0.5 if TL/Sup) > BaseRate
         const salaryTrade = eRecords[0]?.trade || null;
         const empTradeInfo = employeeTradeMap.get(eId);
-        const effectiveTrade = salaryTrade || empTradeInfo?.trade || 'Helper';
+        // Healed trade: non-Helper Accounts edits win; Employee.trade heals
+        // attendance-sync "Helper" placeholders (Mason → 7.0, not 6.0).
+        const effectiveTrade = resolveEffectiveTradeName({
+          savedRecordTrade: salaryTrade,
+          employeeTrade: emp?.trade ?? null,
+          assignedTrade: empTradeInfo?.trade ?? null,
+        });
         const isHelper = effectiveTrade.toLowerCase() === 'helper';
         const tradeRateVal = !isHelper ? (tradeRateMap.get(effectiveTrade) ?? null) : null;
 
@@ -633,7 +666,11 @@ export async function GET(request: NextRequest) {
             empName: rec.empName,
             employeeCode: rec.employeeCode,
             nationality: rec.nationality,
-            trade: rec.trade,
+            // Heal the trade in the response too: the client-side resolver
+            // re-derives rates from salaryRecord.trade, so sending the raw
+            // attendance-sync "Helper" placeholder would make a Mason display
+            // 6.0 instead of 7.0. Must match `effectiveTrade` above.
+            trade: effectiveTrade,
             assignedTrade: employeeTradeMap.get(eId)?.trade || null,
             assignedTradeRate: employeeTradeMap.get(eId)?.hourlyRate ?? null,
             isTeamLeader: emp?.isTeamLeader ?? false,
@@ -641,6 +678,7 @@ export async function GET(request: NextRequest) {
             rateTier: rec.rateTier as 'standard' | 'premium',
             salaryRecord: {
               ...rec,
+              trade: effectiveTrade, // healed (client resolver reads this field first)
               createdAt: rec.createdAt.toISOString(),
               updatedAt: rec.updatedAt.toISOString(),
             },
@@ -684,7 +722,11 @@ export async function GET(request: NextRequest) {
 
         // ── Rate resolution via the canonical resolver (same as records path) ──
         const stubEmpTradeInfo = employeeTradeMap.get(stub.empId);
-        const stubEffectiveTrade = stubEmpTradeInfo?.trade || 'Helper';
+        const stubEffectiveTrade = resolveEffectiveTradeName({
+          savedRecordTrade: null,
+          employeeTrade: emp?.trade ?? null,
+          assignedTrade: stubEmpTradeInfo?.trade ?? null,
+        });
         const stubIsHelper = stubEffectiveTrade.toLowerCase() === 'helper';
         const tradeRateVal = !stubIsHelper ? (tradeRateMap.get(stubEffectiveTrade) ?? null) : null;
 
@@ -741,7 +783,7 @@ export async function GET(request: NextRequest) {
             month,
             year: yearNum,
             nationality: emp?.nationality || '',
-            trade: 'Helper',
+            trade: stubEffectiveTrade, // healed trade — not the 'Helper' placeholder
             employeeCode: emp?.employeeId || '',
             slNo: 0,
             totalHours: 0,
