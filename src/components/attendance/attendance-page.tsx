@@ -128,7 +128,6 @@ const MONTHS = [
 
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
-const YEARS = Array.from({ length: 5 }, (_, i) => String(currentYear - 2 + i));
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
@@ -771,8 +770,8 @@ function SiteListView({
               variant="ghost"
               size="sm"
               onClick={() => onAddEmployee(site)}
-              className="h-7 text-[11px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 gap-1"
-              title="Add an existing employee to this site"
+              className="h-7 text-[11px] text-slate-400 hover:text-white hover:bg-slate-700/40 gap-1"
+              title="Add an existing employee to this site — assigned globally until changed or removed"
             >
               <UserPlus className="h-3 w-3" />
               <span className="hidden sm:inline">Add Employee</span>
@@ -783,7 +782,7 @@ function SiteListView({
             size="sm"
             onClick={onShare}
             disabled={employees.length === 0}
-            className="h-7 text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 gap-1"
+            className="h-7 text-[11px] text-slate-400 hover:text-white hover:bg-slate-700/40 gap-1"
             title="Generate shareable attendance link"
           >
             <Share2 className="h-3 w-3" />
@@ -794,7 +793,7 @@ function SiteListView({
             size="sm"
             onClick={onAttendanceSheet}
             disabled={employees.length === 0}
-            className="h-7 text-[11px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 gap-1"
+            className="h-7 text-[11px] text-slate-400 hover:text-white hover:bg-slate-700/40 gap-1"
             title="Open printable attendance sheet"
           >
             <FileSpreadsheet className="h-3 w-3" />
@@ -806,7 +805,7 @@ function SiteListView({
       {/* Bulk-mark bar */}
       {!isCollapsed && (
         <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-900/30 border-b border-slate-700/50">
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-400 uppercase tracking-wide font-medium">
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 uppercase tracking-wide font-medium">
             <Calendar className="h-3 w-3" />
             Mark all
           </div>
@@ -866,7 +865,7 @@ function SiteListView({
             )}
             Mark all as {bulkMarkStatus === 'present' ? 'Present' : 'Absent'}
           </Button>
-          <p className="text-[10px] text-slate-500 ml-auto hidden md:block">
+          <p className="text-[10px] text-slate-600 italic ml-auto hidden md:block">
             P=Present(10h) · A=Absent(0h) · C=Camp(8h) · ⌫=clear · Ctrl+Z=undo · Arrows=navigate
           </p>
         </div>
@@ -901,10 +900,10 @@ function SiteListView({
                   );
                 })}
               </div>
-              <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-emerald-900/20 text-emerald-300 border-l border-slate-700/50">
+              <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-slate-800/60 text-slate-400 border-l border-slate-700/50">
                 Total Hrs
               </div>
-              <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-orange-900/20 text-orange-300 border-l border-slate-700/30">
+              <div className="w-16 shrink-0 text-center py-1.5 px-1 bg-slate-800/60 text-slate-400 border-l border-slate-700/30">
                 Camp Hrs
               </div>
             </div>
@@ -1125,32 +1124,32 @@ function SiteListView({
         <div className="flex flex-wrap gap-3 px-4 py-3 border-t border-slate-700/50">
           <div className="flex items-center gap-1.5">
             <span className="h-4 w-4 rounded bg-green-700/80" />
-            <span className="text-[11px] text-slate-400">P = Present (10h)</span>
+            <span className="text-[11px] text-slate-500">P = Present (10h)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="h-4 w-4 rounded bg-red-700/80" />
-            <span className="text-[11px] text-slate-400">A = Absent (0h)</span>
+            <span className="text-[11px] text-slate-500">A = Absent (0h)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="h-4 w-4 rounded bg-orange-700/80" />
-            <span className="text-[11px] text-slate-400">C = Camp Sitting (8h, not in lifetime)</span>
+            <span className="text-[11px] text-slate-500">C = Camp Sitting (8h, not in lifetime)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Crown className="h-2.5 w-2.5 text-amber-400" />
-            <span className="text-[11px] text-slate-400">Team Leader</span>
+            <Crown className="h-2.5 w-2.5 text-amber-400/70" />
+            <span className="text-[11px] text-slate-500">Team Leader</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <ShieldCheck className="h-2.5 w-2.5 text-blue-400" />
-            <span className="text-[11px] text-slate-400">Supervisor</span>
+            <ShieldCheck className="h-2.5 w-2.5 text-blue-400/70" />
+            <span className="text-[11px] text-slate-500">Supervisor</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">P</kbd>
-            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">A</kbd>
-            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">C</kbd>
-            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">⌫</kbd>
-            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">←↑↓→</kbd>
-            <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono font-bold border border-slate-600">Ctrl+Z</kbd>
-            <span className="text-[11px] text-slate-400">keyboard only</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 text-[10px] font-mono border border-slate-700/60">P</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 text-[10px] font-mono border border-slate-700/60">A</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 text-[10px] font-mono border border-slate-700/60">C</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 text-[10px] font-mono border border-slate-700/60">⌫</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 text-[10px] font-mono border border-slate-700/60">←↑↓→</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 text-[10px] font-mono border border-slate-700/60">Ctrl+Z</kbd>
+            <span className="text-[11px] text-slate-500 italic">keyboard only</span>
           </div>
         </div>
       )}
@@ -1515,20 +1514,59 @@ export function AttendancePage() {
         // active here regardless of what removedDate says.
         const isCurrentSite = emp.currentSite === siteName;
 
-        // For ALL sites (current AND moved-away), activeFrom = monthStart.
-        // This ensures all days are in-range and attendance marks are visible.
-        // The movedAway flag + opacity-40 provides the visual distinction.
-        const activeFrom = monthStartStr;
+        // ── Days whose attendance was ACTUALLY marked at THIS site ──
+        // (records tagged with this site's siteId). Used as a safety net so
+        // no mark is ever hidden by the merged out-of-range cells.
+        let firstMarkedDate: string | null = null;
+        let lastMarkedDate: string | null = null;
+        for (const att of attendanceRecords) {
+          if (att.employeeId !== emp.id) continue;
+          if (!att.date.startsWith(monthPrefix)) continue;
+          if (att.status !== 'present' && att.status !== 'absent' && att.status !== 'camp_sitting' && att.status !== 'overtime') continue;
+          if (!att.siteId || att.siteId !== assignment.siteId) continue;
+          if (!firstMarkedDate || att.date < firstMarkedDate) firstMarkedDate = att.date;
+          if (!lastMarkedDate || att.date > lastMarkedDate) lastMarkedDate = att.date;
+        }
 
-        // removedDate is when the employee left the site.
-        // If this is the employee's current site, ignore removedDate (stale).
-        // For moved-away employees, set activeUntil = null (full month range)
-        // so ALL attendance marks are visible — nothing is hidden in merged
-        // out-of-range cells.
+        // Date this employee arrived at their CURRENT site: the latest
+        // removedDate among their other site assignments this month (set by
+        // the same PUT that moved them). Days before that merge into a
+        // single cell labelled with the previous site.
+        let movedHereOn: string | null = null;
+        if (isCurrentSite) {
+          for (const other of siteAssignments) {
+            if (other.empId !== assignment.empId) continue;
+            if (other.siteName === siteName) continue;
+            if (!other.removedDate) continue;
+            const clamped = clampToMonth(other.removedDate.split('T')[0]);
+            if (!movedHereOn || clamped > movedHereOn) movedHereOn = clamped;
+          }
+        }
+
         const movedAway = !isCurrentSite && !!assignment.removedDate;
-        const activeUntil = movedAway ? null : (!isCurrentSite && assignment.removedDate
-          ? clampToMonth(assignment.removedDate.split('T')[0])
-          : null);
+
+        // ── Proper per-site date ranges (drives the merged columns) ──
+        let activeFrom: string;
+        let activeUntil: string | null;
+        if (movedAway) {
+          // OLD site: active up to (and including) the day they left.
+          // Days AFTER that merge into one cell showing the next site.
+          activeFrom = monthStartStr;
+          activeUntil = clampToMonth(assignment.removedDate!.split('T')[0]);
+          // Safety: show marks actually made at this site after the removal
+          if (lastMarkedDate && lastMarkedDate > activeUntil) activeUntil = lastMarkedDate;
+        } else if (isCurrentSite && movedHereOn) {
+          // CURRENT site joined mid-month: days BEFORE the arrival merge
+          // into one cell showing the previous site.
+          activeFrom = movedHereOn;
+          activeUntil = null;
+          // Safety: show marks actually made at this site before the arrival
+          if (firstMarkedDate && firstMarkedDate < activeFrom) activeFrom = firstMarkedDate;
+        } else {
+          // No mid-month move this month — active the whole month.
+          activeFrom = monthStartStr;
+          activeUntil = null;
+        }
 
         // ── Compute blockedDates: days with P/A/C/O attendance at ANOTHER site ──
         // Each attendance record now has a siteId. If the record's siteId doesn't
@@ -1649,6 +1687,11 @@ export function AttendancePage() {
               break; // take the first match
             }
           }
+          // Fallback: if no explicit next-site assignment record was found,
+          // the employee's current site is where they went.
+          if (!nextSite && emp.currentSite && emp.currentSite !== siteName) {
+            nextSite = emp.currentSite;
+          }
         }
 
         // If the employee moved away AND has NO meaningful attendance
@@ -1661,16 +1704,16 @@ export function AttendancePage() {
         // from the old site entirely.
         if (movedAway) {
           // Only keep the employee at this site if they have P/A/C/O marks
-          // for this month. We don't filter by siteId here because the
-          // blockedDates check handles which days are blocked/merged.
+          // that belong to THIS site (siteId match; legacy records without a
+          // siteId count when they fall inside this site's active range).
           const hasMarkedAttendance = attendanceRecords.some(
-            (r) =>
-              r.employeeId === emp.id &&
-              r.date.startsWith(monthPrefix) &&
-              (r.status === 'present' ||
-                r.status === 'absent' ||
-                r.status === 'camp_sitting' ||
-                r.status === 'overtime'),
+            (r) => {
+              if (r.employeeId !== emp.id) return false;
+              if (!r.date.startsWith(monthPrefix)) return false;
+              if (r.status !== 'present' && r.status !== 'absent' && r.status !== 'camp_sitting' && r.status !== 'overtime') return false;
+              if (r.siteId) return r.siteId === assignment.siteId;
+              return !activeUntil || r.date <= activeUntil;
+            },
           );
           if (!hasMarkedAttendance) {
             // No P/A/C/O at this site — skip entirely
@@ -2096,7 +2139,7 @@ export function AttendancePage() {
       if (successCount > 0) {
         toast({
           title: 'Employees Added',
-          description: `${successCount} employee${successCount !== 1 ? 's' : ''} assigned to ${addEmpDialogSite.name}.${failCount > 0 ? ` ${failCount} failed.` : ''}`,
+          description: `${successCount} employee${successCount !== 1 ? 's' : ''} now assigned to ${addEmpDialogSite.name} — this applies globally until they are moved or removed.${failCount > 0 ? ` ${failCount} failed.` : ''}`,
         });
         closeAddEmployeeDialog();
         setRefreshKey((k) => k + 1);
@@ -2166,7 +2209,7 @@ export function AttendancePage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Attendance Management</h2>
-          <p className="text-slate-400 mt-1 text-sm">
+          <p className="text-slate-500 mt-1 text-sm">
             Site-wise daily attendance · TL/Supervisors shown first
           </p>
         </div>
@@ -2199,34 +2242,6 @@ export function AttendancePage() {
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
-
-        {/* Year Select */}
-        <Select value={selectedYear} onValueChange={setSelectedYear}>
-          <SelectTrigger className="w-28 bg-slate-800 border-slate-700 text-sm text-white">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="dropdown-upward bg-slate-800 border-slate-600">
-            {YEARS.map((y) => (
-              <SelectItem key={y} value={y} className="text-slate-200 focus:bg-slate-700 focus:text-white">
-                {y}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {/* Month Select */}
-        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-          <SelectTrigger className="w-36 bg-slate-800 border-slate-700 text-sm text-white">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="dropdown-upward bg-slate-800 border-slate-600 max-h-64">
-            {MONTHS.map((m) => (
-              <SelectItem key={m.value} value={m.value} className="text-slate-200 focus:bg-slate-700 focus:text-white">
-                {m.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
 
         {/* Search */}
         <div className="relative flex-1 max-w-xs">
@@ -2431,6 +2446,8 @@ export function AttendancePage() {
             </DialogTitle>
             <DialogDescription className="text-slate-400">
               Search and select one or more employees to assign to this site.
+              The assignment is global — each employee stays in this site
+              (attendance, hours and salary) until they are moved or removed.
               {selectedEmpIds.size > 0 && (
                 <span className="text-emerald-400 ml-1 font-medium">{selectedEmpIds.size} selected</span>
               )}

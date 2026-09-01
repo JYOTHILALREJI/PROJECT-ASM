@@ -47,7 +47,7 @@ import { useAuthStore, type UserRole } from '@/store/auth-store';
 import { useAppStore, type AppView } from '@/store/app-store';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
-import { StaggerContainer, StaggerItem } from '@/components/motion';
+import { StaggerContainer, StaggerItem, PulseDot } from '@/components/motion';
 
 interface NavItem {
   id: AppView;
@@ -89,6 +89,24 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [adminPermissions, setAdminPermissions] = React.useState<string[]>([]);
   const [logoutDialogOpen, setLogoutDialogOpen] = React.useState(false);
+  // Online users count (presence) — shown below the company logo in both
+  // expanded and collapsed sidebar states.
+  const [onlineCount, setOnlineCount] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    const fetchPresence = async () => {
+      try {
+        const res = await fetch('/api/presence/online');
+        const data = await res.json();
+        if (data.success) setOnlineCount(data.data.count ?? null);
+      } catch {
+        // silent
+      }
+    };
+    fetchPresence();
+    const interval = setInterval(fetchPresence, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   React.useEffect(() => {
     const fetchCount = async () => {
@@ -191,6 +209,24 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
         )}
       </div>
 
+      {/* Online presence — always directly below the company logo.
+          Expands to a labeled chip; collapses to a compact dot + count
+          that stays centered inside the narrow rail. */}
+      <div
+        className={cn(
+          'flex shrink-0 items-center',
+          collapsed ? 'flex-col gap-1 pb-3 pt-1' : 'mx-4 mb-3 gap-2 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3 py-1.5'
+        )}
+        title={onlineCount !== null ? `${onlineCount} user${onlineCount !== 1 ? 's' : ''} online` : undefined}
+      >
+        <PulseDot />
+        {onlineCount !== null && (
+          <span className={cn('tabular-nums text-slate-400', collapsed ? 'text-[10px]' : 'text-xs')}>
+            {collapsed ? onlineCount : `${onlineCount} online`}
+          </span>
+        )}
+      </div>
+
       <Separator className="bg-slate-700/50" />
 
       {/* Navigation */}
@@ -263,27 +299,35 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
       <Separator className="bg-slate-700/50" />
 
       {/* User Info Section - Sticky Footer */}
-      <div className="p-3 mt-auto">
+      <div className={cn('mt-auto', collapsed ? 'p-2' : 'p-3')}>
         {user && (
           <div
             className={cn(
               'flex items-center gap-3 rounded-lg bg-slate-800/50 p-3',
-              collapsed && 'justify-center p-2'
+              collapsed && 'flex-col gap-2 p-2'
             )}
           >
-            <div className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-full font-semibold text-sm shrink-0",
-              user.role === 'super_admin'
-                ? 'bg-amber-500/20 text-amber-400'
-                : 'bg-blue-500/20 text-blue-400'
-            )}>
-              {(user.name || user.email)
-                .split(' ')
-                .map((n) => n[0])
-                .join('')
-                .slice(0, 2)
-                .toUpperCase()}
-            </div>
+            {/* Avatar doubles as the Profile button when collapsed */}
+            <button
+              type="button"
+              onClick={() => handleNavClick('profile')}
+              title="Profile"
+              className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <div className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-full font-semibold text-sm transition-transform hover:scale-105",
+                user.role === 'super_admin'
+                  ? 'bg-amber-500/20 text-amber-400'
+                  : 'bg-blue-500/20 text-blue-400'
+              )}>
+                {(user.name || user.email)
+                  .split(' ')
+                  .map((n) => n[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </div>
+            </button>
             {!collapsed && (
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-sm font-medium text-white truncate">
@@ -304,16 +348,18 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
                 </Badge>
               </div>
             )}
-            {!collapsed && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-slate-400 hover:text-red-400 hover:bg-red-500/10 shrink-0"
-                onClick={handleLogout}
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'text-slate-400 hover:text-red-400 hover:bg-red-500/10 shrink-0',
+                collapsed ? 'h-7 w-7' : 'h-8 w-8'
+              )}
+              onClick={handleLogout}
+              title="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
           </div>
         )}
       </div>

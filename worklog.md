@@ -232,3 +232,29 @@ Work Log:
 
 Stage Summary:
 - All UI copy now speaks in plain threshold terms: 3.5 below 1000h, 6/7 after 1000h. No "Premium"/"Basic"/tier names anywhere user-visible; internal rateTier identifiers unchanged.
+
+---
+Task ID: attendance-pdf-header-ux-colors-merge
+Agent: main (Z.ai Code)
+Task: 1) Attendance PDF totals in a 2-column info block; 2) UI fixes (dashboard date, attendance switcher, accounts search/header, presence chip); 3) calmer accounts palette, muted attendance hints, global site-assignment persistence + proper merged columns for moved employees
+
+Work Log:
+- attendance-sheet.tsx: info section rebuilt as a bordered 2-column table (print HTML + live preview):
+  Col 1 = CLIENT NAME / PROJECT NAME / DATE; Col 2 = STRENGTH / TOTAL PRESENT / TOTAL ABSENT.
+  Added editable presentInput/absentInput states, threaded through buildPageHtml + generateAllPagesHtml.
+- dashboard-page.tsx: removed the green date line under the "Dashboard" title (todayDisplay + CalendarDays chip); verified both still used elsewhere (no unused imports).
+- attendance-page.tsx: removed the duplicate Year/Month <Select> dropdowns (chevron month navigation remains; it already handles year rollover); removed now-unused YEARS constant.
+- app-header.tsx: removed the notification bell popover, the user dropdown (username), and the online-presence chip; header-controls-slot now flex-1 (no max-w-md) so page search bars use the full header width without overlapping the right-side action buttons. Profile/logout live in the sidebar user card.
+- app-sidebar.tsx: presence fetch moved here; online chip renders directly below the company logo in BOTH states — expanded: labeled chip "N online"; collapsed: compact dot + count centered in the rail. Collapsed user card now stacks avatar (click = Profile) + logout button.
+- accounts-page.tsx (calm palette): SITE_HEADER_COLORS reduced to one neutral slate scheme; header action buttons uniform slate-700 (emerald reserved for Save All; no glows); month pills selected = light slate; summary cards + grand totals card neutral icon boxes with semantic colors only (Paid=emerald, Unpaid=red, negative balance=red); table headers and rate/salary columns neutral slate; removed cyan/amber/emerald/violet cell tints; Teko badge + TL marker + custom-rate text muted.
+- attendance-page.tsx (hints muted): page subtitle, "Mark all" label, keyboard-hint paragraph (italic slate-600), legend (slate-500 + subtle kbd chips), site action buttons (Add Employee/Share/Sheet → slate), Total Hrs / Camp Hrs headers → neutral slate.
+- Global assignment persistence: dialog text + success toast now state the assignment is global until moved/removed (PUT /api/employees/[id] already updates Employee.currentSite + currentSiteId, stamps removedDate on the old site's EmpCountSitePerMonth, and creates the new site's record + zero-hour WorkLog).
+- Proper merged columns for moved employees (employeesBySite): per-site active ranges instead of always-full-month — movedAway rows: activeUntil = clamp(removedDate); current-site rows joined mid-month: activeFrom = latest other-site removedDate (movedHereOn). Safety extensions use siteId-tagged marks (firstMarkedDate/lastMarkedDate) so no mark is ever hidden by a merge; nextSite falls back to emp.currentSite; movedAway visibility now requires marks belonging to THAT site.
+- Verified end-to-end in browser: sheet shows the 2-column totals block and PDF/print generation runs clean; dashboard has no green date; attendance has a single month switcher + muted hints; accounts header buttons aligned with full-width search (no overlay) and calm palette; sidebar chip correct expanded AND collapsed; simulated a mid-month move (Riyadh→Jeddah, day 15, marks Sep 3 @Riyadh + Sep 20 @Jeddah): Riyadh row = faded marks to day 15 then ONE merged "JEDDAH MALL PROJECT" cell; Jeddah row = ONE merged "RIYADH TOWER SITE" cell for days 1-14 then editable days; totals per site correct; test data reverted (John back at Riyadh, records cleaned).
+- eslint: 0 errors across src (1 pre-existing warning in use-search-navigation.ts, untouched).
+
+Stage Summary:
+- Attendance PDF now prints Strength/Total Present/Total Absent in a 2-column partitioned header block (editable fields, PDF/print/preview all in sync).
+- Header decluttered (no username/bell/presence); presence chip lives under the logo and survives sidebar collapse; page search bars use full header width.
+- Accounts page re-skinned to a calm slate + single-accent system; attendance instructions downgraded to subtle hints.
+- Site assignment from Attendance is global (until changed/removed) and mid-month moves render with exact merged site-name columns on both old and new site grids.

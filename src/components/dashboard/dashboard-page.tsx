@@ -313,8 +313,6 @@ export function DashboardPage() {
 
   const setCurrentView = useAppStore((s) => s.setCurrentView);
 
-  const todayDisplay = useMemo(() => format(now, 'EEEE, MMMM d, yyyy'), []);
-
   const yearOptions = useMemo(() => {
     const currentYear = now.getFullYear();
     return [
@@ -522,10 +520,6 @@ export function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Dashboard</h2>
-          <div className="flex items-center gap-2 mt-1">
-            <CalendarDays className="h-4 w-4 text-emerald-400" />
-            <p className="text-emerald-400 font-medium text-sm">{todayDisplay}</p>
-          </div>
           <p className="text-slate-400 mt-1">
             Overview of your workforce metrics, attendance, and site data.
           </p>

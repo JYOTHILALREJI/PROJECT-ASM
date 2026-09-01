@@ -200,15 +200,10 @@ const MONTH_FULL = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+// Calm, cohesive palette: every site uses the same neutral slate scheme so
+// the page reads as one system instead of a rainbow of site colors.
 const SITE_HEADER_COLORS = [
-  { bg: 'bg-emerald-600/20', border: 'border-emerald-500/30', text: 'text-emerald-300', accent: 'text-emerald-400' },
-  { bg: 'bg-teal-600/20', border: 'border-teal-500/30', text: 'text-teal-300', accent: 'text-teal-400' },
-  { bg: 'bg-cyan-600/20', border: 'border-cyan-500/30', text: 'text-cyan-300', accent: 'text-cyan-400' },
-  { bg: 'bg-sky-600/20', border: 'border-sky-500/30', text: 'text-sky-300', accent: 'text-sky-400' },
-  { bg: 'bg-violet-600/20', border: 'border-violet-500/30', text: 'text-violet-300', accent: 'text-violet-400' },
-  { bg: 'bg-rose-600/20', border: 'border-rose-500/30', text: 'text-rose-300', accent: 'text-rose-400' },
-  { bg: 'bg-amber-600/20', border: 'border-amber-500/30', text: 'text-amber-300', accent: 'text-amber-400' },
-  { bg: 'bg-lime-600/20', border: 'border-lime-500/30', text: 'text-lime-300', accent: 'text-lime-400' },
+  { bg: 'bg-slate-800/70', border: 'border-slate-700/60', text: 'text-slate-200', accent: 'text-slate-300' },
 ];
 
 /* ───────── Helpers ───────── */
@@ -1256,8 +1251,8 @@ export function AccountsPage() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
-              <FileSpreadsheet className="h-5 w-5 text-emerald-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-700/40">
+              <FileSpreadsheet className="h-5 w-5 text-slate-300" />
             </div>
             <div>
               <h2 className="text-2xl font-bold text-white">
@@ -1287,7 +1282,7 @@ export function AccountsPage() {
             {/* Trade Rates button — manage per-trade hourly rates */}
             <Button
               onClick={openTradeRates}
-              className="bg-violet-600 hover:bg-violet-700 text-white gap-2"
+              className="bg-slate-700 hover:bg-slate-600 text-slate-100 gap-2"
               title="Manage trade-specific hourly rates"
             >
               <Wrench className="h-4 w-4" />
@@ -1296,13 +1291,13 @@ export function AccountsPage() {
             {/* Advance button — opens the Advance management page */}
             <Button
               onClick={() => setCurrentView('advance')}
-              className="bg-amber-600 hover:bg-amber-700 text-white gap-2 shadow-lg shadow-amber-600/20"
+              className="bg-slate-700 hover:bg-slate-600 text-slate-100 gap-2"
               title="Manage employee cash advances"
             >
               <Wallet className="h-4 w-4" />
               <span className="hidden sm:inline">Advance</span>
               {totalPendingAdvances > 0 && (
-                <Badge variant="secondary" className="ml-1 bg-amber-300 text-amber-900 text-[10px] px-1.5 py-0 h-4 min-w-[20px] flex items-center justify-center">
+                <Badge variant="secondary" className="ml-1 bg-slate-200 text-slate-900 text-[10px] px-1.5 py-0 h-4 min-w-[20px] flex items-center justify-center">
                   {totalPendingAdvances > 999 ? '999+' : Math.round(totalPendingAdvances)}
                 </Badge>
               )}
@@ -1316,7 +1311,7 @@ export function AccountsPage() {
                     <Button
                       onClick={handleSave}
                       disabled={saving}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-lg shadow-emerald-600/20"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
                     >
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                       <span className="hidden sm:inline">{saving ? 'Saving...' : 'Save All'}</span>
@@ -1326,7 +1321,7 @@ export function AccountsPage() {
                         setSiteEmployees(JSON.parse(JSON.stringify(originalSiteEmployees)));
                         setEditMode(false);
                       }}
-                      className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+                      className="bg-slate-700 hover:bg-slate-600 text-slate-200 gap-2"
                     >
                       <X className="h-4 w-4" />
                       <span className="hidden sm:inline">Cancel</span>
@@ -1346,7 +1341,7 @@ export function AccountsPage() {
             {/* Manage Rates button */}
             <Button
               onClick={() => setShowRatesDialog(true)}
-              className="bg-violet-700 hover:bg-violet-600 text-white gap-2"
+              className="bg-slate-700 hover:bg-slate-600 text-slate-100 gap-2"
               title="Manage base rates"
             >
               <Settings className="h-4 w-4" />
@@ -1399,7 +1394,7 @@ export function AccountsPage() {
                       className={cn(
                         'h-8 px-3 text-xs font-semibold rounded-md transition-all',
                         selectedMonth === i
-                          ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-500/20'
+                          ? 'bg-slate-100 text-slate-900 hover:bg-white'
                           : available
                             ? 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50 hover:text-white'
                             : 'bg-slate-800/20 text-slate-600 cursor-not-allowed opacity-50',
@@ -1435,8 +1430,8 @@ export function AccountsPage() {
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
             <CardHeader className="flex flex-row items-center justify-between pb-1 px-4">
               <CardTitle className="text-xs font-medium text-slate-400">Total Salary</CardTitle>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10">
-                <DollarSign className="h-4 w-4 text-emerald-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/40">
+                <DollarSign className="h-4 w-4 text-slate-300" />
               </div>
             </CardHeader>
             <CardContent className="px-4 pt-0">
@@ -1447,8 +1442,8 @@ export function AccountsPage() {
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
             <CardHeader className="flex flex-row items-center justify-between pb-1 px-4">
               <CardTitle className="text-xs font-medium text-slate-400">Balance Due</CardTitle>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10">
-                <ArrowDownToLine className="h-4 w-4 text-amber-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/40">
+                <ArrowDownToLine className="h-4 w-4 text-slate-300" />
               </div>
             </CardHeader>
             <CardContent className="px-4 pt-0">
@@ -1459,20 +1454,20 @@ export function AccountsPage() {
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
             <CardHeader className="flex flex-row items-center justify-between pb-1 px-4">
               <CardTitle className="text-xs font-medium text-slate-400">Paid</CardTitle>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-500/10">
-                <CheckCircle2 className="h-4 w-4 text-green-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/40">
+                <CheckCircle2 className="h-4 w-4 text-slate-300" />
               </div>
             </CardHeader>
             <CardContent className="px-4 pt-0">
-              <p className="text-xl font-bold text-green-400">{grandTotals.paidCount}</p>
+              <p className="text-xl font-bold text-emerald-400">{grandTotals.paidCount}</p>
               <p className="text-xs text-slate-500 mt-0.5">of {grandTotals.totalEmployees} employees</p>
             </CardContent>
           </Card>
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
             <CardHeader className="flex flex-row items-center justify-between pb-1 px-4">
               <CardTitle className="text-xs font-medium text-slate-400">Unpaid</CardTitle>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/10">
-                <XCircle className="h-4 w-4 text-red-400" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/40">
+                <XCircle className="h-4 w-4 text-slate-300" />
               </div>
             </CardHeader>
             <CardContent className="px-4 pt-0">
@@ -1507,7 +1502,7 @@ export function AccountsPage() {
                 </span>
               )}
               {searchQuery && matchCount === 0 && (
-                <span className="text-[10px] text-amber-400 mr-1 whitespace-nowrap">0 results</span>
+                <span className="text-[10px] text-slate-400 mr-1 whitespace-nowrap">0 results</span>
               )}
               <Button
                 variant="ghost"
@@ -1594,22 +1589,22 @@ export function AccountsPage() {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBranchCollapse(branchGroup.branchId); } }}
                   className="flex items-center gap-3 px-4 py-3 bg-slate-900/60 border border-emerald-600/30 rounded-lg cursor-pointer hover:bg-slate-900/80 transition-colors"
                 >
-                  {isBranchCollapsed ? <ChevronRight className="h-5 w-5 text-emerald-400" /> : <ChevronDown className="h-5 w-5 text-emerald-400" />}
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10">
-                    <GitBranch className="h-4 w-4 text-emerald-400" />
+                  {isBranchCollapsed ? <ChevronRight className="h-5 w-5 text-slate-300" /> : <ChevronDown className="h-5 w-5 text-slate-300" />}
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/40">
+                    <GitBranch className="h-4 w-4 text-slate-300" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="text-base font-bold text-white">{branchGroup.branchName}</h3>
                       {branchGroup.branchCode && (
-                        <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0 h-4">
+                        <Badge className="bg-slate-700/50 text-slate-300 border-slate-600/50 text-[10px] px-1.5 py-0 h-4">
                           {branchGroup.branchCode}
                         </Badge>
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500">
                       {branchSites.length} site{branchSites.length !== 1 ? 's' : ''} · {branchTotalEmployees} employee{branchTotalEmployees !== 1 ? 's' : ''}
-                      {' · '}<span className="text-emerald-400 font-medium">{formatNumber(branchTotalSalary)} DHS</span>
+                      {' · '}<span className="text-slate-200 font-medium">{formatNumber(branchTotalSalary)} DHS</span>
                     </p>
                   </div>
                 </div>
@@ -1684,12 +1679,12 @@ export function AccountsPage() {
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-left whitespace-nowrap min-w-[90px]">Emp Code</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-left whitespace-nowrap min-w-[100px]">Trade</th>
                           <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[80px]">Total Hrs</th>
-                          <th className="text-cyan-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[85px] bg-cyan-900/15">{lowRateHeader}</th>
-                          <th className="text-amber-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[85px] bg-amber-900/15">{highRateHeader}</th>
-                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-emerald-900/10">Salary (DHS)</th>
+                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[85px] bg-slate-800/60">{lowRateHeader}</th>
+                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[85px] bg-slate-800/60">{highRateHeader}</th>
+                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-slate-800/60">Salary (DHS)</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[90px]">Advance</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[90px]">Deduction</th>
-                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-emerald-900/10">Total Salary</th>
+                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-slate-800/60">Total Salary</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-center whitespace-nowrap w-[70px]">Status</th>
                           {editMode && <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 w-[36px]"></th>}
                         </tr>
@@ -1727,7 +1722,7 @@ export function AccountsPage() {
                                   isMatchedRow && 'bg-yellow-500/10 ring-1 ring-inset ring-yellow-500/20',
                                   // Non-match states (only when not highlighted).
                                   !isCurrentRow && !isMatchedRow && emp.isPaid && 'bg-emerald-500/5',
-                                  !isCurrentRow && !isMatchedRow && !emp.isPaid && hasSplit && 'bg-amber-500/5',
+                                  !isCurrentRow && !isMatchedRow && !emp.isPaid && hasSplit && 'bg-slate-700/10',
                                   !isCurrentRow && !isMatchedRow && !emp.isPaid && !hasSplit && 'bg-slate-900/30',
                                   editMode && !isCurrentRow && !isMatchedRow && 'hover:bg-slate-700/30',
                                 )}
@@ -1751,10 +1746,10 @@ export function AccountsPage() {
                                       isCurrentRow ? 'text-yellow-200' : isMatchedRow ? 'text-yellow-300' : 'text-white'
                                     )}>
                                       {emp.empName || '-'}
-                                      {emp.isTeamLeader && <span className="text-amber-400 font-bold ml-1">(TL)</span>}
+                                      {emp.isTeamLeader && <span className="text-slate-300 font-semibold ml-1">(TL)</span>}
                                       {emp.isSupervisor && !emp.isTeamLeader && <span className="text-blue-400 font-bold ml-1">(SUP)</span>}
                                       {emp.isTeko && (
-                                        <span className="inline-flex items-center gap-0.5 ml-1 px-1 py-0 rounded bg-violet-500/15 text-violet-400 border border-violet-500/25 text-[8px] font-bold align-middle" title="This employee is marked as Teko">
+                                        <span className="inline-flex items-center gap-0.5 ml-1 px-1 py-0 rounded bg-slate-500/15 text-slate-300 border border-slate-500/25 text-[8px] font-bold align-middle" title="This employee is marked as Teko">
                                           TEKO
                                         </span>
                                       )}
@@ -1820,7 +1815,7 @@ export function AccountsPage() {
                                     <span className="text-[11px] text-slate-300">
                                       {emp.assignedTrade || tradeDisplay(emp)}
                                       {emp.isCustomRate && (
-                                        <span className="ml-1 text-violet-400 text-[10px]">(custom)</span>
+                                        <span className="ml-1 text-slate-400 text-[10px]">(custom)</span>
                                       )}
                                     </span>
                                   )}
@@ -1839,7 +1834,7 @@ export function AccountsPage() {
                                 {/* Rate 2.5/3.0 - Low Rate Hours */}
                                 <td className="py-1.5 px-2 text-right bg-cyan-900/5">
                                   {emp.isCustomRate ? (
-                                    <span className="text-[11px] text-violet-300 font-mono">
+                                    <span className="text-[11px] text-slate-300 font-mono">
                                       {emp.totalHours > 0 ? formatNumber(emp.totalHours) : '-'}
                                     </span>
                                   ) : (
@@ -1856,7 +1851,7 @@ export function AccountsPage() {
                                 </td>
 
                                 {/* Rate 5.0/5.5 - High Rate Hours */}
-                                <td className="py-1.5 px-2 text-right bg-amber-900/5">
+                                <td className="py-1.5 px-2 text-right bg-slate-800/30">
                                   {emp.isCustomRate ? (
                                     <span className="text-[11px] text-slate-600 font-mono">-</span>
                                   ) : (
@@ -1865,7 +1860,7 @@ export function AccountsPage() {
                                       onChange={(v) => handleCellChange(site.id, index, 'highRateHours', v as number)}
                                       className={cn(
                                         'text-[11px] font-mono',
-                                        emp.highRateHours > 0 ? 'text-amber-300' : 'text-slate-600'
+                                        emp.highRateHours > 0 ? 'text-slate-300' : 'text-slate-600'
                                       )}
                                       editMode={editMode}
                                     />
@@ -1873,16 +1868,16 @@ export function AccountsPage() {
                                 </td>
 
                                 {/* Salary (DHS) - hours × rate = salary format */}
-                                <td className="py-1.5 px-2 text-right bg-emerald-900/5">
+                                <td className="py-1.5 px-2 text-right bg-slate-800/20">
                                   <div className="flex flex-col items-end gap-0.5">
                                     <span className="text-[9px] text-slate-500 font-mono">
                                       {emp.isCustomRate ? (
                                         `${formatNumber(emp.totalHours)} × ${formatNumber(emp.lowRate)}`
                                       ) : emp.rateTier === 'split' ? (
                                         <>
-                                          <span className="text-emerald-500">{formatNumber(emp.lowRateHours)} × {formatNumber(emp.lowRate)}</span>
+                                          <span className="text-slate-400">{formatNumber(emp.lowRateHours)} × {formatNumber(emp.lowRate)}</span>
                                           {' + '}
-                                          <span className="text-amber-500">{formatNumber(emp.highRateHours)} × {formatNumber(emp.highRate)}</span>
+                                          <span className="text-slate-400">{formatNumber(emp.highRateHours)} × {formatNumber(emp.highRate)}</span>
                                         </>
                                       ) : emp.rateTier === 'premium' ? (
                                         `${formatNumber(emp.highRateHours)} × ${formatNumber(emp.highRate)}`
@@ -1890,7 +1885,7 @@ export function AccountsPage() {
                                         `${formatNumber(emp.lowRateHours)} × ${formatNumber(emp.lowRate)}`
                                       )}
                                     </span>
-                                    <span className="text-[11px] text-emerald-300 font-mono font-semibold">
+                                    <span className="text-[11px] text-white font-mono font-semibold">
                                       = {formatNumber(emp.totalSalary)}
                                     </span>
                                   </div>
@@ -1919,10 +1914,10 @@ export function AccountsPage() {
                                 </td>
 
                                 {/* Total Salary (Salary - Advance - Deduction = Balance) */}
-                                <td className="py-1.5 px-2 text-right bg-emerald-900/5">
+                                <td className="py-1.5 px-2 text-right bg-slate-800/20">
                                   <span className={cn(
                                     'text-[11px] font-mono font-semibold',
-                                    emp.balanceSalary < 0 ? 'text-red-400' : 'text-emerald-400'
+                                    emp.balanceSalary < 0 ? 'text-red-400' : 'text-slate-200'
                                   )}>
                                     {formatNumber(emp.balanceSalary)}
                                   </span>
@@ -1977,13 +1972,13 @@ export function AccountsPage() {
                             <td className="text-[11px] text-white font-semibold py-2 px-2 text-right font-mono">
                               {formatNumber(siteTotalHours)}
                             </td>
-                            <td className="text-[11px] text-cyan-300 font-semibold py-2 px-2 text-right font-mono bg-cyan-900/5">
+                            <td className="text-[11px] text-slate-200 font-semibold py-2 px-2 text-right font-mono bg-slate-800/40">
                               {formatNumber(siteTotalLowRateHours)}
                             </td>
-                            <td className="text-[11px] text-amber-300 font-semibold py-2 px-2 text-right font-mono bg-amber-900/5">
+                            <td className="text-[11px] text-slate-200 font-semibold py-2 px-2 text-right font-mono bg-slate-800/40">
                               {formatNumber(siteTotalHighRateHours)}
                             </td>
-                            <td className="text-[11px] text-emerald-300 font-semibold py-2 px-2 text-right font-mono bg-emerald-900/5">
+                            <td className="text-[11px] text-slate-200 font-semibold py-2 px-2 text-right font-mono bg-slate-800/40">
                               {formatNumber(siteTotalSalary)}
                             </td>
                             <td className="text-[11px] text-white font-semibold py-2 px-2 text-right font-mono">
@@ -1992,7 +1987,7 @@ export function AccountsPage() {
                             <td className="text-[11px] text-white font-semibold py-2 px-2 text-right font-mono">
                               {formatNumber(siteTotalDeduction)}
                             </td>
-                            <td className="text-[11px] text-emerald-400 font-semibold py-2 px-2 text-right font-mono bg-emerald-900/5">
+                            <td className="text-[11px] text-slate-200 font-semibold py-2 px-2 text-right font-mono bg-slate-800/40">
                               {formatNumber(siteTotalBalance)}
                             </td>
                             <td colSpan={editMode ? 2 : 1}></td>
@@ -2027,10 +2022,10 @@ export function AccountsPage() {
 
           {/* ── Grand Totals Card ── */}
           {sites.length > 0 && (
-            <Card className="bg-slate-800/70 border-2 border-emerald-500/30 shadow-lg shadow-emerald-500/5">
+            <Card className="bg-slate-800/70 border border-slate-600/50">
               <CardHeader className="px-4 py-3">
                 <CardTitle className="text-base text-white flex items-center gap-2">
-                  <DollarSign className="h-4 w-4 text-emerald-400" />
+                  <DollarSign className="h-4 w-4 text-slate-300" />
                   Grand Totals - All Sites
                 </CardTitle>
               </CardHeader>
@@ -2042,7 +2037,7 @@ export function AccountsPage() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Total Salary</p>
-                    <p className="text-sm font-bold text-emerald-300 font-mono">{formatNumber(grandTotals.totalSalary)}</p>
+                    <p className="text-sm font-bold text-white font-mono">{formatNumber(grandTotals.totalSalary)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Total Advances</p>
@@ -2054,11 +2049,11 @@ export function AccountsPage() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Balance Due</p>
-                    <p className="text-sm font-bold text-amber-300 font-mono">{formatNumber(grandTotals.balanceDue)}</p>
+                    <p className="text-sm font-bold text-slate-200 font-mono">{formatNumber(grandTotals.balanceDue)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Paid</p>
-                    <p className="text-sm font-bold text-green-400 font-mono">{grandTotals.paidCount}</p>
+                    <p className="text-sm font-bold text-emerald-400 font-mono">{grandTotals.paidCount}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Unpaid</p>
