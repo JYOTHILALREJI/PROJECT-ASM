@@ -1248,7 +1248,7 @@ export function AccountsPage() {
 
   // ── Column headers ──
   const lowRateHeader = `Base Rate ${baseRates?.baseLow ?? 3.5}`;
-  const highRateHeader = `Premium ${baseRates?.helperHigh ?? 6.0} (Helper) / ${baseRates?.tradeHigh ?? 7.0} (Trade)`;
+  const highRateHeader = `After 1000h — ${baseRates?.helperHigh ?? 6.0} (Helper) / ${baseRates?.tradeHigh ?? 7.0} (Trade)`;
 
   return (
     <div className="flex flex-col gap-6">
@@ -2080,16 +2080,16 @@ export function AccountsPage() {
               Manage Base Rates
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Set the base hourly rate (below threshold) and the premium rates
-              after the threshold. Helpers earn the helper premium; every other
-              trade earns the trade premium. Custom and trade rates still
-              override these defaults.
+              Set the base hourly rate and the rates that apply after the
+              1000h threshold — Helpers earn {baseRates?.helperHigh ?? 6.0} and every
+              other trade earns {baseRates?.tradeHigh ?? 7.0}. Custom and trade rates
+              still override these defaults.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* Base rate — everyone below threshold */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Base Rate (Below Threshold)</div>
+              <div className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Base Rate (Below 1000h)</div>
               <div className="flex items-center gap-3">
                 <label className="text-xs text-slate-400 w-40">All Employees</label>
                 <Input type="number" step="0.1" min="0" value={ratesForm.baseLow}
@@ -2098,22 +2098,22 @@ export function AccountsPage() {
                 <span className="text-xs text-slate-500">/hr</span>
               </div>
             </div>
-            {/* Above threshold — helper premium */}
+            {/* After 1000h — helpers */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-amber-300 uppercase tracking-wide">After Threshold — Helpers</div>
+              <div className="text-xs font-semibold text-amber-300 uppercase tracking-wide">After 1000h — Helpers</div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-400 w-40">Helper Premium</label>
+                <label className="text-xs text-slate-400 w-40">Helpers</label>
                 <Input type="number" step="0.1" min="0" value={ratesForm.helperHigh}
                   onChange={(e) => setRatesForm({ ...ratesForm, helperHigh: parseFloat(e.target.value) || 0 })}
                   className="bg-slate-900 border-slate-600 text-white h-8" />
                 <span className="text-xs text-slate-500">/hr</span>
               </div>
             </div>
-            {/* Above threshold — trade premium */}
+            {/* After 1000h — other trades */}
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-sky-300 uppercase tracking-wide">After Threshold — Other Trades</div>
+              <div className="text-xs font-semibold text-sky-300 uppercase tracking-wide">After 1000h — Other Trades</div>
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-400 w-40">Trade Premium</label>
+                <label className="text-xs text-slate-400 w-40">Other Trades</label>
                 <Input type="number" step="0.1" min="0" value={ratesForm.tradeHigh}
                   onChange={(e) => setRatesForm({ ...ratesForm, tradeHigh: parseFloat(e.target.value) || 0 })}
                   className="bg-slate-900 border-slate-600 text-white h-8" />

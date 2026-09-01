@@ -576,9 +576,9 @@ export function EmployeeHoursDirectory() {
                 </SelectTrigger>
                 <SelectContent className="bg-slate-800 border-slate-700">
                   <SelectItem value="all">All Rates</SelectItem>
-                  <SelectItem value="base">Base (Below Threshold)</SelectItem>
-                  <SelectItem value="helper_premium">Helper Premium (Above)</SelectItem>
-                  <SelectItem value="trade_premium">Trade Premium (Above)</SelectItem>
+                  <SelectItem value="base">Below 1000h (Base)</SelectItem>
+                  <SelectItem value="helper_premium">Helpers — After 1000h</SelectItem>
+                  <SelectItem value="trade_premium">Other Trades — After 1000h</SelectItem>
                   <SelectItem value="Custom">Custom</SelectItem>
                 </SelectContent>
               </Select>

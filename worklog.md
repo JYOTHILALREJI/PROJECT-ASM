@@ -215,3 +215,20 @@ Stage Summary:
 - Salary math centralized in payroll-math.ts — consistent 2dp rounding, drift-free threshold splits, clamped balances, no hardcoded rates anywhere in the pipeline.
 - All existing salary data re-priced to the new structure with hours verified unchanged (878.00h).
 - Commit: b0fb769
+
+---
+Task ID: threshold-terminology-rename
+Agent: main (Z.ai Code)
+Task: Remove all user-facing "Premium"/"Basic"/"Standard" tier terminology — it's just a threshold, display 1000
+
+Work Log:
+- Kept all internal data identifiers (rateTier: 'standard'|'premium', premiumRecordId, filter values helper_premium/trade_premium) untouched for DB/API compatibility; only user-visible strings changed.
+- employee-hours-ledger.tsx: milestone gauge "Current Tier" stat (Premium/Standard) now displays the threshold value (1000) labelled "Threshold (hrs)"; bottom summary "Rate Tier" card likewise shows 1000 / "Threshold (hrs)"; both custom-rate-cleared toasts reworded to "Base rate will apply again (6/7 after the 1000h threshold)". Role badge "Standard" (Supervisor/TL/Standard) kept — role, not rate.
+- accounts-page.tsx: grid header "Premium 6 (Helper) / 7 (Trade)" → "After 1000h — 6 (Helper) / 7 (Trade)"; Manage Base Rates dialog description rewritten without "premium"; sections now "Base Rate (Below 1000h)" / "After 1000h — Helpers" (label "Helpers") / "After 1000h — Other Trades" (label "Other Trades").
+- employee-hours-directory.tsx: rate filter options → "Below 1000h (Base)", "Helpers — After 1000h", "Other Trades — After 1000h" (values unchanged).
+- api/employees/hours-summary: rateLabel now `After ${threshold}h (6)` / `Below ${threshold}h (3.5)` using the dynamic threshold variable (was "Helper premium (6)" / "Base (3.5)").
+- employee-page.tsx: custom-rate help text → "overrides ALL rates (3.5 base rate and the 6/7 rates after the 1000h threshold)"; placeholder → "Leave empty to use default rates".
+- Verified via curl + agent-browser: filter dropdown options render correctly; directory badges show "After 1000h (6)" / "Below 1000h (3.5)"; John Doe (1050h) ledger shows threshold stat 1000; Accounts headers + rates dialog verified with 3.5/6/7 fields; eslint clean on all 5 modified files.
+
+Stage Summary:
+- All UI copy now speaks in plain threshold terms: 3.5 below 1000h, 6/7 after 1000h. No "Premium"/"Basic"/tier names anywhere user-visible; internal rateTier identifiers unchanged.

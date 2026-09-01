@@ -163,10 +163,10 @@ export async function GET(request: NextRequest) {
         rateLabel = `${effectiveTrade} (${tradeRateVal}${hasBonus ? ' +0.5' : ''})`;
       } else if (cumulativeHours >= threshold) {
         effectiveRate = highRate;
-        rateLabel = isHelper ? `Helper premium (${highRate})` : `${effectiveTrade} premium (${highRate})`;
+        rateLabel = `After ${threshold}h (${highRate})`;
       } else {
         effectiveRate = lowRate;
-        rateLabel = `Base (${lowRate})`;
+        rateLabel = `Below ${threshold}h (${lowRate})`;
       }
 
       // Resolve current site: prefer latest deployment, fallback to employee.currentSite
@@ -208,10 +208,10 @@ export async function GET(request: NextRequest) {
 
     if (rateFilter) {
       filtered = filtered.filter((emp) => {
-        // Semantic rate tiers (independent of the configured amounts):
+        // Semantic rate groups (independent of the configured amounts):
         //   base          → below threshold, no custom/trade rate (baseLow)
-        //   helper_premium→ above threshold, Helper (helperHigh)
-        //   trade_premium → above threshold, other trade (tradeHigh)
+        //   helper_premium→ after the 1000h threshold, Helper (helperHigh)
+        //   trade_premium → after the 1000h threshold, other trade (tradeHigh)
         //   Custom        → any per-employee flat rate
         if (rateFilter === 'Custom') return emp.customHourlyRate != null;
         if (rateFilter === 'base') {

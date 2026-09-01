@@ -3137,13 +3137,13 @@ export function EmployeePage() {
                   <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
                     <Label className="text-slate-300 text-sm">Custom Rate Override (AED/hr)</Label>
                     <p className="text-xs text-slate-500 mb-2">
-                      If set, this overrides ALL tier rates (base rate + helper/trade premiums) for this employee across all calculations.
+                      If set, this overrides ALL rates for this employee (3.5 base rate and the 6/7 rates after the 1000h threshold) across all calculations.
                     </p>
                     <Input
                       type="number"
                       step="0.1"
                       min="0"
-                      placeholder="Leave empty to use standard rates"
+                      placeholder="Leave empty to use default rates"
                       value={formData.customHourlyRate}
                       onChange={(e) => handleFormChange('customHourlyRate', e.target.value)}
                       className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"

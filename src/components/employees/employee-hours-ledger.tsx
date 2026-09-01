@@ -598,7 +598,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
           title: numericRate ? 'Custom Rate Set' : 'Custom Rate Cleared',
           description: numericRate
             ? `Custom rate set to ${numericRate} AED/hr from ${currentMonth} onward. Past months keep their previous rate.`
-            : 'Custom rate removed. Standard tier rates will apply.',
+            : 'Custom rate removed. Base rate will apply again (6/7 after the 1000h threshold).',
         });
         setIsEditingRate(false);
         await fetchWorkLogs();
@@ -623,7 +623,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
       });
       const json = await res.json();
       if (json.success) {
-        toast({ title: 'Custom Rate Cleared', description: 'Standard tier rates will now apply.' });
+        toast({ title: 'Custom Rate Cleared', description: 'Base rate will apply again (6/7 after the 1000h threshold).' });
         setCustomRateInput('');
         setIsEditingRate(false);
         await fetchWorkLogs();
@@ -885,12 +885,10 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                   <p className="text-xs text-slate-500">Total Hours</p>
                 </div>
                 <div className="text-center">
-                  <p className={`text-lg font-bold ${
-                    milestoneProgress.crossed ? 'text-red-400' : 'text-emerald-400'
-                  }`}>
-                    {milestoneProgress.crossed ? 'Premium' : 'Standard'}
+                  <p className="text-lg font-bold text-white">
+                    {milestoneProgress.threshold}
                   </p>
-                  <p className="text-xs text-slate-500">Current Tier</p>
+                  <p className="text-xs text-slate-500">Threshold (hrs)</p>
                 </div>
               </div>
             </div>
@@ -1358,11 +1356,11 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
           </Card>
           <Card className="bg-slate-800/50 border-slate-700/50">
             <CardContent className="p-4 text-center">
-              <p className={`text-2xl font-bold ${milestoneProgress.crossed ? 'text-red-400' : 'text-emerald-400'}`}>
-                {milestoneProgress.crossed ? 'Premium' : 'Standard'}
+              <p className="text-2xl font-bold text-white">
+                {employeeInfo.hoursThreshold}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Rate Tier ({employeeInfo.hoursThreshold}h threshold)
+                Threshold (hrs)
               </p>
             </CardContent>
           </Card>
