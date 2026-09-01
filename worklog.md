@@ -183,3 +183,35 @@ Stage Summary:
 - Dashboard: count-up stats, staggered cards, quick actions. Login: animated ambient background.
 - Bug fixes: accounts API tekoInfoMap crash, mobile sidebar auto-open, palette filter, pre-existing lint errors.
 - Dev server runs on port 3000. Test account: admin@asm.com / admin123.
+
+---
+Task ID: base-rate-3.5-premium-6-7
+Agent: main (Z.ai Code)
+Task: Change the base rate to 3.5; after the threshold 6 for Helpers and 7 for other trades; make the hour and salary calculation stronger
+
+Work Log:
+- Mapped the full rate pipeline: BaseRate singleton, rate-resolver.ts (canonical priority), allocation-engine.ts, recalculation.ts, attendance-sync.ts, client-rate-resolver.ts, and every API/UI consumer.
+- prisma/schema.prisma: BaseRate reworked from 6 role fields (standard/tl/sup × low/high) to 3 trade-based fields — baseLow(3.5), helperHigh(6.0), tradeHigh(7.0). Ran `prisma db push` + regenerated client.
+- src/lib/payroll-math.ts (NEW): single source of truth for payroll arithmetic — roundMoney/roundHours (NaN/Infinity/negative guards), computeThresholdSplit (the ONE canonical drift-free split used everywhere), computeSalary, computeBalance (clamped ≥ 0), composeSalaryRecord, safeNonNegative/safeRate.
+- src/lib/trade-utils.ts (NEW): pure isHelperTrade/normalizeTrade shared by server & client.
+- rate-resolver.ts: applyPriority now trade-aware — below threshold baseLow for everyone; above threshold helperHigh (Helpers) vs tradeHigh (other trades). resolveRateSync/resolveEmployeeRate/resolveRateMapForMonth take/derive isHelper. Custom rate + changelog override + defined TradeRate(+0.5 TL/Sup) still win.
+- client-rate-resolver.ts: mirrored trade-aware logic + DEFAULT_CLIENT_BASE_RATES (3.5/6/7); resolveClientRate takes trade name.
+- allocation-engine.ts: uses payroll-math everywhere (per-site hour accumulation rounded, splits via computeThresholdSplit, totals via composeSalaryRecord); camp_sitting rtPerHour calc trade-aware; computeAllocationSplit takes trade; NEW isDefaultLikeRate() — stored rates matching any shipped default (2.5/3.0/5.0/5.5 or current baseLow/helperHigh/tradeHigh) are re-priced on every run, genuine manual overrides preserved; fixed latent `tradeRate!` undefined-var bug (reuse resolver lowRate which already includes +0.5).
+- recalculation.ts: getEmployeeRates trade-aware (also fixed async return type); computeMonthSplit delegates to payroll-math; all salary writes rounded/clamped via payroll-math.
+- attendance-sync.ts, api/accounts (both record paths + stubs), api/accounts/employee-monthly: pass isHelper; baseLow fallbacks.
+- api/base-rates: 3-field validation (finite, > 0), rounded, returns updated rates on PUT.
+- api/working-hours: removed hardcoded `?? 2.5` fallbacks — new resolveDefaultLowRate() resolves custom > trade > baseLow per employee; hours/rates rounded.
+- api/salary-records: GET computeGrossSalary uses canonical resolver (was hardcoded 2.5/5.0 ÷ divisors 3.0/5.5); POST resolves real low rate + effective trade (was 2.5/divisor + hardcoded 'Helper' trade) and UPSERTS instead of blind create — fixes unique-constraint crash when a soft-deleted row occupies the key; PUT recomputes totalSalary/balance via payroll-math.
+- api/salary-records/export-excel: DB rates + trade-aware computeGrossSalary (was hardcoded constants); balances clamped.
+- api/employees/hours-summary: rate labels ("Base (3.5)", "Helper premium (6)"), isHelper in payload; rate filters now semantic (base / helper_premium / trade_premium / Custom) instead of hardcoded '2.5'/'5.0'/'3.0'/'5.5'.
+- accounts-page.tsx: Manage Rates dialog 3 fields (Base Rate / Helper Premium / Trade Premium); trade-change reset sets baseLow + helper-or-trade premium; editable grid recomputes via payroll-math + canonical split; headers "Base Rate 3.5" / "Premium 6 (Helper) / 7 (Trade)".
+- consolidated-salary-page.tsx, employee-hours-ledger.tsx, employee-hours-directory.tsx: new BaseRates shape, trade-aware resolution, API-driven rate badges, semantic filters.
+- scripts/migrate-rates.mjs (NEW): upserts BaseRate singleton (3.5/6/7) and re-prices every existing month; re-priced old default rates 2.5/3.0 → 3.5 and 5.0/5.5 → 6/7 by trade while preserving genuine custom rates. Result: 878.00h preserved exactly, salary 2195.00 → 3073.00, distribution standard@3.5.
+- Verified end-to-end via APIs + browser: /api/base-rates returns 3.5/6/7; hours-summary shows Helper above threshold @ 6; created a Mason trade worker with 1200h → allocation split 1000h@3.5 + 200h@7.0 = 4900 ✓; switched to Helper → re-allocation to 200h@6.0 = 4700 ✓; Excel export 40h×3.5=140 ✓; Accounts page renders new headers + 3-field rates dialog; test data cleaned up (final: 878h = 3073 salary).
+- eslint clean on all modified files (0 errors); next build succeeds; tsc error count reduced vs baseline (fixed base-rates casts + async signature).
+
+Stage Summary:
+- New pay structure live: base rate 3.5 below threshold for everyone; after the cumulative threshold, Helpers earn 6.0 and other trades 7.0. Custom rates, per-month changelog overrides and defined TradeRates (+0.5 TL/Sup) still take priority.
+- Salary math centralized in payroll-math.ts — consistent 2dp rounding, drift-free threshold splits, clamped balances, no hardcoded rates anywhere in the pipeline.
+- All existing salary data re-priced to the new structure with hours verified unchanged (878.00h).
+- Commit: b0fb769
