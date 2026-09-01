@@ -258,3 +258,26 @@ Stage Summary:
 - Header decluttered (no username/bell/presence); presence chip lives under the logo and survives sidebar collapse; page search bars use full header width.
 - Accounts page re-skinned to a calm slate + single-accent system; attendance instructions downgraded to subtle hints.
 - Site assignment from Attendance is global (until changed/removed) and mid-month moves render with exact merged site-name columns on both old and new site grids.
+
+---
+Task ID: print-fix-badges-empcode
+Agent: main (Z.ai Code)
+Task: 1) Fix attendance print layout (stretched employee row) + wider signature column; 2) remove Leave/Cancellation Requests from the Notifications page + live count badges on sidebar items (incl. Notifications); 3) full EMP.CODE visible in the attendance grid
+
+Work Log:
+- attendance-sheet.tsx (print fix): root cause of the stretched row — `.main-table{height:100%}` inside a flex-1 wrapper distributes ALL leftover page height across only the real employee rows (1 employee = 1 giant row filling the sheet). Fix: blank ruled filler rows now complete every page grid (16 slots first page / 20 after, from FIRST_PAGE_ROWS_COUNT / ROWS_PER_PAGE), so leftover height is shared uniformly (~40px per row) and the sheet reads like a pre-ruled paper form. Applied to BOTH the print/PDF HTML builder (buildPageHtml) and the live React preview (preview filler tds fixed at 40px).
+- Signature column widened 15% → 23% (widths now 7/37/16/17/23) in tableHeaderHtml (print/PDF), the preview main table, AND the preview EXTRA EMPLOYEES table (previously mismatched fixed px widths — now aligned to the same percentages everywhere).
+- Verified by downloading the real PDF from the UI: employee row normal height, 15 uniform ruled fillers, wider signature column, extra-employees table column-aligned with the main table. (Note: a stale PDF from the earlier session exists in ~/Downloads — check timestamps before comparing.)
+- notification-page.tsx: removed the "Requests" tab and the LeaveRequestsTab / CancellationRequestsTab components (~640 lines) plus now-unused RequestCard, generateLeaveApplicationHtml, printLeaveRequest, calculateTotalDays, formatFormalDate, MONTHS/YEARS constants, LeaveRequest/CancellationRequest types and FileText/CalendarDays/Ban/Printer/HourglassIcon/CheckCircle2/XCircle/Select imports (bulk deletions via scripts/trim-notifications-page.py with per-line boundary assertions). Notifications page = exactly two tabs: Warnings (default) + Fines; subtitle updated.
+- app-sidebar.tsx: one combined counts fetcher (GET /api/notifications?limit=1 + /api/leave-requests?status=pending + /api/cancellation-requests?status=pending) refreshing every 30s, on window focus, AND on a new custom window event 'asm:refresh-badge-counts'. Generic per-item badge rendering: Notifications = blue (unread), Leave Requests = amber (pending), Cancellations = red (pending); expanded = count Badge, collapsed = compact top-right dot (min-w-4, "9+" overflow). Verified in both sidebar states via DOM + screenshots (the attendance active-pill was correctly distinguished from badges during checks).
+- leave-request-page.tsx + cancellation-request-page.tsx: dispatch 'asm:refresh-badge-counts' after successful create/review so sidebar badges update instantly.
+- attendance-page.tsx: Emp. Code column w-24 → w-28 (header + cells), truncation removed (whitespace-nowrap) — "ASM-2025-001" fully visible in the grid.
+- Browser verification: badges appear/clear live with real pending requests created via API; notifications page shows only Warnings/Fines; sheet preview + downloaded PDF correct; full emp code visible. eslint: 0 errors (1 pre-existing warning in use-search-navigation.ts, untouched).
+- Test data fully cleaned: scripts/cleanup-badge-test-data.ts + scripts/cleanup-badge-test-2.ts removed both test requests, all test notifications, and restored the employee to active; API counts re-verified 0/0/0.
+
+Stage Summary:
+- Attendance print/PDF no longer stretches a single employee row across the page — every page renders as a uniform pre-ruled grid with a 23% signature column; preview, print and PDF all match.
+- Notifications page is now Warnings + Fines only; leave/cancellation management lives exclusively in their side-panel pages.
+- Sidebar shows live count badges on Notifications / Leave Requests / Cancellations (expanded + collapsed), refreshing every 30s, on focus, and instantly on request create/review events.
+- Attendance grid shows the full employee code without ellipsis.
+- Session note: a tool-infrastructure outage occurred mid-verification; after recovery the remaining cleanup + this worklog entry were completed. No code changes were lost.
