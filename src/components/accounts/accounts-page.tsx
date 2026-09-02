@@ -297,8 +297,17 @@ function mergeApiEntries(
     const campSalary = computeSalary(campHours, lowRate); // camp_sitting uses the low rate
     const totalSalary = roundMoney(standardSalary + premiumSalary + campSalary);
 
-    const deduction = standardEntry?.salaryRecord?.deduction ?? 0;
-    const advance = standardEntry?.salaryRecord?.advance ?? 0;
+    // Deduction/advance live on the record the SERVER merged them into:
+    // standard-tier first, else the first available record (premium/camp).
+    // Reading only the standard entry showed "-" for premium-only months.
+    const deduction =
+      standardEntry?.salaryRecord?.deduction ??
+      premiumEntry?.salaryRecord?.deduction ??
+      campEntry?.salaryRecord?.deduction ?? 0;
+    const advance =
+      standardEntry?.salaryRecord?.advance ??
+      premiumEntry?.salaryRecord?.advance ??
+      campEntry?.salaryRecord?.advance ?? 0;
     const isPaid = (standardEntry?.salaryRecord?.isPaid ?? false) || (premiumEntry?.salaryRecord?.isPaid ?? false);
 
     let rateTier: 'standard' | 'premium' | 'split' = 'standard';

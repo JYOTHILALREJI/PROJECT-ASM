@@ -69,6 +69,29 @@ interface PendingAdvance {
   effectiveMonth: string;
   effectiveYear: number;
   createdAt: string;
+  // Recurring fields (returned by GET /api/advances)
+  deductionType?: string;
+  monthlyDeductionAmount?: number | null;
+  remainingBalance?: number | null;
+  recurringUntil?: string | null;
+  status?: string;
+}
+
+/** Active recurring advance returned by pending-by-month (separate array) */
+interface RecurringAdvanceRow {
+  id: string;
+  empId: string;
+  empName: string;
+  employeeCode: string;
+  amount: number;
+  reason: string;
+  effectiveMonth: string;
+  effectiveYear: number;
+  monthlyDeductionAmount: number | null;
+  remainingBalance: number | null;
+  recurringUntil: string | null;
+  status: string;
+  createdAt: string;
 }
 
 /* ───────── Helpers ───────── */
@@ -92,6 +115,13 @@ function getNextMonth(year: number, month: number): { year: number; month: numbe
 
 function formatNumber(n: number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** "YYYY-MM" -> "Mar 2027" for display */
+function formatMonthKey(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  if (!y || !m || m < 1 || m > 12) return key;
+  return `${MONTH_FULL[m - 1]} ${y}`;
 }
 
 /* ───────── Main Component ───────── */
@@ -123,12 +153,18 @@ export function AdvancePage() {
 
   // ── Recurring deduction state ──
   // deductionType: "one_time" (full amount in one month) or "recurring"
-  // (monthlyDeductionAmount deducted each month until repaid)
+  // (monthlyDeductionAmount deducted each month until repaid or until the
+  // optional inclusive end month recurringUntil is reached)
   const [deductionType, setDeductionType] = useState<'one_time' | 'recurring'>('one_time');
   const [monthlyDeductionAmount, setMonthlyDeductionAmount] = useState<number>(50);
+  // Optional inclusive END month for recurring deductions
+  const [recurringEndEnabled, setRecurringEndEnabled] = useState(false);
+  const [recurringUntilMonth, setRecurringUntilMonth] = useState<number>(now.getMonth()); // 0-indexed
+  const [recurringUntilYear, setRecurringUntilYear] = useState<number>(now.getFullYear());
 
   // Existing pending advances for the selected month
   const [pendingAdvances, setPendingAdvances] = useState<PendingAdvance[]>([]);
+  const [recurringAdvances, setRecurringAdvances] = useState<RecurringAdvanceRow[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
 
   // Saving state
@@ -187,11 +223,14 @@ export function AdvancePage() {
       const data = await res.json();
       if (data.success) {
         setPendingAdvances(data.data.advances || []);
+        setRecurringAdvances(data.data.recurringAdvances || []);
       } else {
         setPendingAdvances([]);
+        setRecurringAdvances([]);
       }
     } catch {
       setPendingAdvances([]);
+      setRecurringAdvances([]);
     } finally {
       setLoadingPending(false);
     }
@@ -300,6 +339,28 @@ export function AdvancePage() {
       }
     }
 
+    // Validate recurring fields
+    const isRecurring = deductionType === 'recurring';
+    const recurringUntilKey = recurringEndEnabled
+      ? getMonthString(recurringUntilYear, recurringUntilMonth)
+      : null;
+    if (isRecurring && recurringEndEnabled && recurringUntilKey && recurringUntilKey < monthStr) {
+      toast({
+        title: 'Invalid end month',
+        description: `The "deduct until" month (${formatMonthKey(recurringUntilKey)}) cannot be earlier than the effective month (${formatMonthKey(monthStr)})`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (isRecurring && (!monthlyDeductionAmount || monthlyDeductionAmount <= 0)) {
+      toast({
+        title: 'Invalid monthly amount',
+        description: 'Monthly deduction amount must be greater than 0',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -312,7 +373,8 @@ export function AdvancePage() {
           effectiveYear: selectedYear,
           // Recurring deduction fields
           deductionType,
-          monthlyDeductionAmount: deductionType === 'recurring' ? monthlyDeductionAmount : undefined,
+          monthlyDeductionAmount: isRecurring ? monthlyDeductionAmount : undefined,
+          recurringUntil: isRecurring ? recurringUntilKey : undefined,
         })),
         // Send both id and email so the server can resolve the creator
         // even if the localStorage id is stale (e.g., after a DB reset).
@@ -329,8 +391,8 @@ export function AdvancePage() {
       if (data.success) {
         toast({
           title: 'Advances saved',
-          description: deductionType === 'recurring'
-            ? `${data.data.count} recurring advance(s) saved. ${monthlyDeductionAmount} AED/month will be deducted from ${MONTH_FULL[selectedMonth]} ${selectedYear} salary until repaid.`
+          description: isRecurring
+            ? `${data.data.count} recurring advance(s) saved. ${monthlyDeductionAmount} AED/month will be deducted from ${MONTH_FULL[selectedMonth]} ${selectedYear} salary ${recurringUntilKey ? `until ${formatMonthKey(recurringUntilKey)}` : 'until fully repaid'}.`
             : `${data.data.count} advance(s) saved for ${MONTH_FULL[selectedMonth]} ${selectedYear}. They will be deducted from the ${MONTH_FULL[selectedMonth]} ${selectedYear} salary.`,
         });
         setBucket(new Map());
@@ -344,7 +406,7 @@ export function AdvancePage() {
     } finally {
       setSaving(false);
     }
-  }, [user, bucketArray, commonAmount, monthStr, selectedYear, selectedMonth, fetchPendingAdvances]);
+  }, [user, bucketArray, commonAmount, monthStr, selectedYear, selectedMonth, fetchPendingAdvances, deductionType, monthlyDeductionAmount, recurringEndEnabled, recurringUntilMonth, recurringUntilYear]);
 
   // ── Delete pending advance ──
   const handleDeletePending = useCallback(async (advanceId: string, empName: string) => {
@@ -712,11 +774,96 @@ export function AdvancePage() {
                           className="bg-slate-900 border-slate-600 text-white h-8"
                         />
                         <p className="text-[10px] text-slate-500">
-                          This amount will be deducted from the employee's salary each month
-                          starting from {MONTH_FULL[selectedMonth]} {selectedYear} until the full
-                          advance is repaid. You can change the amount later — the new amount
-                          applies from the next month onward.
+                          This amount will be deducted from the employee&apos;s salary each month
+                          starting from {MONTH_FULL[selectedMonth]} {selectedYear}
+                          {recurringEndEnabled
+                            ? ` until ${MONTH_FULL[recurringUntilMonth]} ${recurringUntilYear}`
+                            : ' until the full advance is repaid'}. You can change the amount later —
+                          the new amount applies from the next month onward.
                         </p>
+
+                        {/* Deduct until (optional inclusive end month) */}
+                        <div className="pt-2 mt-1 border-t border-slate-700/40 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs text-slate-400">Deduct until (optional)</Label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = !recurringEndEnabled;
+                                setRecurringEndEnabled(next);
+                                // Sensible default when enabling: 12 months after the effective month
+                                if (next) {
+                                  const end = getNextMonth(selectedYear, selectedMonth);
+                                  for (let i = 1; i < 12; i++) {
+                                    const n = getNextMonth(end.year, end.month);
+                                    end.year = n.year; end.month = n.month;
+                                  }
+                                  setRecurringUntilYear(end.year);
+                                  setRecurringUntilMonth(end.month);
+                                }
+                              }}
+                              className={cn(
+                                'text-[10px] px-2 py-1 rounded border transition-colors',
+                                recurringEndEnabled
+                                  ? 'bg-violet-500/20 text-violet-300 border-violet-500/30'
+                                  : 'bg-slate-700 text-slate-400 border-slate-600'
+                              )}
+                              title="Stop the recurring deduction after a specific month"
+                            >
+                              {recurringEndEnabled ? 'End month ON' : 'Set end month'}
+                            </button>
+                          </div>
+                          {recurringEndEnabled && (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  value={String(recurringUntilMonth)}
+                                  onValueChange={(v) => setRecurringUntilMonth(parseInt(v, 10))}
+                                >
+                                  <SelectTrigger className="h-8 text-xs flex-1 bg-slate-900 border-slate-600 text-white">
+                                    <SelectValue placeholder="Month" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-60">
+                                    {MONTH_FULL.map((m, idx) => (
+                                      <SelectItem key={m} value={String(idx)} className="text-xs">
+                                        {m}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Select
+                                  value={String(recurringUntilYear)}
+                                  onValueChange={(v) => setRecurringUntilYear(parseInt(v, 10))}
+                                >
+                                  <SelectTrigger className="h-8 text-xs w-[100px] bg-slate-900 border-slate-600 text-white">
+                                    <SelectValue placeholder="Year" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-60">
+                                    {Array.from({ length: 8 }, (_, i) => now.getFullYear() + i).map((y) => (
+                                      <SelectItem key={y} value={String(y)} className="text-xs">
+                                        {y}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <p className="text-[10px] text-violet-400/80">
+                                The deduction still happens in{' '}
+                                <span className="font-semibold">
+                                  {MONTH_FULL[recurringUntilMonth]} {recurringUntilYear}
+                                </span>{' '}
+                                itself (inclusive), then stops automatically — even if the advance
+                                is not fully repaid yet.
+                              </p>
+                              {getMonthString(recurringUntilYear, recurringUntilMonth) < monthStr && (
+                                <p className="text-[10px] text-red-400">
+                                  ⚠ End month is earlier than the effective month
+                                  ({MONTH_FULL[selectedMonth]} {selectedYear}) — it will be rejected.
+                                </p>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -826,7 +973,7 @@ export function AdvancePage() {
                   <Skeleton key={i} className="h-16 bg-slate-700/50" />
                 ))}
               </div>
-            ) : pendingAdvances.length === 0 ? (
+            ) : pendingAdvances.length === 0 && recurringAdvances.length === 0 ? (
               <div className="py-12 text-center">
                 <CheckCircle2 className="h-10 w-10 text-slate-700 mx-auto mb-3" />
                 <p className="text-sm text-slate-400 font-medium">No pending advances</p>
@@ -855,10 +1002,16 @@ export function AdvancePage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-white font-medium truncate">{adv.empName}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-[10px] text-slate-500 font-mono">{adv.employeeCode}</span>
                         {adv.reason && (
                           <span className="text-[10px] text-slate-400 italic truncate">— {adv.reason}</span>
+                        )}
+                        {adv.deductionType === 'recurring' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/25 font-medium">
+                            Recurring · {formatNumber(adv.monthlyDeductionAmount ?? 0)} DHS/mo
+                            {adv.recurringUntil ? ` · until ${formatMonthKey(adv.recurringUntil)}` : ' · until repaid'}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -879,6 +1032,62 @@ export function AdvancePage() {
                     </Button>
                   </div>
                 ))}
+
+                {/* Recurring advances started this month */}
+                {recurringAdvances.length > 0 && (
+                  <div className="pt-3 mt-3 border-t border-slate-700/50 space-y-2">
+                    <p className="text-xs text-violet-300 font-medium flex items-center gap-1.5">
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      Recurring advances starting {MONTH_FULL[selectedMonth]} {selectedYear}
+                      <span className="text-slate-500 font-normal">
+                        ({recurringAdvances.length} — monthly installments, deducted automatically)
+                      </span>
+                    </p>
+                    {recurringAdvances.map((adv) => (
+                      <div
+                        key={adv.id}
+                        className="flex items-center gap-3 rounded-lg border border-violet-500/25 bg-violet-500/5 p-3"
+                      >
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-500/15 text-violet-300 text-xs font-semibold shrink-0">
+                          {adv.empName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white font-medium truncate">{adv.empName}</p>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span className="text-[10px] text-slate-500 font-mono">{adv.employeeCode}</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/25 font-medium">
+                              {formatNumber(adv.monthlyDeductionAmount ?? 0)} DHS/mo
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 border border-slate-600 font-medium">
+                              until {adv.recurringUntil ? formatMonthKey(adv.recurringUntil) : 'fully repaid'}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 font-medium">
+                              remaining {formatNumber(adv.remainingBalance ?? adv.amount)} DHS
+                            </span>
+                            {adv.reason && (
+                              <span className="text-[10px] text-slate-400 italic truncate">— {adv.reason}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-bold text-amber-300">{formatNumber(adv.amount)} DHS</p>
+                          <p className="text-[10px] text-slate-500">
+                            {new Date(adv.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleDeletePending(adv.id, adv.empName)}
+                          className="h-7 w-7 text-slate-500 hover:text-red-400 hover:bg-red-500/10 shrink-0"
+                          title="Delete recurring advance"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Info banner */}
                 <div className="flex items-start gap-2 mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">

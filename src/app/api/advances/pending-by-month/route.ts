@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       effectiveMonth: string;
       effectiveYear: number;
       createdAt: Date;
-      employee: { id: string; fullName: string; employeeId: string; currentSite: string } | null;
+      employee: { id: string; fullName: string; employeeId: string; currentSite: string | null } | null;
     }> = [];
     try {
       pendingAdvances = await db.advance.findMany({
@@ -77,6 +77,43 @@ export async function GET(request: NextRequest) {
         err instanceof Error ? err.message : err,
       );
       pendingAdvances = [];
+    }
+
+    // Active recurring advances that START in this month — shown in a separate
+    // section on the Advance page so admins can see/manage them (they never
+    // enter totalPending / byEmployee, which stay strictly "pending").
+    let recurringAdvances: Array<{
+      id: string;
+      empId: string;
+      empName: string;
+      employeeCode: string;
+      amount: number;
+      reason: string;
+      effectiveMonth: string;
+      effectiveYear: number;
+      monthlyDeductionAmount: number | null;
+      remainingBalance: number | null;
+      recurringUntil: string | null;
+      status: string;
+      createdAt: Date;
+    }> = [];
+    try {
+      recurringAdvances = await db.advance.findMany({
+        where: {
+          effectiveMonth: month,
+          effectiveYear: yearNum,
+          deductionType: 'recurring',
+          status: 'active',
+          deletedAt: null,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+    } catch (err) {
+      console.warn(
+        '[advances/pending-by-month] Recurring advance query failed, returning [].',
+        err instanceof Error ? err.message : err,
+      );
+      recurringAdvances = [];
     }
 
     // Group by empId -> total amount
@@ -114,6 +151,21 @@ export async function GET(request: NextRequest) {
           reason: a.reason,
           effectiveMonth: a.effectiveMonth,
           effectiveYear: a.effectiveYear,
+          createdAt: a.createdAt.toISOString(),
+        })),
+        recurringAdvances: recurringAdvances.map((a) => ({
+          id: a.id,
+          empId: a.empId,
+          empName: a.empName,
+          employeeCode: a.employeeCode,
+          amount: a.amount,
+          reason: a.reason,
+          effectiveMonth: a.effectiveMonth,
+          effectiveYear: a.effectiveYear,
+          monthlyDeductionAmount: a.monthlyDeductionAmount,
+          remainingBalance: a.remainingBalance,
+          recurringUntil: a.recurringUntil,
+          status: a.status,
           createdAt: a.createdAt.toISOString(),
         })),
       },

@@ -630,9 +630,14 @@ model Advance {
   //   "one_time"  — the full `amount` is deducted in ONE month (effectiveMonth)
   //   "recurring" — `monthlyDeductionAmount` is deducted each month starting
   //                 from `effectiveMonth` until `remainingBalance` reaches 0
+  //                 OR the `recurringUntil` month is reached (whichever first)
   deductionType           String  @default("one_time")
   monthlyDeductionAmount  Float?  // how much to deduct per month (recurring only)
   remainingBalance        Float?  // how much is left to repay (recurring only)
+  // Optional END month for recurring deductions (INCLUSIVE — the deduction
+  // still happens IN this month, then stops). Format "YYYY-MM".
+  // null → deduct until remainingBalance reaches 0 (legacy behaviour).
+  recurringUntil          String?
 
   createdById   String
   createdAt     DateTime @default(now())

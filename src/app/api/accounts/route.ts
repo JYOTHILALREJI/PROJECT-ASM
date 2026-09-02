@@ -101,32 +101,62 @@ export async function GET(request: NextRequest) {
       orderBy: [{ slNo: 'asc' }, { empName: 'asc' }],
     });
 
-    // ── Merge pending advances into the salary records ──
-    // Pending advances (status='pending', effectiveMonth=month, effectiveYear=year)
-    // are added to the corresponding employee's standard-tier salary record's
-    // `advance` field, and `balanceSalary` is recomputed.
+    // Get all unique empIds from salary records (needed by the recurring
+    // deduction merge below, which must run BEFORE the salary-record merge
+    // consumes the map).
+    const empIds = [...new Set(allSalaryRecords.map((r) => r.empId))];
+
+    // ── Build pendingByEmp: one-time pending advances + recurring deductions ──
+    // Both sources are collected into pendingByEmp FIRST, then merged into the
+    // salary records below. (Historical bug: the recurring merge used to run
+    // AFTER the salary-record merge, so recurring deductions never showed in
+    // months where the employee already had salary records.)
     //
-    // This is done in-memory here (NOT written to DB) so the Accounts page
-    // always shows the latest pending advance amount. The actual DB write
-    // happens when the user clicks "Save All" via the bulk-save route.
-    //
-    // IMPORTANT: This must match the logic in /api/salary-records and the
-    // bulk-save route so all three views (Accounts, Consolidated, and saved
-    // salary records) agree on the advance amount.
-    //
-    // The pendingByEmp map is also used later for stub entries (employees
-    // with no salary records yet) so their advance amount shows up too.
+    // pendingByEmp is also used later for stub entries (employees with no
+    // salary records yet) so their advance amount shows up too.
     const pendingByEmp = new Map<string, number>();
+    let recurringAdvancesMap: Map<string, ReturnType<typeof computeMonthlyDeduction>> = new Map();
     {
       const pendingAdvances = await safeFindPendingAdvances(month, yearNum);
 
-      if (pendingAdvances.length > 0) {
-        // Group pending advances by empId (into the outer pendingByEmp map)
-        for (const a of pendingAdvances) {
-          pendingByEmp.set(a.empId, (pendingByEmp.get(a.empId) || 0) + a.amount);
-        }
+      // One-time pending advances
+      for (const a of pendingAdvances) {
+        pendingByEmp.set(a.empId, (pendingByEmp.get(a.empId) || 0) + a.amount);
+      }
 
-        if (allSalaryRecords.length > 0) {
+      // ── Recurring advance deductions for this month ──
+      // For each employee with an active recurring advance, compute the monthly
+      // deduction (min of monthlyDeductionAmount and remainingBalance) and add
+      // it to pendingByEmp — same as one-time pending advances above.
+      //
+      // Repayments are NOT recorded here (this is a read-only merge for display).
+      // The actual repayment recording happens in bulk-save / toggle-paid when
+      // the salary is saved/paid.
+      if (empIds.length > 0) {
+        const eligibleMap = await getEligibleRecurringAdvances(empIds, month);
+        for (const [empId, advances] of eligibleMap) {
+          const deduction = computeMonthlyDeduction(advances);
+          if (deduction.totalDeduction > 0) {
+            pendingByEmp.set(empId, (pendingByEmp.get(empId) || 0) + deduction.totalDeduction);
+            recurringAdvancesMap.set(empId, deduction);
+          }
+        }
+      }
+
+      // ── Merge into the salary records (in-memory) ──
+      // Pending advances (status='pending', effectiveMonth=month, effectiveYear=year)
+      // and recurring deductions are added to the corresponding employee's
+      // standard-tier salary record's `advance` field, and `balanceSalary` is
+      // recomputed.
+      //
+      // This is done in-memory here (NOT written to DB) so the Accounts page
+      // always shows the latest pending advance amount. The actual DB write
+      // happens when the user clicks "Save All" via the bulk-save route.
+      //
+      // IMPORTANT: This must match the logic in /api/salary-records and the
+      // bulk-save route so all three views (Accounts, Consolidated, and saved
+      // salary records) agree on the advance amount.
+      if (pendingByEmp.size > 0 && allSalaryRecords.length > 0) {
         // Apply to standard-tier records first (one per empId)
         const appliedEmps = new Set<string>();
         for (let i = 0; i < allSalaryRecords.length; i++) {
@@ -169,33 +199,8 @@ export async function GET(request: NextRequest) {
           };
           appliedEmps.add(r.empId);
         }
-        } // end if (allSalaryRecords.length > 0)
-      }
-    } // end pending advances block
-
-    // Get all unique empIds from salary records
-    const empIds = [...new Set(allSalaryRecords.map((r) => r.empId))];
-
-    // ── Recurring advance deductions for this month ──
-    // For each employee with an active recurring advance, compute the monthly
-    // deduction (min of monthlyDeductionAmount and remainingBalance) and add
-    // it to the pendingByEmp map so it gets merged into the salary records'
-    // `advance` field — same as one-time pending advances above.
-    //
-    // Repayments are NOT recorded here (this is a read-only merge for display).
-    // The actual repayment recording happens in bulk-save / toggle-paid when
-    // the salary is saved/paid.
-    let recurringAdvancesMap: Map<string, ReturnType<typeof computeMonthlyDeduction>> = new Map();
-    if (empIds.length > 0) {
-      const eligibleMap = await getEligibleRecurringAdvances(empIds, month);
-      for (const [empId, advances] of eligibleMap) {
-        const deduction = computeMonthlyDeduction(advances);
-        if (deduction.totalDeduction > 0) {
-          pendingByEmp.set(empId, (pendingByEmp.get(empId) || 0) + deduction.totalDeduction);
-          recurringAdvancesMap.set(empId, deduction);
-        }
-      }
-    }
+      } // end salary-record merge
+    } // end pending advances + recurring deductions block
 
     // Fetch employee details for all employees in salary records
     const employees = await db.employee.findMany({
@@ -413,6 +418,7 @@ export async function GET(request: NextRequest) {
           customHourlyRate: true,
           currentTotalWorkingHours: true,
           role: true,
+          isTeko: true,
         },
       });
       for (const e of missingEmps) {
@@ -812,6 +818,7 @@ export async function GET(request: NextRequest) {
             customHourlyRate: employeeCustomRate,
           },
           tekoInfo: tekoInfoMap.get(emp?.employeeId || '') || null,
+          isTeko: (emp as Record<string, unknown>)?.isTeko === true,
         });
       }
 

@@ -113,6 +113,38 @@ export async function PATCH(
       }
     }
 
+    // ── Recurring end month (recurringUntil) ──
+    // Accepted values:
+    //   null / ''            → clear the end (deduct until fully repaid)
+    //   "YYYY-MM"            → inclusive final deduction month; must not be
+    //                          earlier than the (possibly updated) effectiveMonth
+    if (existing.deductionType === 'recurring' && 'recurringUntil' in body) {
+      const raw = body.recurringUntil;
+      if (raw === null || raw === '') {
+        updateData.recurringUntil = null;
+      } else if (typeof raw === 'string' && /^\d{4}-\d{2}$/.test(raw)) {
+        const effectiveStart =
+          (typeof updateData.effectiveMonth === 'string' ? updateData.effectiveMonth : existing.effectiveMonth);
+        if (raw < effectiveStart) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `recurringUntil (${raw}) must not be earlier than the effective month (${effectiveStart})`,
+            },
+            { status: 400 },
+          );
+        }
+        updateData.recurringUntil = raw;
+        // If the advance was completed and the end month now allows future
+        // deductions, keep status as-is — reactivation stays amount-driven.
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'recurringUntil must be in YYYY-MM format (or null to clear)' },
+          { status: 400 },
+        );
+      }
+    }
+
     // Allow changing deductionType (one_time ↔ recurring)
     if (body.deductionType === 'recurring' || body.deductionType === 'one_time') {
       updateData.deductionType = body.deductionType;

@@ -19,10 +19,14 @@ interface AdvanceCreateItem {
   effectiveYear: number;
   // ── Recurring deduction fields (optional) ──
   // If deductionType = "recurring", monthlyDeductionAmount is deducted each
-  // month starting from effectiveMonth until the full amount is repaid.
+  // month starting from effectiveMonth until the full amount is repaid OR
+  // the inclusive recurringUntil month is reached (whichever comes first).
   deductionType?: 'one_time' | 'recurring';
   monthlyDeductionAmount?: number;
+  recurringUntil?: string | null; // YYYY-MM, recurring only, inclusive end
 }
+
+const MONTH_KEY_RE = /^\d{4}-\d{2}$/;
 
 /**
  * Compute the "next month" key (YYYY-MM) from today's date.
@@ -32,6 +36,32 @@ function getNextMonthKey(now: Date = new Date()): { month: string; year: number 
   const d = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   return { month, year: d.getFullYear() };
+}
+
+/**
+ * Normalize + validate an incoming recurringUntil value.
+ * Returns { ok: true, value } where value is "YYYY-MM" or null (no end),
+ * or { ok: false, error } with a client-facing message.
+ * Rules:
+ *   - undefined/''/null            → null (no end — legacy behaviour)
+ *   - invalid format               → rejected
+ *   - recurring + until < start    → rejected (end must be >= effective month)
+ */
+function normalizeRecurringUntil(
+  raw: unknown,
+  effectiveMonth: string,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  if (typeof raw !== 'string' || !MONTH_KEY_RE.test(raw)) {
+    return { ok: false, error: 'recurringUntil must be in YYYY-MM format' };
+  }
+  if (raw < effectiveMonth) {
+    return {
+      ok: false,
+      error: `recurringUntil (${raw}) must not be earlier than the effective month (${effectiveMonth})`,
+    };
+  }
+  return { ok: true, value: raw };
 }
 
 // GET /api/advances?month=YYYY-MM&year=YYYY&empId=...&status=pending|applied|cancelled
@@ -70,7 +100,7 @@ export async function GET(request: NextRequest) {
         id: string;
         fullName: string;
         employeeId: string;
-        currentSite: string;
+        currentSite: string | null;
         currentSiteId: string | null;
         trade: string | null;
         nationality: string | null;
@@ -201,6 +231,7 @@ export async function POST(request: NextRequest) {
       const items: AdvanceCreateItem[] = body.advances;
 
       // Validate all items first
+      const untilValues = new Map<number, string | null>(); // item index -> normalized recurringUntil
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         if (!it.empId) {
@@ -227,6 +258,14 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           );
         }
+        const until = normalizeRecurringUntil(it.recurringUntil, it.effectiveMonth);
+        if (!until.ok) {
+          return NextResponse.json(
+            { success: false, error: `Item ${i} (${it.empName || it.empId}): ${until.error}` },
+            { status: 400 },
+          );
+        }
+        untilValues.set(i, until.value);
       }
 
       // Fetch employees to denormalize names
@@ -239,7 +278,7 @@ export async function POST(request: NextRequest) {
 
       // Create all rows in a transaction
       const created = await db.$transaction(
-        items.map((it) => {
+        items.map((it, i) => {
           const emp = empMap.get(it.empId);
           const isRecurring = it.deductionType === 'recurring';
           return db.advance.create({
@@ -260,6 +299,7 @@ export async function POST(request: NextRequest) {
               deductionType: isRecurring ? 'recurring' : 'one_time',
               monthlyDeductionAmount: isRecurring ? (it.monthlyDeductionAmount ?? null) : null,
               remainingBalance: isRecurring ? it.amount : null,
+              recurringUntil: isRecurring ? (untilValues.get(i) ?? null) : null,
             },
           });
         }),
@@ -307,6 +347,7 @@ export async function POST(request: NextRequest) {
       effectiveYear = defaultMonth.year,
       deductionType = 'one_time',
       monthlyDeductionAmount,
+      recurringUntil,
     } = body;
 
     if (!empId) {
@@ -318,6 +359,22 @@ export async function POST(request: NextRequest) {
     if (typeof amount !== 'number' || amount <= 0) {
       return NextResponse.json(
         { success: false, error: 'amount must be a positive number' },
+        { status: 400 },
+      );
+    }
+    if (effectiveMonth && !MONTH_KEY_RE.test(effectiveMonth)) {
+      return NextResponse.json(
+        { success: false, error: 'effectiveMonth must be in YYYY-MM format' },
+        { status: 400 },
+      );
+    }
+    const normalizedUntil = normalizeRecurringUntil(
+      deductionType === 'recurring' ? recurringUntil : undefined,
+      effectiveMonth,
+    );
+    if (!normalizedUntil.ok) {
+      return NextResponse.json(
+        { success: false, error: normalizedUntil.error },
         { status: 400 },
       );
     }
@@ -348,6 +405,7 @@ export async function POST(request: NextRequest) {
         deductionType: isRecurring ? 'recurring' : 'one_time',
         monthlyDeductionAmount: isRecurring ? (typeof monthlyDeductionAmount === 'number' ? monthlyDeductionAmount : null) : null,
         remainingBalance: isRecurring ? amount : null,
+        recurringUntil: isRecurring ? normalizedUntil.value : null,
       },
     });
 

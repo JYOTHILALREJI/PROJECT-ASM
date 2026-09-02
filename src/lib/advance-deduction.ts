@@ -26,6 +26,8 @@ export interface RecurringAdvance {
   status: string;
   effectiveMonth: string;
   effectiveYear: number;
+  /** Optional inclusive END month "YYYY-MM" — deduction stops AFTER this month. */
+  recurringUntil: string | null;
   reason: string;
 }
 
@@ -46,6 +48,8 @@ export interface DeductionResult {
  *   - deductionType = "recurring"
  *   - status = "active"
  *   - effectiveMonth <= monthKey
+ *   - recurringUntil is null OR recurringUntil >= monthKey (inclusive end:
+ *     the deduction still happens IN the until-month, then stops)
  *   - remainingBalance > 0
  *   - no repayment exists for (advanceId, monthKey) yet
  */
@@ -82,6 +86,9 @@ export async function getEligibleRecurringAdvances(
       const remaining = adv.remainingBalance ?? adv.amount;
       if (remaining <= 0) continue;
       if (repaidAdvanceIds.has(adv.id)) continue; // already deducted this month
+      // Inclusive end month: once monthKey is past recurringUntil, stop.
+      // ("YYYY-MM" strings compare correctly with < > operators.)
+      if (adv.recurringUntil && adv.recurringUntil < monthKey) continue;
 
       const empId = adv.empId;
       if (!result.has(empId)) result.set(empId, []);
@@ -96,6 +103,7 @@ export async function getEligibleRecurringAdvances(
         status: adv.status,
         effectiveMonth: adv.effectiveMonth,
         effectiveYear: adv.effectiveYear,
+        recurringUntil: adv.recurringUntil ?? null,
         reason: adv.reason,
       });
     }

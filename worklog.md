@@ -386,3 +386,32 @@ Work Log:
 
 Stage Summary:
 - Rate column now reflects the actual rate applied to each employee's salary for the selected month; "3.5/7" appears only in the genuine straddle case (hours on both sides of the 1000h threshold in one month). Custom-rate and trade-rate employees keep showing their single effective rate. Also fixed the latent TEKO-badge type gap in the same file.
+
+---
+Task ID: 5
+Agent: main (Z.ai Code)
+Task: (1) Fix "attempt to write a readonly database" error when adding an advance; (2) Recurring advances must support an end month/year until which the deduction runs; test all cases and edge cases. Push the code.
+
+Work Log:
+- Readonly-db regression: identical to Task 2 — running next-server held fds to a deleted db/custom.db inode (db file replaced by git ops while server lived). Restarted dev server; write test (scripts/test-attendance-write.py) passed. NOTE: git stash/stash-pop during tsc-baselining replaced the db inode AGAIN mid-session and silently re-broke writes — had to restart once more. Rule reinforced: ANY working-tree db replacement (checkout/restore/stash/pull) requires a dev-server restart before write paths are trusted.
+- Feature implementation:
+  * prisma/schema.prisma: Advance.recurringUntil String? (YYYY-MM, inclusive end month; null = legacy "until repaid"). db:push + client regenerated.
+  * src/lib/advance-deduction.ts: eligibility now skips advances whose recurringUntil < monthKey (inclusive end); RecurringAdvance carries recurringUntil.
+  * /api/advances POST: normalizeRecurringUntil() validates format (YYYY-MM) and end>=effective; one_time ignores the field (stored NULL); bulk + single modes store it.
+  * /api/advances/[id] PATCH: accepts recurringUntil (set/clear/null), validates format and >= effective month.
+  * /api/advances/pending-by-month GET: new recurringAdvances[] array (active recurring starting that month, with monthlyDeductionAmount/remainingBalance/recurringUntil) — totalPending/byEmployee semantics untouched (Accounts badge unaffected). Also fixed pre-existing currentSite type gap.
+  * advance-page.tsx: "Deduct until (optional)" UI (Set end month toggle -> month+year selects, defaults to effective+12mo), client validation (end >= effective, monthly amount > 0), toast mentions the end month, handleSave deps fixed (stale closure on deductionType/monthly amounts), Pending Advances tab now renders a violet "Recurring advances starting <month>" section with DHS/mo · until X · remaining badges + delete.
+- PRE-EXISTING BUG FOUND while testing (fixed): /api/accounts merged recurring deductions into pendingByEmp AFTER the salary-record merge had consumed the map — recurring deductions never appeared in months where the employee already had salary records. Restructured: one-time + recurring fill pendingByEmp first, then the merge runs (condition changed from pendingAdvances.length>0 to pendingByEmp.size>0).
+- PRE-EXISTING BUG FOUND while testing (fixed): accounts-page.tsx + consolidated-salary-page.tsx mergeApiEntries read deduction/advance only from the STANDARD-tier record — premium-only months (e.g. John Sep 2026) showed "-" for advance. Now falls back premium -> camp, mirroring the server merge (standard first, else first record).
+- Also fixed pre-existing tsc gaps in accounts/route.ts (missing isTeko in missing-employees select; stub entry missing isTeko) — tsc now clean for every touched file; remaining errors (advances/apply, scripts/repro-site-move-bug.ts) are untouched pre-existing.
+- Tests: scripts/test-recurring-until.py — 31 checks, ALL PASS:
+  * POST validation: until<effective 400; invalid format 400; invalid effectiveMonth 400; one_time ignores until; until==effective OK; mixed bucket OK.
+  * PATCH: set/extend/shorten/clear; <effective 400 keeps value; invalid format 400.
+  * Eligibility via /api/accounts (real display path, John's record months): 13.13-until-Apr present Feb/Mar/Apr (INCLUSIVE), gone May+; no-end 13.14 continues Feb..Sep; one-time 77.77 in May only; start-month advance appears in Sep; months without salary records show nothing (pre-existing semantics — deductions apply at salary save/pay time).
+  * pending-by-month recurring section + untouched totalPending; zero AdvanceRepayment rows and untouched remainingBalance after all GETs; hard cleanup leaves Advance table empty.
+- Browser verification (admin@asm.com): added John via bucket -> Recurring -> Set end month (Dec 2026, defaulted Sep 2027) -> Save succeeded (user's original error flow now clean); Pending tab shows violet recurring card "50.00 DHS/mo · until December 2026 · remaining 100.00"; Accounts Sep shows John Advance 50.00 and Net 20.00 (70-50); UI delete of the test advance works (soft); test row hard-deleted afterwards.
+
+Stage Summary:
+- Adding advances works again (root cause environmental, fixed by dev-server restart; ops rule: restart after ANY db file replacement).
+- Recurring advances now support an optional inclusive "deduct until" month/year end — enforced in the deduction engine (single source of truth used by /api/accounts display, bulk-save and toggle-paid), validated at both create and edit, visible on the Advance page.
+- Two pre-existing advance-display bugs fixed along the way (recurring merge ordering in /api/accounts; premium-only months losing advance/deduction display on Accounts + Consolidated pages).
