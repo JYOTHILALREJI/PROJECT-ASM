@@ -1500,6 +1500,43 @@ export function AttendancePage() {
       return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     };
 
+    // ── Visibility rule: "no attendance data → no row" ──
+    // An employee's name should only appear in a site's grid if they actually
+    // have attendance data AT THAT SITE — meaningful marks (Present / Absent /
+    // Camp Sitting / Overtime) tagged to this site for the viewed month.
+    // Things that do NOT count as attendance data:
+    //   • 'not_marked' / 'no_site' tombstone rows (undo leftovers)
+    //   • records tagged to ANOTHER site (the other site's name is not this
+    //     site's attendance data — e.g. merged "moved to X" labels)
+    // The CURRENT month always shows the active roster (otherwise a fresh
+    // month would be empty and nobody could be marked). PAST months are
+    // data-driven: an employee with zero marks at the site that month is
+    // hidden, even if they are assigned there today.
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isViewingPastMonth = monthEndStr < todayStr;
+
+    // siteId lookup by site name (for the currentSite fallback pass below,
+    // which only knows the site NAME from employee.currentSite).
+    const siteIdByName = new Map(sites.map((s) => [s.name, s.id]));
+
+    // Does this employee have at least one meaningful mark (P/A/C/O) at the
+    // given site during the viewed month?
+    //   • explicit siteId on the record → must match the site
+    //   • legacy records with siteId=null → count when they fall within the
+    //     site's active range (`until`, or always when `until` is null)
+    const hasMeaningfulData = (
+      empId: string,
+      siteId: string | null,
+      until: string | null,
+    ): boolean =>
+      attendanceRecords.some((r) => {
+        if (r.employeeId !== empId) return false;
+        if (!r.date.startsWith(monthPrefix)) return false;
+        if (r.status !== 'present' && r.status !== 'absent' && r.status !== 'camp_sitting' && r.status !== 'overtime') return false;
+        if (r.siteId) return siteId !== null && r.siteId === siteId;
+        return !until || r.date <= until;
+      });
+
     // 1. Add employees from site-assignments FIRST (so we can set date ranges).
     //    This includes both active and moved-away employees.
     //
@@ -1524,6 +1561,21 @@ export function AttendancePage() {
         // Is this site the employee's CURRENT site? If so, the employee is
         // active here regardless of what removedDate says.
         const isCurrentSite = emp.currentSite === siteName;
+
+        // Assignment that only STARTS after the viewed month ends → the
+        // employee had nothing to do with this site in the viewed month.
+        // Without this guard, clampToMonth() would fake an activeFrom INSIDE
+        // a past month (e.g. a Sep assignment rendered as "active from Aug 31")
+        // and produce an empty phantom row. (Moved-away rows with in-month
+        // activity are still handled by the data check further below.)
+        const rawCreatedDate = assignment.createdDate.split('T')[0];
+        if (rawCreatedDate > monthEndStr) {
+          // Release the (emp, site) pair so the currentSite fallback pass can
+          // still add the employee if this IS their current site (e.g. past
+          // months where only marks prove they were here).
+          added.delete(`${emp.id}::${siteName}`);
+          continue;
+        }
 
         // ── Days whose attendance was ACTUALLY marked at THIS site ──
         // (records tagged with this site's siteId). Used as a safety net so
@@ -1554,7 +1606,15 @@ export function AttendancePage() {
           }
         }
 
-        const movedAway = !isCurrentSite && !!assignment.removedDate;
+        // Moved-away = the employee is currently at ANOTHER site. This covers
+        // BOTH clean moves (removedDate set) and STALE assignment rows whose
+        // removedDate was never written (e.g. a move that didn't close out the
+        // old row, or an employee moved back). Without treating stale rows as
+        // moved-away, an employee who no longer belongs here would render as a
+        // fully ACTIVE, editable row at this site — showing an empty/no-data
+        // row in a grid they don't belong to. The hasMeaningfulData check
+        // below then hides them entirely when they have no real marks here.
+        const movedAway = !isCurrentSite;
 
         // ── Proper per-site date ranges (drives the merged columns) ──
         let activeFrom: string;
@@ -1563,7 +1623,11 @@ export function AttendancePage() {
           // OLD site: active up to (and including) the day they left.
           // Days AFTER that merge into one cell showing the next site.
           activeFrom = monthStartStr;
-          activeUntil = clampToMonth(assignment.removedDate!.split('T')[0]);
+          // removedDate can be missing on stale rows — fall back to the last
+          // day they actually had a mark here, else stay till month end.
+          activeUntil = assignment.removedDate
+            ? clampToMonth(assignment.removedDate.split('T')[0])
+            : (lastMarkedDate ?? monthEndStr);
           // Safety: show marks actually made at this site after the removal
           if (lastMarkedDate && lastMarkedDate > activeUntil) activeUntil = lastMarkedDate;
         } else if (isCurrentSite && movedHereOn) {
@@ -1705,31 +1769,27 @@ export function AttendancePage() {
           }
         }
 
-        // If the employee moved away AND has NO meaningful attendance
-        // records (P / A / C / O) for this month at this site, skip them
-        // entirely — don't add to the list. The user only wants moved-away
-        // employees to remain visible at their old site if they actually
-        // have a Present, Absent, Camp Sitting, or Overtime mark there.
-        // If they were moved without ever marking attendance (or all their
-        // records are 'not_marked' / 'no_site'), they should disappear
-        // from the old site entirely.
-        if (movedAway) {
-          // Only keep the employee at this site if they have P/A/C/O marks
-          // that belong to THIS site (siteId match; legacy records without a
-          // siteId count when they fall inside this site's active range).
-          const hasMarkedAttendance = attendanceRecords.some(
-            (r) => {
-              if (r.employeeId !== emp.id) return false;
-              if (!r.date.startsWith(monthPrefix)) return false;
-              if (r.status !== 'present' && r.status !== 'absent' && r.status !== 'camp_sitting' && r.status !== 'overtime') return false;
-              if (r.siteId) return r.siteId === assignment.siteId;
-              return !activeUntil || r.date <= activeUntil;
-            },
-          );
-          if (!hasMarkedAttendance) {
-            // No P/A/C/O at this site — skip entirely
-            continue;
-          }
+        // ── VISIBILITY RULE: no attendance data at this site → no row ──
+        //
+        // 1. Moved-away employees (currently at another site — including
+        //    stale assignment rows whose removedDate was never written):
+        //    only stay visible at the old site if they have P/A/C/O marks
+        //    that belong to THIS site. 'not_marked'/'no_site' tombstones
+        //    and records tagged to the OTHER site do NOT count as
+        //    attendance data — if that's all they have here, the row
+        //    disappears from the old site entirely.
+        // 2. Currently-assigned employees in a PAST month: the roster is
+        //    only kept visible for the CURRENT month (so people can be
+        //    marked). Looking back at a past month, an employee with zero
+        //    marks at this site that month is hidden too.
+        const hasData = hasMeaningfulData(emp.id, assignment.siteId, movedAway ? activeUntil : null);
+        if (movedAway && !hasData) {
+          added.delete(`${emp.id}::${siteName}`);
+          continue;
+        }
+        if (isCurrentSite && isViewingPastMonth && !hasData) {
+          added.delete(`${emp.id}::${siteName}`);
+          continue;
         }
 
         map.get(siteName)!.push({
@@ -1753,6 +1813,14 @@ export function AttendancePage() {
       const siteName = emp.currentSite || '';
       if (!siteName || siteName === 'Idle') continue;
       if (!added.has(`${emp.id}::${siteName}`)) {
+        // Same "no attendance data → no row" rule for PAST months: without
+        // an assignment record the only evidence the employee was at this
+        // site that month is the marks themselves. Current/future months
+        // keep the roster visible so people can be marked.
+        if (isViewingPastMonth) {
+          const fallbackSiteId = siteIdByName.get(siteName) ?? null;
+          if (!hasMeaningfulData(emp.id, fallbackSiteId, null)) continue;
+        }
         added.add(`${emp.id}::${siteName}`);
         if (!map.has(siteName)) map.set(siteName, []);
         // No assignment record — treat as active for the whole month
@@ -1766,7 +1834,7 @@ export function AttendancePage() {
     }
 
     return map;
-  }, [employees, siteAssignments, attendanceRecords, yearStr, monthStr]);
+  }, [employees, siteAssignments, attendanceRecords, sites, yearStr, monthStr]);
 
   // Apply search filter (matches employee name/ID/trade)
   const filteredEmployeesBySite = useMemo(() => {
