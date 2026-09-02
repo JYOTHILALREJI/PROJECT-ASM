@@ -328,25 +328,64 @@ export async function PUT(
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-      // If employee was removed from a site (currentSite set to null)
-      if (!body.currentSite && existing.currentSite) {
-        // Find the old site and set removedDate on EmpCountSitePerMonth
+      // Helper: close out the employee's OLD-site assignment for this month.
+      // Sets removedDate on the active record — and if NO record exists for
+      // this month (employee was at the old site since before this month and
+      // was moved before any attendance/salary sync created the row), BACKFILL
+      // one with removedDate = now, so the old site keeps the employee in its
+      // monthly headcount and the attendance grid can render the moved-away
+      // row instead of losing the employee entirely.
+      const closeOutOldSite = async (oldSiteName: string) => {
         const oldSite = await db.site.findFirst({
-          where: { name: existing.currentSite },
+          where: { name: oldSiteName },
           select: { id: true, name: true },
         });
-        if (oldSite) {
-          // Set removedDate on any active records for this employee at the old site
-          await db.empCountSitePerMonth.updateMany({
+        if (!oldSite) return;
+        const updated = await db.empCountSitePerMonth.updateMany({
+          where: {
+            empId: id,
+            siteId: oldSite.id,
+            removedDate: null,
+            deletedDate: null,
+          },
+          data: { removedDate: now },
+        });
+        if (updated.count === 0) {
+          const anyRecord = await db.empCountSitePerMonth.findUnique({
             where: {
-              empId: id,
-              siteId: oldSite.id,
-              removedDate: null,
-              deletedDate: null,
+              empId_siteId_month: {
+                empId: id,
+                siteId: oldSite.id,
+                month: currentMonth,
+              },
             },
-            data: { removedDate: now },
           });
+          if (!anyRecord) {
+            await db.empCountSitePerMonth.create({
+              data: {
+                empId: id,
+                empName: employee.fullName,
+                siteId: oldSite.id,
+                siteName: oldSite.name,
+                month: currentMonth,
+                // createdDate defaults to now; the row exists purely to record
+                // that the employee left this site on this date.
+                removedDate: now,
+              },
+            });
+          } else if (anyRecord.removedDate === null && anyRecord.deletedDate) {
+            // Legacy soft-deleted row with no removedDate — revive it as removed
+            await db.empCountSitePerMonth.update({
+              where: { id: anyRecord.id },
+              data: { removedDate: now, deletedDate: null, deletedAt: null },
+            });
+          }
         }
+      };
+
+      // If employee was removed from a site (currentSite set to null)
+      if (!body.currentSite && existing.currentSite) {
+        await closeOutOldSite(existing.currentSite);
       }
 
       // If employee is moved from one site to ANOTHER (both non-null):
@@ -354,21 +393,7 @@ export async function PUT(
       // grid knows the employee left on this date. Without this, the old
       // site would still show the employee as active for the whole month.
       if (body.currentSite && existing.currentSite && body.currentSite !== existing.currentSite) {
-        const oldSite = await db.site.findFirst({
-          where: { name: existing.currentSite },
-          select: { id: true, name: true },
-        });
-        if (oldSite) {
-          await db.empCountSitePerMonth.updateMany({
-            where: {
-              empId: id,
-              siteId: oldSite.id,
-              removedDate: null,
-              deletedDate: null,
-            },
-            data: { removedDate: now },
-          });
-        }
+        await closeOutOldSite(existing.currentSite);
       }
 
       // If employee is assigned to a new site

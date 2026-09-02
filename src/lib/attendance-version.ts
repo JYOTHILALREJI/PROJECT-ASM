@@ -54,7 +54,7 @@ export async function captureAttendanceVersion(params: CaptureVersionParams): Pr
 } | null> {
   try {
     // Fetch all employees currently at this site
-    const employees = await db.employee.findMany({
+    const currentEmployees = await db.employee.findMany({
       where: {
         currentSite: params.siteName,
         status: { not: 'deleted' },
@@ -66,17 +66,49 @@ export async function captureAttendanceVersion(params: CaptureVersionParams): Pr
       },
     });
 
+    // ALSO fetch employees who have an attendance record for THIS date tagged
+    // with THIS site even if they are no longer assigned here — a mid-month
+    // transfer means the employee's currentSite points at the NEW site, but
+    // their mark (made in this site's grid) must still appear in this site's
+    // snapshot, otherwise the version history silently drops moved employees.
+    const siteAttendanceForDate = await db.attendance.findMany({
+      where: {
+        date: params.date,
+        siteId: params.siteId,
+        deletedAt: null,
+        isHidden: false,
+      },
+      select: { employeeId: true },
+    });
+    const extraIds = siteAttendanceForDate
+      .map((r) => r.employeeId)
+      .filter((id) => !currentEmployees.some((e) => e.id === id));
+
+    let employees = currentEmployees;
+    if (extraIds.length > 0) {
+      const extraEmployees = await db.employee.findMany({
+        where: { id: { in: extraIds }, status: { not: 'deleted' } },
+        select: { id: true, fullName: true, employeeId: true },
+      });
+      employees = [...currentEmployees, ...extraEmployees];
+    }
+
     if (employees.length === 0) {
       // No employees at this site — nothing to snapshot
       return null;
     }
 
-    // Fetch live attendance for this site's employees on this date
+    // Fetch live attendance for this site's employees on this date.
+    // Only records that BELONG to this site (siteId match) or legacy
+    // un-attributed records (siteId null) count here — a record tagged to a
+    // DIFFERENT site (e.g. marked at the new site before a same-day transfer)
+    // must NOT leak into this site's snapshot.
     const attendanceRecords = await db.attendance.findMany({
       where: {
         employeeId: { in: employees.map((e) => e.id) },
         date: params.date,
         deletedAt: null,
+        OR: [{ siteId: params.siteId }, { siteId: null }],
       },
     });
     const attendanceMap = new Map(attendanceRecords.map((r) => [r.employeeId, r]));

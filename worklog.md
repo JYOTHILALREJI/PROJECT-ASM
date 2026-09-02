@@ -300,3 +300,24 @@ Work Log:
 
 Stage Summary:
 - Preview is now one long continuous page; Print/PDF chunks employees into properly filled A4 sheets (18/24/28/21 rows by page role) with uniform normal-height ruled rows — no more stretched rows; only the SIGNATURE column stays wide (23%). Filler rows, extras block and page numbers render on print pages only.
+
+---
+Task ID: attendance-site-move-fix
+Agent: main (Z.ai Code)
+Task: Fix attendance being marked at the WRONG site after a mid-month employee site transfer (mark Date 2 at Site 2's grid was showing up in Site 1); test all paths + edge cases; push to GitHub
+
+Work Log:
+- Reproduced the exact UI flow via API first (scripts/repro-site-move-bug.ts): DB writes were CORRECT when the client sent siteId — so the visible bug was the UI local-state layer, plus several real mis-attribution paths found by code review:
+  * (UI, root cause of the report) attendance-page.tsx handleStatusChange updated/created the local attendance record WITHOUT siteId → after marking Date 2 in Site 2's grid the record rendered in Site 1's moved-away row too (the move day is in-range for BOTH grids) and polluted Site 1's hour totals until reload. Fix: local state now uses the SERVER-saved siteId (data.data.attendance.siteId).
+  * (UI) Ctrl+Z undo dropped siteId → server fell back to employee.currentSiteId and re-attributed the restored record to the employee's NEW site. Fix: undo entries now record siteId (prev record's site, else the grid's site) and undo passes it through handleStatusChangeRef.
+  * (UI) Bulk-mark "Mark all Present/Absent" didn't send the grid's siteId; server used each employee's currentSiteId. Fix: body now includes siteId; bulk-mark route validates it and tags ALL records with the grid site (falls back to currentSiteId only for global marks without site context); version capture grouped by the bulk site when provided.
+  * (API) POST /api/attendance: explicit siteId is now VALIDATED to exist; bogus ids fall back to currentSiteId instead of causing an FK 500. Version capture now uses the RESOLVED site (the grid the mark was made in) instead of blindly employee.currentSiteId.
+  * (lib) captureAttendanceVersion: snapshot now ALSO includes employees who have a record for that date tagged to that site but no longer have currentSite == site (moved employees), and the attendance fetch is scoped to (siteId match OR legacy siteId null) so records from a different site can't leak into the snapshot.
+  * (API) PUT /api/employees/[id] site-move handler: when the employee had NO EmpCountSitePerMonth row for the current month at the old site, updateMany matched 0 rows and the old site silently lost the employee from its monthly headcount. New closeOutOldSite() helper backfills the old-site row (removedDate = now) and revives legacy soft-deleted rows.
+- Disk corruption incident: 60+ tracked files (select.tsx, tsconfig.json, base-rates.ts, recalculation.ts, many route.ts, db/custom.db...) were found NUL-filled or truncated to 0 bytes in the working tree (fallout from the earlier tool-infrastructure outage). All restored from git HEAD via targeted git checkout; dev server restarted with a clean .next; tsc/eslint re-verified clean.
+- Test suite (scripts/test-site-move-edge-cases.ts): 35/35 PASS covering — core scenario (D1@S1 → move → D2@S2 lands at S2); past-date mark at old-site grid while current site differs; bogus siteId fallback (no 500); no-siteId fallback; bulk-mark with/without siteId; move-back clears removedDate + marks at S1; undo path re-writes at ORIGINAL site; per-site salary split (10h/10h) and S2 salary removal after clearing; version capture attributed to the resolved site + moved employee present in snapshot; site-assignments API date ranges; double move S1→S2→S3 with chain of removed/active rows; cross-month isolation (prior-month record untouched); siteless employee; move with zero prior rows backfills old-site row.
+- Browser verification (agent-browser, admin@asm.com): Riyadh grid — marked Sep 1 present; moved employee to Jeddah Mall Project; Jeddah grid shows merged "Riyadh Tower Site" cell for Sep 1 and editable Sep 2+; Riyadh row faded/read-only with its Sep-1 "10" and days 2+ merged as "Jeddah Mall Project"; marked Sep 2 in JEDDAH's grid → DB record siteId=JEDDAH, Jeddah Hrs=10, Riyadh Hrs unchanged; Ctrl+Z cleared the mark with site=JEDDAH (not the current-site fallback); reload → state persists. All test data cleaned afterwards (employee, records, assignments, salary, versions).
+- eslint: 0 errors on all 5 modified files.
+
+Stage Summary:
+- Attendance marks now stick to the site grid they were made in — before AND after a mid-month transfer — across every path: cell mark/clear, keyboard marks, Ctrl+Z undo, bulk mark-all, share links, and the version history. The old site keeps the employee's historical marks and headcount, the new site owns everything from the move date, and salary hours split per site exactly along the same boundary.

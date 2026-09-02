@@ -159,8 +159,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Resolve siteId: use the provided siteId, or look up from employee's currentSiteId
+    // Resolve siteId — priority:
+    //   1. Explicit siteId from the client (the site grid the mark was made in)
+    //      — VALIDATED to exist, otherwise ignored (prevents FK errors and
+    //      mis-attributed records).
+    //   2. Employee's currentSiteId (their current site).
+    //   3. Site lookup by the employee's currentSite name (legacy fallback).
+    // This ordering is what keeps attendance attributed to the site grid the
+    // user actually marked in — e.g. an employee moved Site 1 → Site 2 mid-month
+    // who is then marked at Site 2 for the move date.
     let resolvedSiteId = siteId || null;
+    if (resolvedSiteId) {
+      const providedSite = await db.site.findUnique({
+        where: { id: resolvedSiteId },
+        select: { id: true },
+      });
+      if (!providedSite) {
+        console.warn(`[attendance POST] provided siteId ${resolvedSiteId} does not exist — falling back to employee's current site`);
+        resolvedSiteId = null;
+      }
+    }
     if (!resolvedSiteId && employee.currentSiteId) {
       resolvedSiteId = employee.currentSiteId;
     }
@@ -295,12 +313,20 @@ export async function POST(request: NextRequest) {
     // ── Capture an attendance version snapshot ──
     // After every attendance write from the website, capture a version so the
     // Attendance Copy page can show the change in the version history.
+    // IMPORTANT: attribute the version to the RESOLVED site (the grid the mark
+    // was actually made in) — NOT blindly employee.currentSiteId. After a
+    // mid-month site transfer the two can differ (e.g. marking a past date at
+    // the old site's grid).
     let versionCapture: { id: string; versionNumber: number; entryCount: number } | null = null;
-    if (employee.currentSiteId) {
+    if (resolvedSiteId) {
       try {
+        const resolvedSite = await db.site.findUnique({
+          where: { id: resolvedSiteId },
+          select: { name: true },
+        });
         versionCapture = await captureAttendanceVersion({
-          siteId: employee.currentSiteId,
-          siteName: employee.currentSite || '',
+          siteId: resolvedSiteId,
+          siteName: resolvedSite?.name || employee.currentSite || '',
           date,
           source: 'website',
           changedByName: actorDisplayName || 'Admin (website)',

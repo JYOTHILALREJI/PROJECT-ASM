@@ -360,8 +360,11 @@ interface SiteListViewProps {
   onAttendanceSheet: () => void;
   onAddEmployee: (site: SiteOption) => void;
   // Undo stack push — called before each mark so the parent can record the
-  // previous status for Ctrl+Z restoration.
-  onPushUndo: (entry: { empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null }) => void;
+  // previous status for Ctrl+Z restoration. siteId records WHICH SITE the
+  // previous value belonged to (prev record's site, or the grid being marked)
+  // so undo restores the record at the ORIGINAL site instead of letting the
+  // server fall back to the employee's (possibly new) current site.
+  onPushUndo: (entry: { empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null; siteId?: string | null }) => void;
 }
 
 function SiteListView({
@@ -479,13 +482,16 @@ function SiteListView({
   // If this is the last in-range employee, STAY in the current cell.
   const handleMark = useCallback(
     (empId: string, dateStr: string, status: 'present' | 'absent' | 'camp_sitting') => {
-      // Push undo entry with the previous status
+      // Push undo entry with the previous status AND the site it belonged to.
+      // siteId = the previous record's site if it had one, else this grid's
+      // site (the mark being replaced was made here).
       const prev = attendanceMap.get(`${empId}-${dateStr}`);
       onPushUndo({
         empId,
         date: dateStr,
         prevStatus: prev?.status || 'not_marked',
         prevOvertime: prev?.overtimeHours || null,
+        siteId: prev?.siteId ?? site.id,
       });
 
       onStatusChange(empId, dateStr, status, undefined, site.id);
@@ -528,10 +534,11 @@ function SiteListView({
         date: dateStr,
         prevStatus: prev?.status || 'not_marked',
         prevOvertime: prev?.overtimeHours || null,
+        siteId: prev?.siteId ?? site.id,
       });
       onStatusChange(empId, dateStr, 'not_marked', undefined, site.id);
     },
-    [onStatusChange, onPushUndo, attendanceMap]
+    [onStatusChange, onPushUndo, attendanceMap, site.id]
   );
 
   // ── Document-level keyboard navigation ──
@@ -1255,13 +1262,16 @@ export function AttendancePage() {
   const [attendanceSheetSite, setAttendanceSheetSite] = useState<SiteOption | null>(null);
 
   // ── Undo stack ──
-  // Each entry records the previous status of a cell before it was changed.
-  // Ctrl+Z pops the last entry and restores the previous status.
+  // Each entry records the previous status of a cell before it was changed
+  // (plus WHICH SITE that value belonged to, so undo re-writes the record at
+  // the original site instead of the employee's current site — the server
+  // otherwise falls back to employee.currentSiteId when no siteId is sent,
+  // which mis-attributes the restored record after a site transfer).
   // The stack is capped at 100 entries to avoid unbounded memory growth.
-  const undoStack = useRef<Array<{ empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null }>>([]);
+  const undoStack = useRef<Array<{ empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null; siteId?: string | null }>>([]);
   const [undoCount, setUndoCount] = useState(0); // triggers re-render for button state
 
-  const pushUndo = useCallback((entry: { empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null }) => {
+  const pushUndo = useCallback((entry: { empId: string; date: string; prevStatus: StatusOption; prevOvertime: number | null; siteId?: string | null }) => {
     undoStack.current.push(entry);
     if (undoStack.current.length > 100) undoStack.current.shift();
     setUndoCount(undoStack.current.length);
@@ -1272,8 +1282,9 @@ export function AttendancePage() {
     if (!entry) return;
     setUndoCount(undoStack.current.length);
     // Restore the previous status via the same API call used for marking.
-    // This fires the same POST /api/attendance that handleStatusChange uses.
-    handleStatusChangeRef.current(entry.empId, entry.date, entry.prevStatus, entry.prevOvertime);
+    // Pass the recorded siteId so the record is restored at the site where it
+    // originally was — NOT the employee's current site (they may have moved).
+    handleStatusChangeRef.current(entry.empId, entry.date, entry.prevStatus, entry.prevOvertime, entry.siteId ?? undefined);
     toast({ title: 'Undone', description: `Reverted to ${STATUS_CONFIG[entry.prevStatus].label}` });
   }, []);
 
@@ -1789,6 +1800,14 @@ export function AttendancePage() {
         });
         const data = await res.json();
         if (data.success) {
+          // CRITICAL: use the siteId the SERVER actually saved (data.data.attendance.siteId),
+          // not just the siteId we sent. The server resolves the site (explicit siteId →
+          // employee.currentSiteId → site-name lookup) and may differ from what we passed.
+          // Without this, the local record has no/stale siteId and the mark RENDERS AT THE
+          // WRONG SITE — e.g. an employee moved Site 1 → Site 2 on the same day: marking
+          // Date 2 in Site 2's grid would also show up in Site 1's moved-away row (both
+          // grids consider the move day "in range" for records without a siteId).
+          const savedSiteId: string | null = data.data?.attendance?.siteId ?? siteId ?? null;
           setAttendanceRecords((prev) => {
             const exists = prev.find(
               (r) => r.employeeId === employeeId && r.date === date
@@ -1796,7 +1815,12 @@ export function AttendancePage() {
             if (exists) {
               return prev.map((r) =>
                 r.employeeId === employeeId && r.date === date
-                  ? { ...r, status, overtimeHours: status === 'overtime' ? (overtimeHours ?? null) : null }
+                  ? {
+                      ...r,
+                      status,
+                      overtimeHours: status === 'overtime' ? (overtimeHours ?? null) : null,
+                      siteId: savedSiteId,
+                    }
                   : r
               );
             }
@@ -1808,6 +1832,7 @@ export function AttendancePage() {
                 date,
                 status,
                 overtimeHours: status === 'overtime' ? (overtimeHours ?? null) : null,
+                siteId: savedSiteId,
               },
             ];
           });
@@ -1836,7 +1861,12 @@ export function AttendancePage() {
         const res = await fetch('/api/attendance/bulk-mark', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, status, employeeIds }),
+          // siteId = the grid the bulk-mark was triggered from. The eligible
+          // employee list was already filtered by THIS site's date ranges, so
+          // every record must be tagged with THIS site — NOT the employee's
+          // currentSiteId (which may point at a site they were moved to later
+          // the same day, mis-attributing the bulk-marked records).
+          body: JSON.stringify({ date, status, employeeIds, siteId }),
         });
         const data = await res.json();
         if (data.success) {

@@ -10,7 +10,7 @@ import { logActivity } from '@/lib/activity-logger';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { date, status = 'present', employeeIds, actorUserId, actorDisplayName } = body;
+    const { date, status = 'present', employeeIds, siteId, actorUserId, actorDisplayName } = body;
 
     if (!date) {
       return NextResponse.json(
@@ -25,6 +25,27 @@ export async function POST(request: NextRequest) {
         { success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },
         { status: 400 }
       );
+    }
+
+    // ── Resolve the site for the bulk-marked records ──
+    // When the request comes from a specific site's grid (siteId provided),
+    // EVERY record must be tagged with THAT site: the caller already filtered
+    // the eligible employees by that site's date ranges. Falling back to each
+    // employee's currentSiteId would mis-attribute records for employees who
+    // were moved to another site later the same day (their currentSiteId now
+    // points at the NEW site, but the mark belongs to the grid's site).
+    // Only fall back to currentSiteId for global bulk-marks with no site context.
+    let bulkSiteId: string | null = null;
+    let bulkSiteName: string | null = null;
+    if (siteId) {
+      const siteRecord = await db.site.findUnique({
+        where: { id: siteId },
+        select: { id: true, name: true },
+      });
+      if (siteRecord) {
+        bulkSiteId = siteRecord.id;
+        bulkSiteName = siteRecord.name;
+      }
     }
 
     // Build the where clause: either specific employeeIds or all active employees
@@ -71,13 +92,13 @@ export async function POST(request: NextRequest) {
           where: { employeeId_date: { employeeId: emp.id, date } },
           create: {
             employeeId: emp.id,
-            siteId: emp.currentSiteId || null,
+            siteId: bulkSiteId ?? emp.currentSiteId ?? null,
             date,
             status,
             overtimeHours: status === 'overtime' ? (body.overtimeHours || 2) : null,
           },
           update: {
-            siteId: emp.currentSiteId || null,
+            siteId: bulkSiteId ?? emp.currentSiteId ?? null,
             status,
             overtimeHours: status === 'overtime' ? (body.overtimeHours || 2) : null,
           },
@@ -101,14 +122,19 @@ export async function POST(request: NextRequest) {
     const skipped = results.filter((r) => r.skipped).length;
 
     // ── Capture one attendance version per affected site ──
-    // Bulk-mark may have touched employees across multiple sites, so group the
-    // updated employees by their currentSiteId and capture one version per site.
+    // Bulk-mark may have touched employees across multiple sites. When a grid
+    // siteId was provided, ALL records belong to that one site; otherwise
+    // group the updated employees by their currentSiteId as before.
     const updatedEmps = employees.filter((e) => results.some((r) => r.employeeId === e.id && r.updated));
     const bySite = new Map<string, { siteId: string; siteName: string }>();
-    for (const emp of updatedEmps) {
-      if (!emp.currentSiteId || !emp.currentSite) continue;
-      if (!bySite.has(emp.currentSiteId)) {
-        bySite.set(emp.currentSiteId, { siteId: emp.currentSiteId, siteName: emp.currentSite });
+    if (bulkSiteId) {
+      bySite.set(bulkSiteId, { siteId: bulkSiteId, siteName: bulkSiteName || '' });
+    } else {
+      for (const emp of updatedEmps) {
+        if (!emp.currentSiteId || !emp.currentSite) continue;
+        if (!bySite.has(emp.currentSiteId)) {
+          bySite.set(emp.currentSiteId, { siteId: emp.currentSiteId, siteName: emp.currentSite });
+        }
       }
     }
     const versionCaptures: Array<{ siteId: string; siteName: string; versionNumber: number }> = [];
