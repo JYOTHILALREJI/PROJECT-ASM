@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { ArrowLeft, Download, Printer, Calendar, Loader2, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,11 +52,15 @@ function resolveTrade(emp: {
 
 /* ───────── Constants ───────── */
 const A4_WIDTH_MM = 210;
-const A4_HEIGHT_MM = 297;
-// Reduced rows per page so the content fits comfortably on one A4 page
-// with equal border spacing on all sides.
-const ROWS_PER_PAGE = 20;
-const FIRST_PAGE_ROWS_COUNT = 16; // first page has the header, so fewer rows
+// Print pagination capacities (MAIN-table rows per A4 page), calibrated for
+// normal-height ruled rows (32px) on a 210x297mm page with 12mm padding:
+//   - page 1 carries the letterhead + info block, so it holds fewer rows
+//   - continuation pages are fuller
+//   - any page carrying the EXTRA EMPLOYEES block reserves room for it
+const PRINT_SINGLE_PAGE_ROWS = 18; // whole list fits on one page (extras below)
+const PRINT_FIRST_PAGE_ROWS = 24;  // first page of a multi-page sheet
+const PRINT_MIDDLE_PAGE_ROWS = 28; // continuation pages
+const PRINT_LAST_PAGE_ROWS = 21;   // final continuation page (extras below)
 const EXTRA_ROWS = 5;
 const HEADER_BG = '#bbbcbd';
 const HEADER_TEXT = '#000';
@@ -113,13 +117,44 @@ function EditableCell({
   );
 }
 
-/* ───────── Page Chunk Helper ───────── */
-function chunkRows<T>(items: T[], perPage: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += perPage) {
-    chunks.push(items.slice(i, i + perPage));
+/* ───────── Print Pagination ───────── */
+// Splits the employee list into A4 page chunks for Print/PDF (the on-screen
+// preview stays one long continuous page). The EXTRA EMPLOYEES block renders
+// under the last page's table, so that page uses the smaller last-page
+// capacity. When every row fits on the first page but exceeds the single-page
+// capacity, the extras get their own continuation page.
+function chunkPrintPages<T>(items: T[]): T[][] {
+  if (items.length <= PRINT_SINGLE_PAGE_ROWS) return [items];
+
+  const chunks: T[][] = [items.slice(0, PRINT_FIRST_PAGE_ROWS)];
+  let i = Math.min(PRINT_FIRST_PAGE_ROWS, items.length);
+
+  if (i >= items.length) {
+    chunks.push([]); // extras-only continuation page
+    return chunks;
+  }
+
+  while (i < items.length) {
+    const remaining = items.length - i;
+    if (remaining <= PRINT_LAST_PAGE_ROWS) {
+      chunks.push(items.slice(i));
+      i = items.length;
+    } else {
+      const take = Math.min(PRINT_MIDDLE_PAGE_ROWS, remaining - PRINT_LAST_PAGE_ROWS);
+      chunks.push(items.slice(i, i + take));
+      i += take;
+    }
   }
   return chunks;
+}
+
+// Ruled-filler slot count for a printed page (keeps every page a complete,
+// evenly ruled grid at normal row height).
+function printPageCapacity(pageIdx: number, totalPages: number): number {
+  if (totalPages === 1) return PRINT_SINGLE_PAGE_ROWS;
+  if (pageIdx === 0) return PRINT_FIRST_PAGE_ROWS;
+  if (pageIdx === totalPages - 1) return PRINT_LAST_PAGE_ROWS;
+  return PRINT_MIDDLE_PAGE_ROWS;
 }
 
 /* ───────── Table Header HTML (shared) ───────── */
@@ -154,8 +189,9 @@ function buildPageHtml(params: {
   isFirstPage: boolean;
   isLastPage: boolean;
   serialOffset: number;
+  fillerCount: number;
 }): string {
-  const { employeeRows, extraRows, pageIdx, totalPages, clientName, projectName, dateInput, strengthInput, presentInput, absentInput, sortedEmployees, getDisplayTrade, contentWidth, contentPadding, isFirstPage, isLastPage, serialOffset } = params;
+  const { employeeRows, extraRows, pageIdx, totalPages, clientName, projectName, dateInput, strengthInput, presentInput, absentInput, sortedEmployees, getDisplayTrade, contentWidth, contentPadding, isFirstPage, isLastPage, serialOffset, fillerCount } = params;
 
   let html = `<div class="page" style="width:${contentWidth}; padding:${contentPadding};">`;
 
@@ -247,19 +283,17 @@ function buildPageHtml(params: {
     }
   });
 
-  // Blank ruled rows complete the page grid so rows keep a uniform height.
-  // Without them a page with few employees would stretch the last employee
-  // row to fill the whole sheet (the whole table is height:100%).
-  const slotCount = isFirstPage ? FIRST_PAGE_ROWS_COUNT : ROWS_PER_PAGE;
-  const fillerCount = Math.max(0, slotCount - employeeRows.length);
+  // Blank ruled rows complete the page grid. The table renders at its natural
+  // height (no page-height stretching), so every row — filled or blank — keeps
+  // the same normal height instead of stretching to fill the sheet.
   for (let i = 0; i < fillerCount; i++) {
     html += `
       <tr class="filler-row">
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
       </tr>
     `;
   }
@@ -313,7 +347,9 @@ function getPrintCSS(): string {
       page-break-after: always;
       page-break-inside: avoid;
       width: 210mm;
-      height: 297mm;
+      /* Slightly under 297mm — guards against sub-pixel rounding overflow
+         that would otherwise emit a blank page after every sheet. */
+      height: 296.5mm;
       padding: 12mm;
       box-sizing: border-box;
       display: flex;
@@ -328,17 +364,16 @@ function getPrintCSS(): string {
       font-size: 12px;
       text-transform: uppercase;
     }
-    /* Main table wrapper fills the remaining vertical space */
+    /* Main table renders at its NATURAL height — rows are never stretched to
+       fill the page. Blank ruled rows (filler-row) complete each page grid at
+       the same normal height instead. */
     .main-table-wrapper {
       flex: 1 1 auto;
       min-height: 0;
-      overflow: hidden;
     }
-    .main-table {
-      height: 100%;
-    }
-    .main-table tbody {
-      height: 100%;
+    tbody tr {
+      height: 32px;
+      page-break-inside: avoid;
     }
     thead tr {
       background: ${HEADER_BG} !important;
@@ -348,14 +383,15 @@ function getPrintCSS(): string {
     }
     th, td {
       border: 1px solid #000;
-      padding: 8px 6px;
     }
     th {
+      padding: 8px 6px;
       font-weight: bold;
       text-align: center;
       font-size: 13px;
     }
     td {
+      padding: 7px 6px;
       font-weight: bold;
       font-size: 12px;
     }
@@ -383,7 +419,6 @@ function getPrintCSS(): string {
 
 /* ───────── Main Component ───────── */
 export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetProps) {
-  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [date, setDate] = useState<Date>(new Date());
   const [dateInput, setDateInput] = useState(formatDateDisplay(new Date()));
   const [isGenerating, setIsGenerating] = useState(false);
@@ -464,31 +499,26 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
     return Array.from({ length: EXTRA_ROWS }, () => ({ type: 'extra' as const }));
   }, []);
 
-  // Chunk employee rows into pages
-  // First page has the header (company name + info section), so fewer rows.
-  // Subsequent pages have more room. The row counts are tuned so the
-  // content fits on one A4 page with 12mm equal borders on all sides.
-  const pages = useMemo(() => {
-    if (employeeRows.length <= FIRST_PAGE_ROWS_COUNT) return [employeeRows];
-    const result: typeof employeeRows[] = [employeeRows.slice(0, FIRST_PAGE_ROWS_COUNT)];
-    const remaining = employeeRows.slice(FIRST_PAGE_ROWS_COUNT);
-    result.push(...chunkRows(remaining, ROWS_PER_PAGE));
-    return result;
-  }, [employeeRows]);
+  // A4 pagination for PRINT/PDF only — the on-screen preview is one long
+  // continuous page and never uses these chunks.
+  const printPages = useMemo(() => chunkPrintPages(employeeRows), [employeeRows]);
 
-  // Generate HTML for all pages (shared by PDF and Print)
+  // Generate HTML for all printed pages (shared by PDF and Print). Every page
+  // is a complete A4 sheet: letterhead on page 1, normal-height ruled blank
+  // rows completing the grid, extras block under the last page's table.
   const generateAllPagesHtml = useCallback(() => {
     let allHtml = '';
-    pages.forEach((pageEmployeeRows, pageIdx) => {
+    printPages.forEach((pageEmployeeRows, pageIdx) => {
       const isFirstPage = pageIdx === 0;
-      const isLastPage = pageIdx === pages.length - 1;
-      const serialOffset = pageIdx === 0 ? 0 : pages.slice(0, pageIdx).flat().length;
+      const isLastPage = pageIdx === printPages.length - 1;
+      const serialOffset = pageIdx === 0 ? 0 : printPages.slice(0, pageIdx).reduce((sum, p) => sum + p.length, 0);
+      const fillerCount = Math.max(0, printPageCapacity(pageIdx, printPages.length) - pageEmployeeRows.length);
 
       allHtml += buildPageHtml({
         employeeRows: pageEmployeeRows,
         extraRows: isLastPage ? extraRowItems : [],
         pageIdx,
-        totalPages: pages.length,
+        totalPages: printPages.length,
         clientName,
         projectName,
         dateInput,
@@ -502,10 +532,11 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
         isFirstPage,
         isLastPage,
         serialOffset,
+        fillerCount,
       });
     });
     return allHtml;
-  }, [pages, extraRowItems, clientName, projectName, dateInput, strengthInput, presentInput, absentInput, sortedEmployees, getDisplayTrade]);
+  }, [printPages, extraRowItems, clientName, projectName, dateInput, strengthInput, presentInput, absentInput, sortedEmployees, getDisplayTrade]);
 
   /* ── Download PDF directly (jsPDF + html2canvas) ── */
   const handleDownloadPDF = useCallback(async () => {
@@ -756,6 +787,14 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
           #attendance-toolbar {
             display: none !important;
           }
+          /* Continuous preview: keep rows whole and repeat the header row on
+             every printed page when the browser paginates the long sheet. */
+          #attendance-sheet-printable tr {
+            page-break-inside: avoid;
+          }
+          #attendance-sheet-printable thead {
+            display: table-header-group;
+          }
         }
       `}</style>
 
@@ -787,6 +826,10 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
               placeholder="DD/MM/YYYY"
             />
           </div>
+
+          <span className="hidden lg:inline ml-2 text-[11px] italic text-gray-400">
+            Continuous preview — Print / PDF splits it into A4 pages automatically
+          </span>
 
           <div className="ml-auto flex items-center gap-2">
             <Button
@@ -827,24 +870,15 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
           </div>
         </div>
 
-        {/* Sheet Container - scrollable preview */}
-        <div className="flex-1 overflow-auto flex flex-col items-center py-6 px-4 gap-6">
-          {pages.map((pageEmployeeRows, pageIdx) => {
-            const isLastPage = pageIdx === pages.length - 1;
-            const isFirstPage = pageIdx === 0;
-            const serialOffset = pageIdx === 0 ? 0 : pages.slice(0, pageIdx).flat().length;
-
-            return (
-              <div
-                key={pageIdx}
-                id={pageIdx === 0 ? 'attendance-sheet-printable' : undefined}
-                ref={(el) => { pageRefs.current[pageIdx] = el; }}
-                className="bg-white shadow-xl border border-gray-300 w-full p-[12mm]"
-                style={{ maxWidth: `${A4_WIDTH_MM}mm`, minHeight: `${A4_HEIGHT_MM}mm`, boxSizing: 'border-box' }}
-              >
+        {/* Sheet Container — ONE long continuous preview page.
+            A4 pagination happens only at print/PDF time. */}
+        <div className="flex-1 overflow-auto flex flex-col items-center py-6 px-4">
+          <div
+            id="attendance-sheet-printable"
+            className="bg-white shadow-xl border border-gray-300 w-full p-[12mm]"
+            style={{ maxWidth: `${A4_WIDTH_MM}mm`, boxSizing: 'border-box' }}
+          >
                 {/* Header Section */}
-                {isFirstPage ? (
-                  <>
                     <div className="relative border border-black bg-gray-200 px-3 py-2 flex items-center justify-between" style={{ minHeight: '52px' }}>
                       {/* Left spacer for centering */}
                       <div className="flex-1" />
@@ -921,19 +955,60 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                         </tr>
                       </tbody>
                     </table>
-                  </>
-                ) : (
-                  <>
-                    {/* Subsequent pages: just the date at top, then table continues */}
-                    <div className="flex justify-end text-[14px] uppercase text-gray-600 pb-1">
-                      <span><strong>DATE:</strong> {upper(dateInput)}</span>
-                    </div>
-                  </>
-                )}
 
-                {/* Main Employee Table */}
-                <div className={isFirstPage ? 'mt-3' : 'mt-1'}>
+                {/* Main Employee Table — continuous: every employee in one
+                    long table (printed pages are chunked from this list). */}
+                <div className="mt-3">
                   <table className="w-full border-collapse text-[13px] uppercase" style={{ tableLayout: 'auto' }}>
+                    <thead>
+                      <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
+                        <th className="sticky top-0 z-10 border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '7%', boxShadow: 'inset 0 0 0 1px #000' }}>SL. NO</th>
+                        <th className="sticky top-0 z-10 border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '37%', boxShadow: 'inset 0 0 0 1px #000' }}>NAME</th>
+                        <th className="sticky top-0 z-10 border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '16%', boxShadow: 'inset 0 0 0 1px #000' }}>EMP. CODE</th>
+                        <th className="sticky top-0 z-10 border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '17%', boxShadow: 'inset 0 0 0 1px #000' }}>TRADE</th>
+                        <th className="sticky top-0 z-10 border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '23%', boxShadow: 'inset 0 0 0 1px #000' }}>SIGNATURE</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedEmployees.map((emp, idx) => {
+                        const serialNo = idx + 1;
+                        const isEven = idx % 2 === 1;
+
+                        return (
+                          <tr
+                            key={emp.id}
+                            className={cn(
+                              isEven ? 'bg-gray-50' : 'bg-white',
+                              emp.isTeamLeader && 'bg-amber-50',
+                              emp.isSupervisor && !emp.isTeamLeader && 'bg-blue-50'
+                            )}
+                          >
+                            <td className="border border-black px-2 py-1.5 text-center text-gray-700 font-bold">{serialNo}</td>
+                            <td className="border border-black px-1 py-1">
+                              <EditableCell value={upper(emp.fullName || '')} onChange={(val) => updateEmployee(emp.id, 'fullName', val)} className="py-0.5 text-gray-900 font-bold text-[13px] uppercase" uppercase />
+                            </td>
+                            <td className="border border-black px-1 py-1 text-center">
+                              <EditableCell value={upper(emp.code || '')} onChange={(val) => updateEmployee(emp.id, 'code', val)} className="py-0.5 text-gray-700 text-center font-mono font-bold text-[13px] uppercase" align="center" uppercase />
+                            </td>
+                            <td className="border border-black px-1 py-1">
+                              <EditableCell value={upper(getDisplayTrade(emp))} onChange={(val) => { const baseVal = val.replace(/ \/ (TL|SUPERVISOR)$/i, ''); updateEmployee(emp.id, 'position', baseVal); }} className="py-0.5 text-gray-700 uppercase font-bold text-[13px]" uppercase />
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              <EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px]" align="center" />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Extra Employees Table — always at the end of the sheet */}
+                <div className="mt-3 pb-4">
+                  <div className="text-[13px] font-bold uppercase tracking-[0.05em] text-black mb-1">
+                    EXTRA EMPLOYEES(IF ANY)
+                  </div>
+                  <table className="w-full border-collapse text-[13px] uppercase">
                     <thead>
                       <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
                         <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '7%' }}>SL. NO</th>
@@ -944,90 +1019,22 @@ export function AttendanceSheet({ site, employees, onClose }: AttendanceSheetPro
                       </tr>
                     </thead>
                     <tbody>
-                      {pageEmployeeRows.map((row, idx) => {
-                        const serialNo = serialOffset + idx + 1;
-                        const isEven = idx % 2 === 1;
-
+                      {extraRowItems.map((_, idx) => {
+                        const serialNo = sortedEmployees.length + idx + 1;
                         return (
-                          <tr
-                            key={row.id || `emp-${idx}`}
-                            className={cn(
-                              isEven ? 'bg-gray-50' : 'bg-white',
-                              row.isTeamLeader && 'bg-amber-50',
-                              row.isSupervisor && !row.isTeamLeader && 'bg-blue-50'
-                            )}
-                          >
-                            <td className="border border-black px-2 py-1.5 text-center text-gray-700 font-bold">{serialNo}</td>
-                            <td className="border border-black px-1 py-1">
-                              <EditableCell value={upper(row.fullName || '')} onChange={(val) => updateEmployee(row.id!, 'fullName', val)} className="py-0.5 text-gray-900 font-bold text-[13px] uppercase" uppercase />
-                            </td>
-                            <td className="border border-black px-1 py-1 text-center">
-                              <EditableCell value={upper(row.code || '')} onChange={(val) => updateEmployee(row.id!, 'code', val)} className="py-0.5 text-gray-700 text-center font-mono font-bold text-[13px] uppercase" align="center" uppercase />
-                            </td>
-                            <td className="border border-black px-1 py-1">
-                              <EditableCell value={upper(getDisplayTrade(row as typeof sortedEmployees[0] & { type: string }))} onChange={(val) => { const baseVal = val.replace(/ \/ (TL|SUPERVISOR)$/i, ''); updateEmployee(row.id!, 'position', baseVal); }} className="py-0.5 text-gray-700 uppercase font-bold text-[13px]" uppercase />
-                            </td>
-                            <td className="border border-black px-2 py-1.5 text-center">
-                              <EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px]" align="center" />
-                            </td>
+                          <tr key={`extra-${idx}`} className="bg-white">
+                            <td className="border border-black px-2 py-1.5 text-center text-gray-400 text-[13px] font-bold">{serialNo}</td>
+                            <td className="border border-black px-1 py-1"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px] font-bold" /></td>
+                            <td className="border border-black px-1 py-1 text-center"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px] font-bold" align="center" /></td>
+                            <td className="border border-black px-1 py-1"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px] font-bold" /></td>
+                            <td className="border border-black px-2 py-1.5 text-center"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px]" align="center" /></td>
                           </tr>
                         );
                       })}
-                      {/* Blank ruled rows complete the page grid so rows keep a
-                          uniform height (mirrors the printed sheet). */}
-                      {Array.from({ length: Math.max(0, (isFirstPage ? FIRST_PAGE_ROWS_COUNT : ROWS_PER_PAGE) - pageEmployeeRows.length) }).map((_, i) => (
-                        <tr key={`filler-${pageIdx}-${i}`} className="bg-white">
-                          <td className="border border-black px-2" style={{ height: '40px' }}>&nbsp;</td>
-                          <td className="border border-black px-1">&nbsp;</td>
-                          <td className="border border-black px-1">&nbsp;</td>
-                          <td className="border border-black px-1">&nbsp;</td>
-                          <td className="border border-black px-2">&nbsp;</td>
-                        </tr>
-                      ))}
                     </tbody>
                   </table>
                 </div>
-
-                {/* Extra Employees Table (only on last page) */}
-                {isLastPage && (
-                  <div className="mt-3 pb-4">
-                    <div className="text-[13px] font-bold uppercase tracking-[0.05em] text-black mb-1">
-                      EXTRA EMPLOYEES(IF ANY)
-                    </div>
-                    <table className="w-full border-collapse text-[13px] uppercase">
-                      <thead>
-                        <tr style={{ background: HEADER_BG, color: HEADER_TEXT }}>
-                          <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '7%' }}>SL. NO</th>
-                          <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '37%' }}>NAME</th>
-                          <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '16%' }}>EMP. CODE</th>
-                          <th className="border border-black px-2 py-2 text-left font-bold text-[14px] uppercase" style={{ width: '17%' }}>TRADE</th>
-                          <th className="border border-black px-2 py-2 text-center font-bold text-[14px] uppercase" style={{ width: '23%' }}>SIGNATURE</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {extraRowItems.map((_, idx) => {
-                          const serialNo = sortedEmployees.length + idx + 1;
-                          return (
-                            <tr key={`extra-${idx}`} className="bg-white">
-                              <td className="border border-black px-2 py-1.5 text-center text-gray-400 text-[13px] font-bold">{serialNo}</td>
-                              <td className="border border-black px-1 py-1"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px] font-bold" /></td>
-                              <td className="border border-black px-1 py-1 text-center"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px] font-bold" align="center" /></td>
-                              <td className="border border-black px-1 py-1"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px] font-bold" /></td>
-                              <td className="border border-black px-2 py-1.5 text-center"><EditableCell value="" onChange={() => {}} className="py-0.5 text-[13px]" align="center" /></td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="text-right text-[10px] text-gray-400 mt-2 pb-4 uppercase">
-                  PAGE {pageIdx + 1} OF {pages.length}
-                </div>
-              </div>
-            );
-          })}
+          </div>
         </div>
       </div>
     </>

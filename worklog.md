@@ -281,3 +281,22 @@ Stage Summary:
 - Sidebar shows live count badges on Notifications / Leave Requests / Cancellations (expanded + collapsed), refreshing every 30s, on focus, and instantly on request create/review events.
 - Attendance grid shows the full employee code without ellipsis.
 - Session note: a tool-infrastructure outage occurred mid-verification; after recovery the remaining cleanup + this worklog entry were completed. No code changes were lost.
+
+---
+Task ID: attendance-print-a4-continuous-preview
+Agent: main (Z.ai Code)
+Task: Attendance print rows stretched too tall — make rows normal (keep only the signature column wide); preview = one long continuous page; print/PDF = properly chunked A4 pages; push to GitHub
+
+Work Log:
+- Root cause of the stretched print rows: getPrintCSS kept `.main-table { height:100% }` (+ tbody 100%) inside the flex page, so Chrome distributed the leftover page height across rows NON-uniformly (content rows grew far taller than the empty filler rows). The 16/20 row counts were also calibrated for stretched rows, leaving pages sparse.
+- attendance-sheet.tsx rebuilt around two independent layouts:
+  * PREVIEW (on-screen): ONE long continuous white sheet — letterhead, 2-col info block, then a single table listing ALL employees (serials 1..N, editable cells, sticky thead with inset-box-shadow borders so it stays readable while scrolled), then the EXTRA EMPLOYEES table. No A4 cards, no filler rows, no "PAGE x OF y". Toolbar gained a muted hint: "Continuous preview — Print / PDF splits it into A4 pages automatically".
+  * PRINT/PDF: employees chunked by NEW chunkPrintPages() into A4 pages with capacities calibrated for normal 32px rows: single page 18 (extras below), first page 24, middle pages 28, last page 21 (reserves room for the extras block). Edge cases: 19-24 employees → page 1 takes all rows and extras get their own continuation page; last chunk always ≤ capacity. Each printed page completes its grid with blank ruled filler rows (&nbsp; cells) at the SAME 32px height, so filled and blank rows are indistinguishable in height.
+- getPrintCSS: removed the height:100% stretching entirely; `tbody tr { height:32px; page-break-inside:avoid }`; td padding 8px→7px vertical; `.page` height 297mm→296.5mm (guards the sub-pixel rounding that emits a blank page after every sheet when printing). Column widths unchanged (7/37/16/17/23) — signature stays the only widened column at 23%.
+- Global @media print fallback (Ctrl+P of the continuous sheet) now sets tr page-break-inside:avoid + thead display:table-header-group so the browser paginates the long table cleanly with a repeating header row.
+- buildPageHtml takes a pre-computed fillerCount; pageRefs/chunkRows/A4_HEIGHT_MM/old row-count constants removed; serial offsets via reduce over printPages.
+- Verified end-to-end with 30 temporary test employees added to Riyadh Tower Site (31 total): preview = single continuous table (37 tbody rows incl. info/extras), sticky header confirmed while scrolled; Download PDF → exactly 2 A4 pages (595.28×841.89pts) — page 1 = letterhead + info + rows 1-24 all at normal height; page 2 = date line + rows 25-31 + uniform ruled fillers + EXTRA EMPLOYEES block, nothing overflowing; signature column visibly the widest on both. Single-employee site re-verified after cleanup: exactly 1 A4 page — John Doe in row 1 at normal height + 17 identical ruled blanks + extras block. eslint clean; tsc: no errors in the file; no browser console errors.
+- Test data removed (scripts/cleanup-sheet-test-data.mjs): 0 test employees / 0 month records remain; helper scripts committed under scripts/ per repo convention.
+
+Stage Summary:
+- Preview is now one long continuous page; Print/PDF chunks employees into properly filled A4 sheets (18/24/28/21 rows by page role) with uniform normal-height ruled rows — no more stretched rows; only the SIGNATURE column stays wide (23%). Filler rows, extras block and page numbers render on print pages only.
