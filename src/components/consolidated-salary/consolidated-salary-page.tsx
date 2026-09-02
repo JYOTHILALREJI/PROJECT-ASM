@@ -387,6 +387,9 @@ interface FlatEmployee {
   // sites in different branches in the same month, so we pick the primary)
   branchId: string | null;
   branchName: string | null;
+  // Teko info — carried over from the merged rows so the TEKO badge renders
+  tekoInfo?: { realName: string; workName: string } | null;
+  isTeko?: boolean;
 }
 
 /**
@@ -490,6 +493,8 @@ function buildFlatEmployees(perSiteRows: Record<string, MergedEmployeeRow[]>): F
       sites,
       branchId: primaryBranchRow?.branchId ?? null,
       branchName: primaryBranchRow?.branchName ?? null,
+      tekoInfo: baseRow.tekoInfo ?? null,
+      isTeko: baseRow.isTeko ?? false,
     });
   }
 
@@ -1247,10 +1252,27 @@ export function ConsolidatedSalaryPage() {
                           const isCurrentRow = isRowCurrent(emp.empId, globalIdx);
                           const isMatchedRow = !isCurrentRow && isRowMatched(emp.empId, globalIdx);
 
-                          const rateLabel =
-                            emp.lowRate === emp.highRate
-                              ? emp.lowRate.toFixed(2)
-                              : `${emp.lowRate.toFixed(1)}/${emp.highRate.toFixed(1)}`;
+                          // Rate column = the rate(s) ACTUALLY used for this
+                          // employee's salary (not a blanket low/high pair):
+                          //  - all hours below threshold → low rate only ("3.5")
+                          //  - all hours above threshold → high rate only ("7")
+                          //  - hours on both tiers (rare straddle) → both
+                          //  - camp_sitting hours are charged at the low rate
+                          //  - no hours yet → tier preview (single if equal)
+                          const fmtRate = (r: number) => String(parseFloat(r.toFixed(2)));
+                          const hasBelowHours = emp.totalBelowThresholdHours > 0;
+                          const hasAboveHours = emp.totalAboveThresholdHours > 0;
+                          const campOnlyHours = Math.max(
+                            emp.totalHours - emp.totalBelowThresholdHours - emp.totalAboveThresholdHours, 0);
+                          const usedLowRate = hasBelowHours || campOnlyHours > 0;
+                          const rateLabel = (() => {
+                            if (usedLowRate && hasAboveHours) return `${fmtRate(emp.lowRate)}/${fmtRate(emp.highRate)}`;
+                            if (hasAboveHours) return fmtRate(emp.highRate);
+                            if (usedLowRate) return fmtRate(emp.lowRate);
+                            return emp.lowRate === emp.highRate
+                              ? fmtRate(emp.lowRate)
+                              : `${fmtRate(emp.lowRate)}/${fmtRate(emp.highRate)}`;
+                          })();
 
                           return (
                             <TableRow
@@ -1314,7 +1336,7 @@ export function ConsolidatedSalaryPage() {
                               <TableCell className="text-slate-300 text-xs text-right font-medium font-mono">
                                 {formatHours(emp.totalHours)}
                               </TableCell>
-                              <TableCell className="text-slate-400 text-xs text-right font-mono" title="Effective hourly rate (low/high)">
+                              <TableCell className="text-slate-400 text-xs text-right font-mono" title="Rate actually used for this salary (low tier / high tier shown only when both were used)">
                                 {rateLabel}
                               </TableCell>
                               <TableCell className="text-emerald-400/80 text-xs text-right font-medium bg-emerald-900/5 font-mono">
@@ -1406,7 +1428,7 @@ export function ConsolidatedSalaryPage() {
             {/* Rate legend */}
             <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-slate-500">
               <span className="bg-slate-800/50 px-2 py-1 rounded border border-slate-700/30">
-                Rate column: effective low/high hourly rate (trade-aware)
+                Rate column: rate actually used for the salary (both rates shown only when hours straddle the threshold)
               </span>
               <span className="bg-violet-900/20 px-2 py-1 rounded border border-violet-700/30 text-violet-400">
                 CR = Custom Rate override
