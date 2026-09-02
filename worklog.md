@@ -321,3 +321,23 @@ Work Log:
 
 Stage Summary:
 - Attendance marks now stick to the site grid they were made in — before AND after a mid-month transfer — across every path: cell mark/clear, keyboard marks, Ctrl+Z undo, bulk mark-all, share links, and the version history. The old site keeps the employee's historical marks and headcount, the new site owns everything from the move date, and salary hours split per site exactly along the same boundary.
+
+---
+Task ID: 2
+Agent: main (Z.ai Code)
+Task: Fix "attempt to write a readonly database" error when adding attendance (user screenshot showed ConnectorError on POST /api/attendance); push the code.
+
+Work Log:
+- Read the user's screenshot: error toast "Invalid ... invocation ... const attendance = await ... Error occurred during query execution: ConnectorError(message: Some(\"attempt to write a readonly database\"))" — a SQLite write-permission failure, not app-logic.
+- Diagnosed environment: .env DATABASE_URL=file:/home/z/my-project/db/custom.db; db dir/file owned by z:z with write bits; direct python sqlite3 write to the file SUCCEEDED (so the file itself was writable).
+- Found root cause via /proc/<next-server-pid>/fd: the dev server (started 06:46) held file descriptors to DELETED inodes of custom.db ("custom.db (deleted)") — the db file had been deleted+recreated by the earlier disk-corruption `git checkout` restore (db mtime 07:02) while the server kept running. SQLite refused writes through the stale handle state → "attempt to write a readonly database".
+- Restarted the Next.js dev server (killed stale process tree; relaunched `node node_modules/next/dist/bin/next dev -p 3000`, log at scripts/dev-server.log). Note: `npm exec next dev -p 3000` misparses `-p` in this env (npm exec swallows it → next treats 3000 as a directory); use the direct binary path instead.
+- Wrote persistent E2E test scripts/test-attendance-write.py: reads a real site+employee from SQLite (ro), POSTs attendance through the HTTP API, asserts 200 + DB row with correct siteId, then deletes the test row.
+- API verification: POST /api/attendance → 200 {"success": true}; DB row confirmed (present, correct siteId); test row cleaned.
+- Browser verification (agent-browser, admin@asm.com/admin123): login OK → Attendance page → Jeddah Mall Project grid (John Doe, Sep 2) → focused day-2 cell, pressed P → DB row (2026-09-02, present, siteId=Jeddah cmrfzfzkj0002pfrj370a03qo) — mark lands in the grid it was made in, no error toast; screenshot scripts/attendance-mark-verified.png; Ctrl+Z undo works; all test rows/tombstones removed afterwards (John Doe Sep-2 clean).
+- Confirmed no stray records; total attendance rows back to 8.
+- Committed db/custom.db data sync as b0a4916 and pushed with PAT: 5012161..b0a4916 main -> main; git fetch refreshed tracking; remote HEAD verified b0a4916.
+
+Stage Summary:
+- Readonly-db error was environmental (stale deleted-inode fds after the corruption restore), NOT a code bug — no source changes needed. Dev server restarted with a fresh handle on the current custom.db; attendance add verified working via both API and real UI grid flow (including correct site attribution and undo).
+- Ops notes for future sessions: (1) after ANY git operation that replaces db/custom.db (checkout/restore/pull) or any `db:push`, restart the dev server or writes fail as readonly; (2) start the dev server with `node node_modules/next/dist/bin/next dev -p 3000`, not `npm exec` (arg parsing bug); (3) `db/custom.db` is git-tracked and is the data-sync mechanism to the user's GitHub.
