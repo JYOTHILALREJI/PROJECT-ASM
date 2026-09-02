@@ -365,3 +365,24 @@ Work Log:
 
 Stage Summary:
 - A site's grid now shows only employees with REAL attendance data at that site (P/A/C/O with matching siteId). not_marked/no_site tombstones and other-site records never keep a row alive. Stale assignment rows without removedDate no longer create active phantom rows. Current-month roster stays visible for marking; past months become fully data-driven. AttendanceSheet and bulk-mark inherit the same list automatically.
+
+---
+Task ID: 4
+Agent: main (Z.ai Code)
+Task: Consolidated Salary Sheet — Rate column must show the rate ACTUALLY used for each employee's salary (only 7 if 7 was used, only 3.5 if 3.5 was used), not a blanket "3.5/7". Push the code.
+
+Work Log:
+- Traced the label to src/components/consolidated-salary/consolidated-salary-page.tsx: old logic `lowRate === highRate ? lowRate.toFixed(2) : "${lowRate}/${highRate}"` printed "3.5/7" for EVERY base-rate employee because baseLow (3.5) never equals helperHigh/tradeHigh (6/7) — regardless of which tier actually produced the salary.
+- Verified live data: John Doe (Mason, cum 1050h) has Feb–Jun 2026 standard records (all hours at 3.5) and Aug–Sep 2026 premium records (all at 7.0); no straddle months exist. All rows wrongly displayed "3.5/7".
+- New rateLabel logic (rows in the flat table): only below-threshold hours → lowRate only ("3.5"); only above-threshold hours → highRate only ("7"); both tiers present (rare threshold-straddle month) → both "3.5/7" (accurate); camp_sitting hours counted as low-rate usage (they're charged at lowRate); zero hours → unchanged tier preview. Rates formatted without trailing zeros (parseFloat(toFixed(2)) → "3.5"/"7"/"6"/"5.5").
+- Updated the Rate cell tooltip and the bottom legend to describe the new behavior.
+- Fixed pre-existing TS error surfaced by tsc (present on HEAD): FlatEmployee was missing isTeko/tekoInfo so the TEKO badge could never render — added fields to the interface and carried them through buildFlatEmployees.
+- eslint 0 errors; tsc clean for the file.
+- Browser verification (agent-browser, admin@asm.com → Consolidated Salary):
+  * September 2026: John Doe Below 0 / Above 20 → Rate "7", gross 140 (screenshot scripts/verify-rate-sept-row.png).
+  * February 2026: Below 40 / Above 0 → Rate "3.5", gross 140 (screenshot scripts/verify-rate-feb-row.png).
+  * August 2026: Below 0 / Above 40 → Rate "7", gross 280.
+  * No console/page errors.
+
+Stage Summary:
+- Rate column now reflects the actual rate applied to each employee's salary for the selected month; "3.5/7" appears only in the genuine straddle case (hours on both sides of the 1000h threshold in one month). Custom-rate and trade-rate employees keep showing their single effective rate. Also fixed the latent TEKO-badge type gap in the same file.
