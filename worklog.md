@@ -341,3 +341,27 @@ Work Log:
 Stage Summary:
 - Readonly-db error was environmental (stale deleted-inode fds after the corruption restore), NOT a code bug — no source changes needed. Dev server restarted with a fresh handle on the current custom.db; attendance add verified working via both API and real UI grid flow (including correct site attribution and undo).
 - Ops notes for future sessions: (1) after ANY git operation that replaces db/custom.db (checkout/restore/pull) or any `db:push`, restart the dev server or writes fail as readonly; (2) start the dev server with `node node_modules/next/dist/bin/next dev -p 3000`, not `npm exec` (arg parsing bug); (3) `db/custom.db` is git-tracked and is the data-sync mechanism to the user's GitHub.
+
+---
+Task ID: 3
+Agent: main (Z.ai Code)
+Task: Hide an employee's name from a site's attendance grid when they have NO attendance data there — records at the OTHER site (and not_marked tombstones) must not count as attendance data. Push the code.
+
+Work Log:
+- Diagnosed the leak with live data: John Doe's currentSite=Riyadh, but a STALE Jeddah assignment row (EmpCountSitePerMonth, removedDate=NULL) existed from earlier move tests. Grid logic computed movedAway = !isCurrentSite && !!removedDate → false → John rendered as a fully active, editable row at Jeddah where his only records were not_marked tombstones (Sep 2-4).
+- Fix in src/components/attendance/attendance-page.tsx (employeesBySite useMemo):
+  1. movedAway = !isCurrentSite (stale rows without removedDate now count as moved away → existing no-data skip applies to them).
+  2. New consolidated VISIBILITY RULE: moved-away employees stay at the old site only with P/A/C/O marks tagged to THAT site; currently-assigned employees are hidden in PAST months with zero marks at the site; the CURRENT month always keeps the roster visible so people can be marked. hasMeaningfulData() treats not_marked/no_site and other-site siteIds as NOT data.
+  3. Early-skip assignments whose createdDate > viewed month end (stops clampToMonth from faking activeFrom inside past months — phantom rows).
+  4. activeUntil fallback for moved-away rows without removedDate (lastMarkedDate ?? monthEndStr).
+  5. Pass-2 (currentSite fallback) gets the same past-month no-data guard (siteId resolved via new siteIdByName map; sites added to useMemo deps).
+  6. CRITICAL bug found while testing: pass 1 add()ed the (emp,site) dedupe key BEFORE skipping, so skipped rows blocked the pass-2 fallback → John vanished from Riyadh in August too. Fixed with added.delete() at every skip site.
+- eslint 0 errors; tsc clean for the file.
+- Browser verification (agent-browser, admin@asm.com):
+  * September (current): Jeddah panel = "0 employees / No active employees assigned to this site" (John gone); Riyadh = John with Sep-1 present "10" intact (screenshot scripts/verify-sept-after-fix.png, verify-sept-riyadh.png).
+  * August (past): Riyadh = John with Aug 1/3/4/5 "10" cells (data-driven history); Jeddah = none (screenshot scripts/verify-august-riyadh.png).
+  * Found + fixed the dedupe-key collision above, re-verified August shows John again.
+- Pushed: b0a4916..3e314b7 (platform auto-commit dfb5d3d + fix 79c21f3 + db sync 3e314b7); remote main verified, tracking in sync.
+
+Stage Summary:
+- A site's grid now shows only employees with REAL attendance data at that site (P/A/C/O with matching siteId). not_marked/no_site tombstones and other-site records never keep a row alive. Stale assignment rows without removedDate no longer create active phantom rows. Current-month roster stays visible for marking; past months become fully data-driven. AttendanceSheet and bulk-mark inherit the same list automatically.
