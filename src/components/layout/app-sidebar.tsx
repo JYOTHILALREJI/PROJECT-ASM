@@ -216,7 +216,7 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
   return (
     <div className="flex h-full flex-col bg-slate-900 border-r border-slate-700/50">
       {/* Logo Section */}
-      <div className="flex items-center gap-3 px-4 py-5">
+      <div className="flex shrink-0 items-center gap-3 px-4 py-5">
         <motion.img
           src="/logo_asm.png"
           alt="ASM"
@@ -254,8 +254,10 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
 
       <Separator className="bg-slate-700/50" />
 
-      {/* Navigation */}
-      <ScrollArea className="flex-1 px-3 py-4">
+      {/* Navigation — min-h-0 is REQUIRED here: as a flex item, the scroll
+          box would otherwise grow to its content height (min-height:auto) and
+          never scroll, pushing the footer off-screen on short viewports. */}
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden px-3 py-4">
         <StaggerContainer
           stagger={0.035}
           className="flex flex-col gap-1"
@@ -342,7 +344,7 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
       <Separator className="bg-slate-700/50" />
 
       {/* User Info Section - Sticky Footer */}
-      <div className={cn('mt-auto', collapsed ? 'p-2' : 'p-3')}>
+      <div className={cn('mt-auto shrink-0', collapsed ? 'p-2' : 'p-3')}>
         {user && (
           <div
             className={cn(

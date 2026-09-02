@@ -415,3 +415,26 @@ Stage Summary:
 - Adding advances works again (root cause environmental, fixed by dev-server restart; ops rule: restart after ANY db file replacement).
 - Recurring advances now support an optional inclusive "deduct until" month/year end — enforced in the deduction engine (single source of truth used by /api/accounts display, bulk-save and toggle-paid), validated at both create and edit, visible on the Advance page.
 - Two pre-existing advance-display bugs fixed along the way (recurring merge ordering in /api/accounts; premium-only months losing advance/deduction display on Accounts + Consolidated pages).
+
+---
+Task ID: 6
+Agent: main (Z.ai Code)
+Task: Side panel (sidebar) menus are not scrollable on smaller or bigger screens. Fix and push.
+
+Work Log:
+- Reproduced with agent-browser at 1280x620 (admin@asm.com): nav ScrollArea viewport measured clientH=656 == scrollH=656 (canScroll=false); last item "All Logs" bottom at 795px vs 577px window — bottom items and the user footer were unreachable on short viewports.
+- Root cause: in src/components/layout/app-sidebar.tsx the nav <ScrollArea className="flex-1"> is a flex child; flex items default to min-height:auto, so the scroll box grew to its CONTENT height instead of being capped by the leftover space. The Radix viewport (h=100% of root) therefore equalled the content height and never scrolled; the footer was pushed off-screen whenever 15 nav items exceeded the viewport height (short laptops, zoomed browsers, phones).
+- Fix (app-sidebar.tsx only):
+  * Nav ScrollArea: className "min-h-0 flex-1 overflow-hidden px-3 py-4" — min-h-0 lets the flex item shrink to the available space so the viewport gets a bounded height and scrolls; overflow-hidden keeps content clipped inside the rail.
+  * Logo header and user footer sections: added shrink-0 so they keep natural height and the nav area always takes the remainder.
+- Verification (agent-browser, all via real layout measurements + screenshots):
+  * 1280x620: canScroll=true (clientH 335 < scrollH 656); scrolled to bottom -> "All Logs" visible + footer visible (scripts/verify-sidebar-scroll-short.png).
+  * 1920x1080: fits without scrolling, footer pinned (no unnecessary scrollbar).
+  * 1280x400 (extreme): canScroll=true, bottom reachable, footer pinned (scripts/verify-sidebar-400.png).
+  * Collapsed 72px rail: canScroll=true, footer pinned.
+  * Mobile 390x700 Sheet: canScroll=true, "All Logs" reachable, footer pinned (scripts/verify-sidebar-mobile.png).
+  * Real trusted input: focus inside nav + PageDown scrolls 0 -> 278 (full range). Synthetic wheel events are untrusted and never scroll anything; agent-browser scroll targets the window, so keyboard input was the conclusive real-input test.
+- eslint 0 errors; tsc clean for the file.
+
+Stage Summary:
+- Sidebar navigation now scrolls within the available height on ANY screen size (short laptops, zoomed browsers, mobile sheet) and in both expanded/collapsed states; logo, online-presence chip and user footer stay pinned. No API/db/schema changes.
