@@ -1,0 +1,2123 @@
+# PRODUCT REQUIREMENTS DOCUMENT
+
+## Documents, NOC ZIP Package & Stamp System — Enhancement and Fix Specification
+
+**Module:** Documents / NOC
+**Feature Area:** NOC Document Packaging, Employee Documents, Stamp Management
+**Status:** Implementation Specification
+**Priority:** High / Production
+**Scope:** Existing Web Application — Documents Module
+
+---
+
+# 1. OBJECTIVE
+
+Enhance the existing Documents and NOC module so that, after an NOC is finalized, the user can generate a complete document package containing:
+
+1. The finalized NOC.
+2. One employee ZIP file for every employee included in that NOC.
+3. Each employee ZIP containing the latest valid:
+
+   * Passport Copy
+   * Emirates ID / ID Card Copy
+   * Visa Copy
+   * Medical / Other document where applicable
+4. Missing documents must not prevent ZIP generation.
+5. Only available and valid documents should be included.
+6. The final package must itself be compressed into a single ZIP named after the NOC.
+7. Both PDF and image documents must be supported.
+8. Documents must have preview functionality.
+9. Employee documents must be displayed in a clean two-column layout.
+10. Stamp selection must use the correct database stamp.
+11. Stamp names and actual stamp files must never become mismatched.
+12. The stamp animation must visually show the stamp falling onto the correct location on the NOC.
+
+The feature must integrate into the existing Documents/NOC module.
+
+---
+
+# 2. FINAL USER WORKFLOW
+
+The intended workflow is:
+
+```text
+Create NOC
+    ↓
+Select Company
+    ↓
+Select Client
+    ↓
+Select Project
+    ↓
+Select Employees
+    ↓
+Review Employee Table
+    ↓
+Generate NOC
+    ↓
+Finalize NOC
+    ↓
+NOC Detail Page
+    ↓
+[ ZIP DOCUMENTS ]
+    ↓
+System finds latest valid documents
+    ↓
+Create Employee ZIPs
+    ↓
+Create final NOC package ZIP
+    ↓
+Download NOC Package
+```
+
+Example final package:
+
+```text
+NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.zip
+```
+
+Inside:
+
+```text
+NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.zip
+│
+├── NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.pdf
+│
+├── PACIFIQUE IRUMVA.zip
+│
+├── PROSPER CIZA.zip
+│
+├── JEAN BOSCO NIYONKURU.zip
+│
+└── ...
+```
+
+---
+
+# 3. EMPLOYEE ZIP STRUCTURE
+
+Each employee included in the NOC receives an individual ZIP.
+
+Example:
+
+```text
+PACIFIQUE IRUMVA.zip
+```
+
+Contents:
+
+```text
+PACIFIQUE IRUMVA.zip
+│
+├── Passport.pdf
+├── Emirates ID.jpg
+└── Visa.pdf
+```
+
+If only passport and visa are available:
+
+```text
+PACIFIQUE IRUMVA.zip
+│
+├── Passport.pdf
+└── Visa.pdf
+```
+
+If only Emirates ID exists:
+
+```text
+PACIFIQUE IRUMVA.zip
+│
+└── Emirates ID.jpg
+```
+
+The absence of a document must **never cause the entire ZIP process to fail**.
+
+---
+
+# 4. DOCUMENT CATEGORY MAPPING
+
+The employee document system must support these logical categories:
+
+| UI Category     | Document Types                   |
+| --------------- | -------------------------------- |
+| Passport        | Passport Copy                    |
+| ID Card         | Emirates ID / ID Card            |
+| Visa            | Visa Copy                        |
+| Medical / Other | Medical, Labour, Contract, Other |
+
+The ZIP generator should normalize these categories to predictable filenames.
+
+Example:
+
+```text
+Passport.pdf
+Emirates ID.pdf
+Visa.pdf
+Medical.pdf
+```
+
+or preserve the original extension:
+
+```text
+Passport.jpg
+Emirates ID.png
+Visa.pdf
+```
+
+---
+
+# 5. PDF AND IMAGE SUPPORT
+
+Employee documents must support:
+
+### PDF
+
+```text
+.pdf
+```
+
+### Images
+
+At minimum:
+
+```text
+.jpg
+.jpeg
+.png
+.webp
+```
+
+The system must determine the MIME type from the uploaded file and validate it on the backend.
+
+Do not trust the extension alone.
+
+Example:
+
+```text
+application/pdf
+image/jpeg
+image/png
+image/webp
+```
+
+---
+
+# 6. DOCUMENT UPLOAD VALIDATION
+
+When uploading an employee document:
+
+```text
+Document Type
+Document Name
+File
+Expiry Date
+Notes
+```
+
+The backend validates:
+
+* MIME type
+* File extension
+* File size
+* File integrity
+* Upload permissions
+
+The system must reject unsupported file formats.
+
+---
+
+# 7. DOCUMENT PREVIEW
+
+Every employee document should have:
+
+```text
+[ Preview ]
+[ Download ]
+```
+
+### PDF preview
+
+Open inside the application's document preview page/viewer.
+
+### Image preview
+
+Open the image inside the application's preview interface.
+
+Recommended behavior:
+
+```text
+Employee
+ ↓
+Passport
+ ↓
+Preview
+ ↓
+Document Viewer
+```
+
+The preview should support:
+
+* Zoom
+* Fit to screen
+* Next/previous where applicable
+* Download
+* Close/back
+
+The system should not require the user to download the document simply to inspect it.
+
+---
+
+# 8. EMPLOYEE DOCUMENT UI — TWO DOCUMENTS PER ROW
+
+The Employee Documents dropdown must be redesigned into a two-column grid.
+
+Required structure:
+
+```text
+EMPLOYEE NAME
+Trade • Nationality • Passport
+
+Documents ▼
+
+┌──────────────────────┐ ┌──────────────────────┐
+│ Passport             │ │ Emirates ID          │
+│                      │ │                      │
+│ ✓ Available          │ │ ✓ Available          │
+│                      │ │                      │
+│ [Preview] [Download] │ │ [Preview] [Download] │
+└──────────────────────┘ └──────────────────────┘
+
+┌──────────────────────┐ ┌──────────────────────┐
+│ Visa                 │ │ Medical / Other      │
+│                      │ │                      │
+│ ✓ Available          │ │ ✓ Available          │
+│                      │ │                      │
+│ [Preview] [Download] │ │ [Preview] [Download] │
+└──────────────────────┘ └──────────────────────┘
+```
+
+The ordering must remain:
+
+### Row 1
+
+```text
+Passport | Emirates ID
+```
+
+### Row 2
+
+```text
+Visa | Medical / Other
+```
+
+Then additional document categories can continue in pairs.
+
+---
+
+# 9. MISSING DOCUMENT UI
+
+If a document is unavailable:
+
+```text
+Passport
+
+⚠ Not Available
+
+[ + Upload ]
+```
+
+Do not hide the category.
+
+The user should immediately understand which documents are missing.
+
+Example:
+
+```text
+┌──────────────────────┐ ┌──────────────────────┐
+│ Passport             │ │ Emirates ID          │
+│ ✓ Available          │ │ ⚠ Not Available      │
+│ [Preview] [Download] │ │ [ + Upload ]         │
+└──────────────────────┘ └──────────────────────┘
+```
+
+---
+
+# 10. LATEST VALID DOCUMENT RULE
+
+This is a critical backend requirement.
+
+When generating the NOC ZIP package, the system must **not simply use the first document returned by the database**.
+
+For every employee and every required document category:
+
+```text
+Find all records
+    ↓
+Remove invalid records
+    ↓
+Remove deleted records
+    ↓
+Remove unusable files
+    ↓
+Sort by latest valid record
+    ↓
+Use newest valid file
+```
+
+The selection rule should be:
+
+```text
+latest valid uploaded document
+```
+
+preferably based on:
+
+```text
+uploaded_at DESC
+```
+
+with a deterministic secondary ordering such as:
+
+```text
+id DESC
+```
+
+---
+
+# 11. EXAMPLE — MULTIPLE PASSPORT FILES
+
+Suppose the employee has:
+
+```text
+Passport_old.pdf
+Uploaded: January
+
+Passport_scan.jpg
+Uploaded: February
+
+Passport_new.pdf
+Uploaded: March
+```
+
+The ZIP process uses:
+
+```text
+Passport_new.pdf
+```
+
+Only.
+
+The old files must not be included.
+
+---
+
+# 12. VALID DOCUMENT DEFINITION
+
+A document is considered valid for packaging when:
+
+* Database record exists.
+* File exists in storage.
+* File is readable.
+* File has an accepted MIME type.
+* File is not marked deleted.
+* File is not corrupted.
+* File belongs to the employee.
+* Document category matches the requested category.
+
+If a document record exists but the physical file is missing:
+
+```text
+Invalid
+```
+
+and it must not be packaged.
+
+---
+
+# 13. STORAGE CLEANUP
+
+The employee document repository must not accumulate unnecessary duplicate files indefinitely.
+
+The system should identify obsolete/unusable document records.
+
+Examples:
+
+```text
+old passport
+duplicate upload
+broken file
+orphan database record
+deleted document
+unsupported document
+```
+
+These should be removed according to the document retention policy.
+
+However, **do not automatically delete a document merely because it is old if that document is referenced by a finalized NOC or required for audit/history**.
+
+Historical NOC references must remain safe.
+
+Recommended model:
+
+```text
+Employee current documents
+        ↓
+Latest valid document
+```
+
+while:
+
+```text
+Finalized NOC
+        ↓
+Historical document reference/snapshot
+```
+
+remains immutable.
+
+---
+
+# 14. DOCUMENT CLEANUP JOB
+
+Introduce a backend cleanup process.
+
+Example:
+
+```text
+Document Cleanup
+       ↓
+Find invalid/orphan documents
+       ↓
+Check historical references
+       ↓
+Exclude protected documents
+       ↓
+Delete safe-to-delete files
+       ↓
+Delete corresponding records
+```
+
+Possible statuses:
+
+```text
+ACTIVE
+REPLACED
+DELETED
+INVALID
+ORPHANED
+```
+
+A replaced document can be removed from active storage after confirming it is not protected by a historical reference.
+
+---
+
+# 15. ZIP DOCUMENTS BUTTON
+
+The finalized NOC page must include:
+
+```text
+[ Print ]
+[ Download PDF ]
+[ Stamp NOC ]
+[ ZIP DOCUMENTS ]
+```
+
+The ZIP button should only be available after the NOC has reached the final state.
+
+---
+
+# 16. ZIP GENERATION PROCESS
+
+When the user clicks:
+
+```text
+ZIP DOCUMENTS
+```
+
+display:
+
+```text
+Prepare NOC Documents
+
+NOC
+PROSCAPE — ARABIAN RANCHES
+
+Employees
+20
+
+Documents are being collected...
+
+[ Cancel ]
+```
+
+Then process:
+
+```text
+Load NOC
+ ↓
+Load NOC employees
+ ↓
+For each employee
+ ↓
+Find latest valid Passport
+ ↓
+Find latest valid Emirates ID
+ ↓
+Find latest valid Visa
+ ↓
+Find latest valid Medical/Other
+ ↓
+Create employee ZIP
+ ↓
+Add employee ZIP to NOC ZIP
+ ↓
+Add NOC PDF
+ ↓
+Finalize NOC ZIP
+```
+
+---
+
+# 17. ZIP GENERATION MUST BE STREAMED
+
+Do not load all employee files into browser memory.
+
+The ZIP generation must happen server-side.
+
+Architecture:
+
+```text
+Browser
+   ↓
+POST /nocs/{id}/package
+   ↓
+Backend
+   ↓
+Storage
+   ↓
+Streaming ZIP generator
+   ↓
+Final ZIP
+   ↓
+Secure download
+```
+
+This is particularly important for large NOCs and large image/PDF files.
+
+---
+
+# 18. MISSING DOCUMENTS MUST NOT STOP ZIP GENERATION
+
+Example:
+
+20 employees.
+
+Employee #1:
+
+```text
+Passport ✓
+ID ✓
+Visa ✓
+```
+
+Employee #2:
+
+```text
+Passport ✓
+ID ✗
+Visa ✓
+```
+
+Employee #3:
+
+```text
+Passport ✗
+ID ✓
+Visa ✗
+```
+
+The result should still contain:
+
+```text
+Employee 1.zip
+Employee 2.zip
+Employee 3.zip
+...
+```
+
+No employee should be excluded simply because a document is missing.
+
+---
+
+# 19. ZIP GENERATION SUMMARY
+
+Before download, optionally show:
+
+```text
+NOC Package Ready
+
+Employees: 20
+Employee ZIPs created: 20
+
+Documents included:
+Passport: 19/20
+Emirates ID: 17/20
+Visa: 20/20
+Medical/Other: 8/20
+
+Missing:
+3 Passport copies
+3 Emirates ID copies
+12 Medical/Other documents
+
+[ Download ZIP ]
+```
+
+This is highly recommended because it gives the user immediate visibility into missing documents.
+
+---
+
+# 20. OUTER ZIP NAMING
+
+The final ZIP must use the NOC name.
+
+Recommended:
+
+```text
+NOC_{CLIENT}_{PROJECT}_{DATE}.zip
+```
+
+Example:
+
+```text
+NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.zip
+```
+
+The filename must be sanitized.
+
+Remove/replace:
+
+```text
+/
+\
+:
+*
+?
+"
+<
+>
+|
+```
+
+with safe characters.
+
+---
+
+# 21. EMPLOYEE ZIP NAMING
+
+Employee ZIP:
+
+```text
+{EMPLOYEE_FULL_NAME}.zip
+```
+
+Example:
+
+```text
+PACIFIQUE IRUMVA.zip
+```
+
+If duplicate names occur, use a deterministic suffix:
+
+```text
+PACIFIQUE IRUMVA - P00032399.zip
+```
+
+This should only happen when required to prevent overwriting two employees with identical names.
+
+---
+
+# 22. DOCUMENT FILE NAMING INSIDE EMPLOYEE ZIP
+
+Normalize names.
+
+Recommended:
+
+```text
+Passport.pdf
+Emirates ID.jpg
+Visa.pdf
+Medical.pdf
+```
+
+Do not carry extremely long uploaded filenames into the package unless required.
+
+The original filename remains available in the database.
+
+---
+
+# 23. ZIP PACKAGE STRUCTURE
+
+Final package:
+
+```text
+NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.zip
+
+├── NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.pdf
+│
+├── PACIFIQUE IRUMVA.zip
+│   ├── Passport.pdf
+│   ├── Emirates ID.jpg
+│   └── Visa.pdf
+│
+├── PROSPER CIZA.zip
+│   ├── Passport.pdf
+│   └── Visa.pdf
+│
+├── JEAN BOSCO NIYONKURU.zip
+│   ├── Passport.pdf
+│   └── Emirates ID.pdf
+│
+└── ...
+```
+
+---
+
+# 24. PACKAGE SHOULD NOT MODIFY EMPLOYEE RECORDS
+
+ZIP generation is a read/package operation.
+
+It must not:
+
+* Change employee information.
+* Change passport information.
+* Change document ownership.
+* Replace employee documents.
+* Modify NOC employee snapshots.
+
+It simply retrieves the correct current valid files and packages them.
+
+---
+
+# 25. PACKAGE GENERATION HISTORY
+
+Recommended database model:
+
+```text
+noc_document_packages
+
+id
+noc_id
+file_name
+storage_path
+file_size
+employee_count
+documents_included
+documents_missing
+generated_by
+generated_at
+status
+```
+
+Status:
+
+```text
+GENERATING
+COMPLETED
+FAILED
+```
+
+This allows the system to know whether a package already exists.
+
+---
+
+# 26. REGENERATING A ZIP
+
+If documents have changed after the previous package was generated:
+
+```text
+[ ZIP DOCUMENTS ]
+```
+
+should regenerate the package using the latest valid documents.
+
+Do not silently serve an old package.
+
+Recommended display:
+
+```text
+Last Package Generated
+03 Sep 2026, 03:15 PM
+
+Documents have changed since then.
+
+[ Generate New Package ]
+```
+
+---
+
+# 27. PACKAGE CACHE
+
+For performance, completed packages can be stored.
+
+However, invalidate/regenerate when:
+
+* NOC changes.
+* Stamp status changes if stamped PDF is included.
+* Employee document used for the package is replaced.
+* Package contents become stale.
+
+---
+
+# 28. STAMP BUG — WRONG STAMP NAME / WRONG IMAGE
+
+### Current problem
+
+The UI displays one stamp name but another stamp is actually applied.
+
+Example:
+
+```text
+Selected:
+Dubai Official Stamp
+```
+
+but generated PDF contains:
+
+```text
+HR Stamp
+```
+
+This indicates that stamp identity is not being handled reliably.
+
+---
+
+# 29. STAMP MUST USE DATABASE ID
+
+Never select a stamp based only on:
+
+```text
+stamp_name
+```
+
+Do not do:
+
+```text
+WHERE name = "Dubai Stamp"
+```
+
+as the actual stamping identity.
+
+Use:
+
+```text
+stamp_id
+```
+
+Example:
+
+```text
+{
+    "stampId": "stp_004"
+}
+```
+
+Then backend loads:
+
+```text
+noc_stamps.id = stp_004
+```
+
+and retrieves the exact associated image.
+
+---
+
+# 30. STAMP DATA MODEL
+
+Recommended:
+
+```text
+noc_stamps
+
+id
+company_id
+name
+image_path
+mime_type
+is_active
+created_at
+updated_at
+```
+
+The UI should receive:
+
+```text
+id
+name
+thumbnail
+company
+```
+
+When the user selects a stamp, the frontend stores:
+
+```text
+selectedStampId
+```
+
+not the image filename and not the display name.
+
+---
+
+# 31. STAMP APPLICATION TRANSACTION
+
+The stamping request should be:
+
+```text
+POST /nocs/{nocId}/stamp
+```
+
+Payload:
+
+```text
+{
+    "stampId": "stp_004"
+}
+```
+
+Backend:
+
+```text
+NOC
+ ↓
+Validate NOC
+ ↓
+Validate stamp ID
+ ↓
+Verify stamp belongs to allowed company
+ ↓
+Load exact stamp record
+ ↓
+Load exact stamp image
+ ↓
+Render stamp
+ ↓
+Generate stamped PDF
+ ↓
+Store stamp_id on NOC
+```
+
+This prevents the name/image mismatch.
+
+---
+
+# 32. COMPANY-SPECIFIC STAMP VALIDATION
+
+If NOC belongs to:
+
+```text
+Company A
+```
+
+and the selected stamp belongs to:
+
+```text
+Company B
+```
+
+the backend must reject the operation.
+
+```text
+400 / 403
+INVALID_STAMP_FOR_COMPANY
+```
+
+The frontend must never be allowed to override this validation.
+
+---
+
+# 33. STAMP DISPLAY CONFIRMATION
+
+Before applying:
+
+```text
+Stamp NOC
+
+Selected Stamp
+
+┌──────────────────────────┐
+│                          │
+│      [STAMP IMAGE]       │
+│                          │
+└──────────────────────────┘
+
+Arabian Shield Official
+
+[Cancel]     [Apply Stamp]
+```
+
+The preview image must come from the exact selected `stampId`.
+
+---
+
+# 34. STAMP ANIMATION — NEW REQUIREMENT
+
+The current animation is insufficient.
+
+The required animation should look like an actual physical stamp being applied to the NOC.
+
+The PDF should remain visible throughout the animation.
+
+Do NOT replace the document with a separate full-screen animation.
+
+---
+
+# 35. STAMP ANIMATION SEQUENCE
+
+Recommended sequence:
+
+```text
+NOC PDF remains visible
+        ↓
+Screen subtly darkens/focuses document
+        ↓
+Stamp appears above document
+        ↓
+Stamp moves toward target location
+        ↓
+Stamp rotates slightly
+        ↓
+Stamp accelerates downward
+        ↓
+Stamp hits paper
+        ↓
+Small impact/bounce
+        ↓
+Ink/stamp impression appears
+        ↓
+Stamp settles
+        ↓
+Success state
+```
+
+Visual concept:
+
+```text
+                ┌─────────────┐
+                │   STAMP     │
+                │             │
+                └─────────────┘
+                       ↓
+                       ↓
+                     ↘
+                      ↘
+             ┌───────────────────┐
+             │                   │
+             │     NOC PDF       │
+             │                   │
+             │                   │
+             │       ↓           │
+             │    [STAMP]        │
+             │                   │
+             └───────────────────┘
+```
+
+---
+
+# 36. STAMP TARGET POSITION
+
+The stamp must have a defined target position in the NOC template.
+
+Do not simply place it at:
+
+```text
+x = 50%
+y = 50%
+```
+
+The template should define:
+
+```text
+stamp_position
+stamp_width
+stamp_height
+stamp_rotation
+```
+
+Example:
+
+```text
+{
+    "x": 450,
+    "y": 690,
+    "width": 120,
+    "height": 120,
+    "rotation": -8
+}
+```
+
+The actual coordinates must be calibrated against the approved A4 NOC template.
+
+---
+
+# 37. ANIMATION AND PDF MUST USE THE SAME POSITION
+
+The biggest requirement for visual correctness:
+
+```text
+Animation position
+        =
+Final PDF stamp position
+```
+
+The frontend animation should use the same normalized coordinates as the backend renderer.
+
+Otherwise the animation may show the stamp hitting one location while the final PDF places it somewhere else.
+
+---
+
+# 38. RECOMMENDED POSITION MODEL
+
+Use normalized coordinates:
+
+```text
+x: 0.72
+y: 0.82
+width: 0.18
+height: 0.12
+rotation: -8
+```
+
+Then:
+
+```text
+Frontend
++
+Backend PDF renderer
+```
+
+both calculate the physical position from the same values.
+
+This avoids screen-size-dependent errors.
+
+---
+
+# 39. STAMP ANIMATION PERFORMANCE
+
+Animation target:
+
+```text
+800–1200ms
+```
+
+Recommended phases:
+
+```text
+0–250ms
+Stamp enters
+
+250–650ms
+Stamp travels toward document
+
+650–800ms
+Impact
+
+800–1000ms
+Ink/impression appears
+
+1000–1200ms
+Success/settle
+```
+
+The PDF must remain visible throughout.
+
+---
+
+# 40. STAMP IMPACT EFFECT
+
+At the moment the stamp lands:
+
+* Very small scale compression.
+* Slight rotation correction.
+* Tiny bounce.
+* Subtle shadow.
+* Optional subtle paper-impact effect.
+* Stamp opacity transitions from preview/translucent to final.
+* Final stamp remains exactly where it landed.
+
+Avoid excessive effects. It should feel premium and professional rather than like a game.
+
+---
+
+# 41. STAMP SUCCESS STATE
+
+After the animation:
+
+```text
+✓ NOC Stamped Successfully
+
+Stamp:
+Arabian Shield Official
+
+Applied:
+03 Sep 2026, 03:42 PM
+
+[ View Stamped NOC ]
+[ Download ]
+[ Print ]
+```
+
+---
+
+# 42. STAMPED / UNSTAMPED DOCUMENT STATES
+
+The NOC page should clearly indicate:
+
+```text
+Stamp: Not Applied
+```
+
+or:
+
+```text
+Stamp: Arabian Shield Official
+```
+
+Example:
+
+```text
+NOC-2026-00124
+
+Status: Final
+Stamp: Not Applied
+
+[Stamp NOC]
+```
+
+After stamping:
+
+```text
+NOC-2026-00124
+
+Status: Final
+Stamp: Arabian Shield Official
+
+[Change Stamp]
+[Download]
+[Print]
+[ZIP Documents]
+```
+
+---
+
+# 43. CHANGING A STAMP
+
+If authorized:
+
+```text
+Change Stamp
+```
+
+opens the stamp selector.
+
+The system should warn:
+
+```text
+This NOC already has a stamp.
+
+Applying a different stamp will replace the existing stamped PDF.
+
+The original unstamped NOC will remain preserved.
+
+[Cancel] [Continue]
+```
+
+---
+
+# 44. ORIGINAL NOC MUST ALWAYS REMAIN
+
+Storage:
+
+```text
+NOC/
+    original.pdf
+    stamped.pdf
+```
+
+Never overwrite the original final NOC.
+
+The database retains:
+
+```text
+original_pdf_path
+stamped_pdf_path
+stamp_id
+stamp_applied
+```
+
+---
+
+# 45. ZIP AND STAMP INTERACTION
+
+When the NOC has been stamped:
+
+```text
+ZIP DOCUMENTS
+```
+
+should include the stamped NOC PDF.
+
+When the NOC has not been stamped:
+
+```text
+ZIP DOCUMENTS
+```
+
+includes the normal final NOC PDF.
+
+Therefore:
+
+```text
+stamp_applied = true
+    ↓
+use stamped.pdf
+
+stamp_applied = false
+    ↓
+use original.pdf
+```
+
+---
+
+# 46. EMPLOYEE DOCUMENT QUERY
+
+The backend must avoid loading every document for every employee.
+
+Do not perform:
+
+```text
+Get all employees
++
+Get all documents
++
+Filter in browser
+```
+
+Instead, retrieve paginated employees and fetch their relevant document metadata efficiently.
+
+Recommended:
+
+```text
+GET /employees?page=1&pageSize=25
+```
+
+Then:
+
+```text
+GET /employees/{employeeId}/documents
+```
+
+or an optimized batch endpoint:
+
+```text
+GET /employee-documents?employeeIds=...
+```
+
+depending on existing architecture.
+
+---
+
+# 47. PAGINATION REMAINS MANDATORY
+
+The new ZIP functionality must not compromise the earlier pagination requirement.
+
+Employee Documents:
+
+```text
+25 employees/page
+```
+
+All NOCs:
+
+```text
+25 NOCs/page
+```
+
+Client folders:
+
+```text
+25 NOCs/page
+```
+
+The browser must never load thousands of employees/documents simultaneously.
+
+---
+
+# 48. DOCUMENT SEARCH
+
+Search must remain server-side.
+
+Supported:
+
+```text
+Employee Name
+Employee ID
+Passport
+Trade
+Company
+Nationality
+```
+
+Example:
+
+```text
+Search: PACIFIQUE
+```
+
+returns only matching employee records.
+
+Pagination applies to search results as well.
+
+---
+
+# 49. ZIP SECURITY
+
+ZIP packages contain highly sensitive employee documents.
+
+Therefore:
+
+* ZIP generation requires authentication.
+* User must have NOC/document access permission.
+* Generated ZIP must be stored privately.
+* Download should use authenticated access or a short-lived signed URL.
+* ZIP URLs must not be publicly guessable.
+* Audit the package generation/download.
+* Do not expose employee documents through public storage.
+
+---
+
+# 50. AUDIT LOGGING
+
+Log:
+
+```text
+NOC_PACKAGE_CREATED
+NOC_PACKAGE_DOWNLOADED
+NOC_STAMP_APPLIED
+NOC_STAMP_CHANGED
+EMPLOYEE_DOCUMENT_UPLOADED
+EMPLOYEE_DOCUMENT_REPLACED
+EMPLOYEE_DOCUMENT_DELETED
+```
+
+Example:
+
+```text
+user_id
+action
+entity_type
+entity_id
+timestamp
+metadata
+```
+
+---
+
+# 51. DATABASE EXTENSIONS
+
+### NOC
+
+Add:
+
+```text
+stamp_id
+stamp_applied
+stamp_applied_at
+stamp_applied_by
+original_pdf_path
+stamped_pdf_path
+```
+
+### NOC Stamps
+
+```text
+noc_stamps
+
+id
+company_id
+name
+image_path
+mime_type
+is_active
+created_at
+updated_at
+```
+
+### Employee Documents
+
+Recommended:
+
+```text
+employee_documents
+
+id
+employee_id
+document_type
+document_name
+file_name
+storage_path
+mime_type
+file_size
+expiry_date
+status
+uploaded_by
+uploaded_at
+updated_at
+```
+
+---
+
+# 52. DOCUMENT STATUS
+
+Use:
+
+```text
+ACTIVE
+REPLACED
+DELETED
+INVALID
+```
+
+Only:
+
+```text
+ACTIVE
+```
+
+documents are eligible for latest-document selection.
+
+Then additionally validate the physical file.
+
+---
+
+# 53. LATEST DOCUMENT QUERY
+
+Conceptually:
+
+```text
+Employee
+    ↓
+Document Category
+    ↓
+WHERE status = ACTIVE
+    ↓
+Validate storage file
+    ↓
+ORDER BY uploaded_at DESC
+    ↓
+LIMIT 1
+```
+
+This logic must exist on the backend.
+
+---
+
+# 54. DO NOT TRUST FRONTEND DOCUMENT SELECTION
+
+The ZIP generator must independently determine the latest valid document.
+
+The frontend must not tell the backend:
+
+```text
+use document ID 123
+```
+
+and expect that document to be accepted blindly.
+
+The backend should validate the document's:
+
+* Employee ownership
+* Category
+* Status
+* File existence
+* File type
+* Validity
+
+---
+
+# 55. ZIP ERROR HANDLING
+
+If one employee's document cannot be read:
+
+```text
+Employee ZIP creation failed
+```
+
+should not necessarily destroy the entire package.
+
+The system should continue processing the remaining employees.
+
+At completion:
+
+```text
+20 employees
+19 packages successful
+1 package failed
+```
+
+Then display the affected employee.
+
+However, if the NOC PDF itself cannot be generated/read, the overall package should fail because the NOC is mandatory.
+
+---
+
+# 56. ZIP GENERATION PROGRESS
+
+For large NOCs:
+
+```text
+Preparing NOC Package
+
+██████████████░░░░░░ 72%
+
+Processing:
+PACIFIQUE IRUMVA
+
+18 / 25 employees
+```
+
+Then:
+
+```text
+✓ Package Ready
+```
+
+This should be implemented as a backend job if package generation can take significant time.
+
+---
+
+# 57. RECOMMENDED ARCHITECTURE
+
+```text
+                DOCUMENTS
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+         NOC             Employee Documents
+          │                     │
+          │                     │
+       Final NOC             Employees
+          │                     │
+     ┌────┴─────┐               │
+     │          │               │
+   Stamp      Package           │
+     │          │               │
+     │      ┌───┴────┐          │
+     │      │        │          │
+     │     NOC    Employees     │
+     │      PDF      ZIPs       │
+     │               │          │
+     └───────────────┴──────────┘
+                     │
+                Final ZIP
+```
+
+---
+
+# 58. COMPLETE NOC PACKAGE WORKFLOW
+
+```text
+FINAL NOC
+   │
+   ├── View
+   │
+   ├── Print
+   │
+   ├── Download PDF
+   │
+   ├── Stamp NOC
+   │      │
+   │      ├── Select Stamp
+   │      ├── Preview
+   │      ├── Animation
+   │      └── Generate Stamped PDF
+   │
+   └── ZIP DOCUMENTS
+          │
+          ├── Load NOC PDF
+          │
+          ├── Employee 1
+          │    ├── Latest Passport
+          │    ├── Latest Emirates ID
+          │    ├── Latest Visa
+          │    └── Latest Medical/Other
+          │
+          ├── Employee 2
+          │    └── ...
+          │
+          ├── Employee N
+          │
+          └── Generate Final NOC ZIP
+```
+
+---
+
+# 59. ACCEPTANCE CRITERIA — ZIP
+
+The feature is complete only when:
+
+* [ ] ZIP DOCUMENTS button exists on finalized NOC.
+* [ ] ZIP generation occurs server-side.
+* [ ] NOC PDF is included.
+* [ ] Every NOC employee gets an individual ZIP.
+* [ ] Employee ZIP uses full employee name.
+* [ ] Passport is included when available.
+* [ ] Emirates ID is included when available.
+* [ ] Visa is included when available.
+* [ ] Medical/Other is included when available.
+* [ ] Missing documents do not stop generation.
+* [ ] Latest valid document is selected.
+* [ ] Old invalid documents are excluded.
+* [ ] Final package is named after the NOC.
+* [ ] Final package can be downloaded.
+* [ ] Large packages do not overload browser memory.
+* [ ] Package generation is audited.
+
+---
+
+# 60. ACCEPTANCE CRITERIA — EMPLOYEE DOCUMENTS
+
+* [ ] Employee list comes from the existing employee database.
+* [ ] Server-side pagination is enforced.
+* [ ] Search works by name.
+* [ ] Search works by passport.
+* [ ] Search works by employee ID.
+* [ ] Employee card expands/collapses.
+* [ ] Documents appear inside the employee card.
+* [ ] Passport and Emirates ID are displayed in row 1.
+* [ ] Visa and Medical/Other are displayed in row 2.
+* [ ] Additional document categories use the same two-column pattern.
+* [ ] PDF preview works.
+* [ ] Image preview works.
+* [ ] Download works.
+* [ ] Upload works.
+* [ ] Missing documents show an upload option.
+
+---
+
+# 61. ACCEPTANCE CRITERIA — LATEST DOCUMENT
+
+Given:
+
+```text
+Passport A — January
+Passport B — February
+Passport C — March
+```
+
+the ZIP contains:
+
+```text
+Passport C
+```
+
+If Passport C is invalid/missing:
+
+```text
+Passport B
+```
+
+is selected.
+
+If no valid passport exists:
+
+```text
+No Passport file
+```
+
+is added, and ZIP generation continues.
+
+---
+
+# 62. ACCEPTANCE CRITERIA — STAMP
+
+* [ ] Stamp is never automatically applied.
+* [ ] Stamp selection displays the correct name.
+* [ ] Selected `stampId` is sent to backend.
+* [ ] Backend retrieves the exact stamp record.
+* [ ] Correct stamp image is applied.
+* [ ] Stamp must belong to the correct company.
+* [ ] Wrong-company stamps are rejected.
+* [ ] Multiple stamps can exist.
+* [ ] Stamp can be selected per NOC.
+* [ ] Final NOCs can be stamped after creation.
+* [ ] Original NOC remains preserved.
+* [ ] Stamped PDF is separately stored.
+* [ ] Stamp animation keeps the PDF visible.
+* [ ] Stamp visually travels onto the correct location.
+* [ ] Final PDF position matches animation position.
+* [ ] Animation is smooth and professional.
+
+---
+
+# 63. ACCEPTANCE CRITERIA — STAMP ANIMATION
+
+The final animation should visually communicate:
+
+```text
+PDF already visible
+       ↓
+Stamp appears
+       ↓
+Stamp travels toward designated location
+       ↓
+Stamp falls onto document
+       ↓
+Impact
+       ↓
+Ink impression
+       ↓
+Success
+```
+
+It should not:
+
+* Replace the PDF with a blank animation screen.
+* Stamp at an arbitrary location.
+* Use a different stamp from the selected stamp.
+* Show one stamp name while applying another.
+* Move the stamp to a location different from the final PDF.
+
+---
+
+# 64. ACCEPTANCE CRITERIA — STORAGE CLEANUP
+
+* [ ] Invalid documents are identified.
+* [ ] Missing-storage-file records are identified.
+* [ ] Orphaned documents are identified.
+* [ ] Replaced documents are identified.
+* [ ] Historical NOC references are protected.
+* [ ] Only safe-to-delete documents are permanently removed.
+* [ ] Cleanup does not delete files required by finalized NOCs.
+* [ ] Storage usage is reduced over time.
+
+---
+
+# 65. FINAL UI — NOC PAGE
+
+The finalized NOC page should ultimately look like:
+
+```text
+← Back to NOCs
+
+NOC-2026-00124
+PROSCAPE LLC
+ARABIAN RANCHES
+
+Status: Final
+Stamp: Not Applied
+
+                 [ Print ]
+                 [ Download PDF ]
+                 [ Stamp NOC ]
+                 [ ZIP DOCUMENTS ]
+
+────────────────────────────────────────
+
+                A4 NOC
+
+        ┌───────────────────────┐
+        │                       │
+        │                       │
+        │       NOC PDF         │
+        │                       │
+        │                       │
+        └───────────────────────┘
+
+────────────────────────────────────────
+```
+
+After stamping:
+
+```text
+Status: Final
+Stamp: Arabian Shield Official
+
+[ Print ]
+[ Download PDF ]
+[ Change Stamp ]
+[ ZIP DOCUMENTS ]
+```
+
+---
+
+# 66. FINAL UI — EMPLOYEE DOCUMENTS
+
+```text
+Employee Documents
+
+Search employees...
+
+Showing 1–25 of 1,284
+
+────────────────────────────────────
+
+PACIFIQUE IRUMVA
+HELPER • BURUNDI • P00032399
+
+Documents ▼
+
+┌──────────────────────┐ ┌──────────────────────┐
+│ Passport             │ │ Emirates ID          │
+│ ✓ Available          │ │ ✓ Available          │
+│ [Preview] [Download] │ │ [Preview] [Download] │
+└──────────────────────┘ └──────────────────────┘
+
+┌──────────────────────┐ ┌──────────────────────┐
+│ Visa                 │ │ Medical / Other      │
+│ ✓ Available          │ │ ⚠ Not Available      │
+│ [Preview] [Download] │ │ [ + Upload ]         │
+└──────────────────────┘ └──────────────────────┘
+
+────────────────────────────────────
+
+PROSPER CIZA
+HELPER • BURUNDI • OP0316316
+
+Documents ▶
+
+────────────────────────────────────
+
+← Previous   1 2 3 4 5   Next →
+```
+
+---
+
+# 67. IMPLEMENTATION ORDER
+
+## Phase 1 — Fix Existing NOC Problems
+
+1. Fix NOC View from All NOCs.
+2. Fix NOC View from client folders.
+3. Fix NOC View from dashboard.
+4. Dedicated NOC page.
+5. Back navigation.
+6. Download.
+7. Print.
+8. Delete/cache synchronization.
+
+## Phase 2 — Company and Stamp System
+
+9. Company selection.
+10. Company-specific template.
+11. Company-specific manager footer.
+12. Multiple stamp database.
+13. Stamp ID selection.
+14. Stamp/company validation.
+15. Correct stamp rendering.
+16. New stamp animation.
+
+## Phase 3 — Draft Persistence
+
+17. Server-side drafts.
+18. Auto-save.
+19. Local offline persistence.
+20. Resume exact workflow step.
+21. Sync after reconnection.
+
+## Phase 4 — Employee Documents
+
+22. Employee-centric listing.
+23. Search.
+24. Server pagination.
+25. Two-column document cards.
+26. PDF preview.
+27. Image preview.
+28. Upload/replace/delete.
+29. Latest-valid-document logic.
+30. Storage cleanup.
+
+## Phase 5 — NOC ZIP Package
+
+31. ZIP DOCUMENTS action.
+32. Latest-document resolver.
+33. Employee ZIP generation.
+34. Missing-document handling.
+35. Outer NOC ZIP generation.
+36. Streaming/queued generation.
+37. Package storage.
+38. Package download.
+39. Package audit history.
+
+---
+
+# 68. FINAL PRODUCT PRINCIPLE
+
+The Documents module should now operate as a complete document-management and NOC-production system:
+
+```text
+EMPLOYEE DATABASE
+       │
+       ├── Employee Information
+       │
+       └── Employee Documents
+              │
+              ├── Passport
+              ├── Emirates ID
+              ├── Visa
+              └── Medical / Other
+                         │
+                         ↓
+                    NOC CREATION
+                         │
+                         ├── Company
+                         ├── Client
+                         ├── Project
+                         └── Employees
+                         │
+                         ↓
+                    FINAL NOC
+                         │
+             ┌───────────┼───────────┐
+             │           │           │
+           Print      Download     Stamp
+                                     │
+                                Select Stamp
+                                     │
+                              Animated Apply
+                                     │
+                              Stamped NOC
+                                     │
+                                     ↓
+                              ZIP DOCUMENTS
+                                     │
+                     ┌───────────────┴──────────────┐
+                     │                              │
+                  NOC PDF                     Employee ZIPs
+                                                    │
+                                      ┌─────────────┼─────────────┐
+                                      │             │             │
+                                  Passport      Emirates ID     Visa
+                                      │             │             │
+                                      └─────────────┴─────────────┘
+                                                    │
+                                                    ↓
+                                           FINAL NOC PACKAGE
+                                                    │
+                                                    ↓
+                                         Download to Device
+```
+
+The core architectural rule remains:
+
+**Employee database = source of truth.**
+
+**Employee document repository = latest valid document source.**
+
+**NOC = historical snapshot.**
+
+**Stamp = independent NOC-level action.**
+
+**ZIP = generated delivery package, not the source of truth.**
+
+This structure will allow the system to scale to a very large number of employees, NOCs and documents without loading the entire document repository into the browser or mixing historical NOC data with current employee records.

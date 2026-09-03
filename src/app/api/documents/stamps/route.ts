@@ -7,8 +7,8 @@ import path from 'path';
 
 // ---------------------------------------------------------------------------
 // /api/documents/stamps — the stamp library stored in the database
-//   GET   — active stamps (id, name, isDefault, imagePath)
-//   POST  — upload a new stamp (multipart: name, isDefault?, file png/jpg)
+//   GET   — active stamps (id, name, companyId, companyName, isDefault, imagePath)
+//   POST  — upload a new stamp (multipart: name, companyId?, isDefault?, file png/jpg)
 // ---------------------------------------------------------------------------
 
 const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
@@ -19,9 +19,22 @@ export async function GET() {
     const stamps = await db.stamp.findMany({
       where: { deletedAt: null, active: true },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
-      select: { id: true, name: true, imagePath: true, isDefault: true, createdAt: true },
+      select: { id: true, name: true, imagePath: true, companyId: true, company: { select: { name: true } }, isDefault: true, createdAt: true },
     });
-    return NextResponse.json({ success: true, data: { stamps } });
+    return NextResponse.json({
+      success: true,
+      data: {
+        stamps: stamps.map((s) => ({
+          id: s.id,
+          name: s.name,
+          imagePath: s.imagePath,
+          companyId: s.companyId,
+          companyName: s.company?.name ?? null,
+          isDefault: s.isDefault,
+          createdAt: s.createdAt,
+        })),
+      },
+    });
   } catch (error) {
     console.error('GET /api/documents/stamps error:', error);
     return NextResponse.json({ success: false, error: 'Failed to load stamps' }, { status: 500 });
@@ -54,6 +67,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: `Unsupported image type "${ext || 'unknown'}". Allowed: PNG, JPG, WEBP.` }, { status: 400 });
     }
 
+    // §30/§32 — a stamp belongs to a company (optional; null = usable on any NOC)
+    const companyId = (form.get('companyId') || '').toString().trim() || null;
+    if (companyId) {
+      const company = await db.nocCompany.findFirst({ where: { id: companyId, deletedAt: null } });
+      if (!company) {
+        return NextResponse.json({ success: false, error: 'The selected company no longer exists.' }, { status: 400 });
+      }
+    }
+
     const dir = ensureStorageDir('stamps');
     const absPath = uniqueFilePath(dir, sanitizeFileName(`${name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}${ext}`));
     fs.writeFileSync(absPath, Buffer.from(await file.arrayBuffer()));
@@ -64,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const stamp = await db.stamp.create({
-      data: { name, imagePath: relativePath, isDefault, active: true },
+      data: { name, imagePath: relativePath, companyId, isDefault, active: true, mime: file.type || 'image/png' },
     });
 
     await logActivity({

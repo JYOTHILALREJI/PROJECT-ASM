@@ -934,6 +934,9 @@ model NocDocument {
   stampType     String   @default("procurement") // legacy: "procurement" | "signature" | "none" (pre stamp-picker rows)
   stampEnabled  Boolean  @default(false) // stamps are NOT applied automatically — toggled per NOC
   stampId       String? // which stamp (Stamp row) is applied when stampEnabled
+  stampAppliedAt DateTime? // when the stamp was applied / last changed
+  stampAppliedBy String? // admin display name who applied the stamp
+  stampRect     String? // JSON {page,x,y,w,h} normalized 0..1 (y from page TOP) — where the renderer placed the stamp; shared with the FE animation (§36-38)
   companyId     String? // which company (NocCompany row) issues this NOC (letterhead + signature)
   employeesJson String // JSON array of { name, trade, company, nationality, passport }
   employeeCount Int      @default(0)
@@ -948,6 +951,7 @@ model NocDocument {
 
   stamp   Stamp?      @relation(fields: [stampId], references: [id], onDelete: SetNull)
   company NocCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  packages NocDocumentPackage[]
 
   @@unique([nocNumber, version])
   @@index([clientName])
@@ -981,7 +985,8 @@ model NocCompany {
   updatedAt      DateTime @updatedAt
   deletedAt      DateTime?
 
-  nocs NocDocument[]
+  nocs   NocDocument[]
+  stamps Stamp[]
 
   @@index([active])
   @@index([name])
@@ -998,15 +1003,19 @@ model Stamp {
   id        String   @id @default(cuid())
   name      String // display name, e.g. "Procurement", "Round signature"
   imagePath String // "builtin:stamp-procurement.png" | relative path under storage/stamps/
+  companyId String? // owning company — a stamp is only valid for NOCs of that company (null = universal)
+  mime      String   @default("image/png") // image mime (validated at upload; never trust the extension alone)
   isDefault Boolean  @default(false) // pre-selected for new NOCs
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   deletedAt DateTime?
 
-  nocs NocDocument[]
+  nocs     NocDocument[]
+  company  NocCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
 
   @@index([active])
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,6 +1034,7 @@ model EmployeeDocument {
   filePath   String // relative path under storage/
   mimeType   String   @default("application/pdf")
   fileSize   Int      @default(0)
+  status     String   @default("ACTIVE") // ACTIVE | REPLACED | DELETED | INVALID — only ACTIVE feeds latest-valid selection (§52)
   expiryDate String? // optional ISO date (YYYY-MM-DD) for expiry tracking
   notes      String? // optional free-text note
   createdBy  String?
@@ -1037,6 +1047,34 @@ model EmployeeDocument {
   @@index([employeeId])
   @@index([docType])
   @@index([expiryDate])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// NocDocumentPackage — generated NOC ZIP packages (audit + cache)
+// ---------------------------------------------------------------------------
+// One row per generated package: the outer ZIP holds the NOC PDF plus one
+// nested ZIP per NOC employee with their latest valid documents. status
+// tracks GENERATING/COMPLETED/FAILED so the UI can show the last package.
+// ---------------------------------------------------------------------------
+model NocDocumentPackage {
+  id                String   @id @default(cuid())
+  nocId             String
+  fileName          String // e.g. "NOC_PROSCAPE_ARABIAN_RANCHES_02-09-2026.zip"
+  storagePath       String? // relative path under storage/noc-packages/
+  fileSize          Int      @default(0)
+  employeeCount     Int      @default(0)
+  documentsIncluded Int      @default(0) // total employee docs packaged
+  documentsMissing  Int      @default(0) // total category slots with no valid doc
+  summaryJson       String?  @default("{}") // per-employee/per-category detail for the UI summary
+  status            String   @default("GENERATING") // GENERATING | COMPLETED | FAILED
+  generatedBy       String?
+  createdAt         DateTime @default(now())
+
+  noc NocDocument @relation(fields: [nocId], references: [id], onDelete: Cascade)
+
+  @@index([nocId])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -152,7 +152,22 @@ function drawLetterhead(page: PDFPage, letterhead: PDFImage) {
   });
 }
 
-export async function generateNocPdf(data: NocData): Promise<Uint8Array> {
+/**
+ * Where the stamp physically landed on the rendered letter — NORMALIZED 0..1
+ * coordinates, y measured from the page TOP (frontend-friendly), shared by the
+ * PDF renderer and the UI stamp animation so both always agree (§36-38).
+ */
+export interface StampRectMeta {
+  page: number; // 1-based page number the stamp was drawn on
+  x: number; // left edge, 0..1 of page width
+  y: number; // top edge, 0..1 of page height (from the TOP)
+  w: number; // width, 0..1 of page width
+  h: number; // height, 0..1 of page height
+  rotation: number; // degrees (visual only — renderer draws unrotated)
+}
+
+export async function generateNocPdf(data: NocData, meta?: { stampRect?: StampRectMeta | null }): Promise<Uint8Array> {
+  if (meta) meta.stampRect = null; // reset — filled below only when a stamp is actually drawn
   const pdf = await PDFDocument.create();
   pdf.setTitle(`NOC ${data.clientName} ${data.projectName} ${data.nocDate}`.trim());
   pdf.setAuthor('Arabian Shield A/C. Units Fix. Cont');
@@ -352,12 +367,26 @@ export async function generateNocPdf(data: NocData): Promise<Uint8Array> {
   if (stampImg) {
     const stW = data.stampType === 'signature' ? 150 : 152;
     const stH = (stW * stampImg.height) / stampImg.width;
+    const stX = A4_W - MARGIN - stW - 6;
+    const stY = y - stH + 10;
     page.drawImage(stampImg, {
-      x: A4_W - MARGIN - stW - 6,
-      y: y - stH + 10,
+      x: stX,
+      y: stY,
       width: stW,
       height: stH,
     });
+    // report the normalized placement so the UI animation can target the
+    // EXACT same spot (y flipped: renderer measures from the bottom)
+    if (meta) {
+      meta.stampRect = {
+        page: pdf.getPages().indexOf(page) + 1,
+        x: stX / A4_W,
+        y: (A4_H - (stY + stH)) / A4_H,
+        w: stW / A4_W,
+        h: stH / A4_H,
+        rotation: -8,
+      };
+    }
   }
 
   y -= 30;

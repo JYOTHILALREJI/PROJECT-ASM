@@ -20,6 +20,38 @@ import path from 'path';
 
 const ALLOWED_DOC_TYPES = ['passport', 'id_card', 'visa', 'other'];
 const ALLOWED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.doc', '.docx'];
+
+/**
+ * Magic-byte sniffing (§5-6) — never trust the extension alone. Returns an
+ * error string when the CONTENT does not match the declared file type.
+ */
+function sniffFileError(buffer: Buffer, ext: string): string | null {
+  if (buffer.length < 8) return 'The file is too small to be a valid document.';
+  const head = buffer.subarray(0, 12);
+  const isPdf = head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46; // %PDF
+  const isJpeg = head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+  const isPng = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47;
+  const isWebp = head.subarray(0, 4).toString('ascii') === 'RIFF' && head.subarray(8, 12).toString('ascii') === 'WEBP';
+  const isZip = head[0] === 0x50 && head[1] === 0x4b; // PK — docx
+  const isDoc = head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0; // OLE2 — doc
+  switch (ext) {
+    case '.pdf':
+      return isPdf ? null : 'The file content is not a valid PDF (corrupted or renamed file).';
+    case '.jpg':
+    case '.jpeg':
+      return isJpeg ? null : 'The file content is not a valid JPG image (corrupted or renamed file).';
+    case '.png':
+      return isPng ? null : 'The file content is not a valid PNG image (corrupted or renamed file).';
+    case '.webp':
+      return isWebp ? null : 'The file content is not a valid WEBP image (corrupted or renamed file).';
+    case '.docx':
+      return isZip ? null : 'The file content is not a valid Word document (corrupted or renamed file).';
+    case '.doc':
+      return isDoc || isZip ? null : 'The file content is not a valid Word document (corrupted or renamed file).';
+    default:
+      return 'Unsupported file format.';
+  }
+}
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 export async function GET(request: NextRequest) {
@@ -185,6 +217,12 @@ export async function POST(request: NextRequest) {
         { success: false, error: `Unsupported file type "${ext || 'unknown'}". Allowed: PDF, images, Word documents.` },
         { status: 400 },
       );
+    }
+
+    // content integrity check BEFORE touching storage (§6)
+    const contentCheck = sniffFileError(Buffer.from(await file.arrayBuffer()), ext);
+    if (contentCheck) {
+      return NextResponse.json({ success: false, error: contentCheck }, { status: 400 });
     }
 
     const employee = await db.employee.findFirst({

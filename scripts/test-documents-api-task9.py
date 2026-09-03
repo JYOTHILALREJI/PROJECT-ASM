@@ -72,6 +72,11 @@ def make_pdf_bytes():
     # minimal valid PDF for upload endpoints
     return b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n9\n%%EOF"
 
+def make_png_bytes():
+    """A real 1x1 PNG — the renderer actually embeds stamp images now."""
+    import base64
+    return base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
 def multipart(fields, files):
     boundary = "----asmtestboundary42"
     out = io.BytesIO()
@@ -97,7 +102,7 @@ def cleanup_leftovers():
     st, _, data = req("GET", "/api/documents/stamps")
     if st == 200 and data.get("success"):
         for s in data["data"]["stamps"]:
-            if s["name"].startswith("Test Stamp QA"):
+            if s["name"].startswith("Test Stamp QA") or s["name"].startswith("QA Company Stamp"):
                 req("DELETE", f"/api/documents/stamps/{s['id']}?actorDisplayName=QA")
                 print(f"  cleanup: removed leftover stamp {s['name']}")
     st, _, data = req("GET", "/api/documents/companies")
@@ -159,6 +164,16 @@ def main():
     st, _, data = req("POST", "/api/documents/companies", {"name": "QA SECOND COMPANY LLC", "contactPerson": "QA Manager", "contactPhone": "050 000 0000", "contactEmail": "qa@second.com"})
     check("POST company 201", st == 201 and data["success"], str(data))
     qa_company = data["data"]["company"]
+
+    # company-scoped stamps for the QA company (§32 — stamps belong to companies)
+    body, hdrs = multipart({"name": "QA Company Stamp A", "companyId": qa_company["id"], "actorDisplayName": "QA"}, {"file": ("qa-a.png", make_png_bytes(), "image/png")})
+    st, _, data = req("POST", "/api/documents/stamps", raw_body=body, headers=hdrs)
+    check("QA stamp A created (company-scoped)", st == 201 and data["success"], str(data))
+    qa_stamp_a = data["data"]["stamp"]
+    body, hdrs = multipart({"name": "QA Company Stamp B", "companyId": qa_company["id"], "actorDisplayName": "QA"}, {"file": ("qa-b.png", make_png_bytes(), "image/png")})
+    st, _, data = req("POST", "/api/documents/stamps", raw_body=body, headers=hdrs)
+    check("QA stamp B created (company-scoped)", st == 201 and data["success"], str(data))
+    qa_stamp_b = data["data"]["stamp"]
     st, _, data = req("POST", "/api/documents/companies", {"name": "QA SECOND COMPANY LLC"})
     check("dupe company name rejected 409", st == 409)
     st, _, data = req("POST", "/api/documents/companies", {"name": "AB"})
@@ -191,18 +206,20 @@ def main():
     st, rh, pdf = req("GET", f"/api/documents/noc/{noc['id']}/pdf?mode=inline")
     check("final PDF served", st == 200 and "application/pdf" in str(rh.get("content-type", "")) and isinstance(pdf, bytes) and len(pdf) > 1000, f"st={st} ct={rh.get('content-type')} len={len(pdf) if isinstance(pdf, bytes) else pdf}")
 
-    # apply stamp via stampUpdate
+    # apply stamp via stampUpdate — wrong-company stamps are rejected (§32)
     st, _, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": True, "stampId": proc["id"], "actorDisplayName": "QA"})
+    check("wrong-company stamp rejected INVALID_STAMP_FOR_COMPANY", st == 400 and data.get("code") == "INVALID_STAMP_FOR_COMPANY", str(data))
+    st, _, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": True, "stampId": qa_stamp_a["id"], "actorDisplayName": "QA"})
     check("stampUpdate apply 200", st == 200 and data["success"], str(data))
     check("stampEnabled now true", data["data"]["noc"]["stampEnabled"] is True)
     st, _, data = req("GET", f"/api/documents/noc/{noc['id']}")
-    check("detail shows stampName", data["data"]["noc"]["stampName"] == "Procurement stamp")
+    check("detail shows stampName", data["data"]["noc"]["stampName"] == "QA Company Stamp A")
 
     # switch which stamp
-    st, _, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": True, "stampId": sig["id"], "actorDisplayName": "QA"})
+    st, _, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": True, "stampId": qa_stamp_b["id"], "actorDisplayName": "QA"})
     check("stampUpdate switch stamp 200", st == 200 and data["success"])
     st, _, data = req("GET", f"/api/documents/noc/{noc['id']}")
-    check("stampName switched", data["data"]["noc"]["stampName"] == "Signature stamp")
+    check("stampName switched", data["data"]["noc"]["stampName"] == "QA Company Stamp B")
 
     # remove stamp again
     st, _, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": False, "stampId": None, "actorDisplayName": "QA"})

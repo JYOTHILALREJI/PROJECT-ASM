@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logActivity } from '@/lib/activity-logger';
-import { generateNocPdf, buildNocFileName, monthKeyFromNocDate, type NocEmployeeRow } from '@/lib/noc-pdf';
+import { generateNocPdf, buildNocFileName, monthKeyFromNocDate, type NocEmployeeRow, type StampRectMeta } from '@/lib/noc-pdf';
 import { resolveNocAssets } from '@/lib/noc-pdf-server';
 import { ensureStorageDir, slugify, uniqueFilePath } from '@/lib/document-storage';
 import fs from 'fs';
@@ -388,6 +388,7 @@ export async function POST(request: NextRequest) {
       let activeAbs = plainAbs;
       if (stampEnabled) {
         const stampedAssets = await resolveNocAssets(assetOpts);
+        const stampedMeta: { stampRect?: StampRectMeta | null } = {};
         const stampedBytes = await generateNocPdf({
           clientName,
           projectName: recordData.projectName as string,
@@ -403,10 +404,15 @@ export async function POST(request: NextRequest) {
           employees,
           bodyText: stampedAssets.bodyText,
           companyName: stampedAssets.companyName,
-        });
+        }, stampedMeta);
         const stampedAbs = uniqueFilePath(dir, plainName.replace(/\.pdf$/i, ' (stamped).pdf'));
         fs.writeFileSync(stampedAbs, stampedBytes);
         activeAbs = stampedAbs;
+        if (stampedMeta.stampRect) {
+          recordData.stampRect = JSON.stringify(stampedMeta.stampRect);
+          recordData.stampAppliedAt = new Date();
+          recordData.stampAppliedBy = body.actorDisplayName || null;
+        }
       }
       recordData.fileName = path.basename(activeAbs);
       recordData.filePath = path.relative(process.cwd(), activeAbs).replace(/\\/g, '/');

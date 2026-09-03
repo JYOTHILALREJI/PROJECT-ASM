@@ -33,6 +33,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { cn } from '@/lib/utils';
@@ -256,11 +263,12 @@ function CompaniesSection({ companies, onChanged }: { companies: CompanyOption[]
 
 // ---------------------------------------------------------------------------
 
-function StampsSection({ stamps, onChanged }: { stamps: StampOption[]; onChanged: () => void }) {
+function StampsSection({ stamps, companies, onChanged }: { stamps: StampOption[]; companies: CompanyOption[]; onChanged: () => void }) {
   const { user } = useAuthStore();
   const [name, setName] = React.useState('');
   const [file, setFile] = React.useState<File | null>(null);
   const [isDefault, setIsDefault] = React.useState(false);
+  const [companyId, setCompanyId] = React.useState('');
   const [adding, setAdding] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<StampOption | null>(null);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
@@ -279,6 +287,7 @@ function StampsSection({ stamps, onChanged }: { stamps: StampOption[]; onChanged
       const form = new FormData();
       form.append('name', name.trim());
       if (isDefault) form.append('isDefault', '1');
+      if (companyId) form.append('companyId', companyId);
       form.append('actorDisplayName', user?.name || user?.email || '');
       form.append('actorUserId', user?.id || '');
       form.append('file', file);
@@ -289,6 +298,7 @@ function StampsSection({ stamps, onChanged }: { stamps: StampOption[]; onChanged
       setName('');
       setFile(null);
       setIsDefault(false);
+      setCompanyId('');
       if (fileRef.current) fileRef.current.value = '';
       onChanged();
     } catch (e) {
@@ -349,7 +359,7 @@ function StampsSection({ stamps, onChanged }: { stamps: StampOption[]; onChanged
                 <span className="text-[13px] font-semibold text-slate-200 truncate">{s.name}</span>
                 {s.isDefault && <Star className="h-3 w-3 text-amber-400 fill-amber-400" />}
               </div>
-              <div className="text-[10px] text-slate-500">{s.isDefault ? 'Default for new NOCs' : 'Available in the stamp picker'}</div>
+              <div className="text-[10px] text-slate-500">{s.isDefault ? 'Default for new NOCs' : 'Available in the stamp picker'}{s.companyName ? ` · ${s.companyName}` : ' · any company'}</div>
             </div>
             <div className="flex items-center gap-0.5">
               {!s.isDefault && (
@@ -375,6 +385,17 @@ function StampsSection({ stamps, onChanged }: { stamps: StampOption[]; onChanged
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-400">Stamp Image * (PNG/JPG scan, max 5 MB)</span>
             <Input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" onChange={(e) => setFile(e.target.files?.[0] || null)} className={inputCls} />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <span className="text-xs font-medium text-slate-400">Belongs to company</span>
+            <Select value={companyId || undefined} onValueChange={(v) => setCompanyId(v === '_any' ? '' : v)}>
+              <SelectTrigger className={inputCls}><SelectValue placeholder="Any company (universal stamp)" /></SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
+                <SelectItem value="_any">Any company (universal stamp)</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <span className="text-[10px] text-slate-500">A company stamp can only be applied to NOCs issued by the same company.</span>
           </div>
         </div>
         <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -425,7 +446,7 @@ export function NocSettings({
     <div className="max-w-3xl space-y-5">
       <TemplateSection template={template} onSaved={onTemplateSaved} />
       <CompaniesSection companies={companies} onChanged={onLibraryChanged} />
-      <StampsSection stamps={stamps} onChanged={onLibraryChanged} />
+      <StampsSection stamps={stamps} companies={companies} onChanged={onLibraryChanged} />
     </div>
   );
 }

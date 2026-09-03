@@ -42,6 +42,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { cn } from '@/lib/utils';
+import { DocumentPreviewModal, type PreviewDoc } from '@/components/documents/document-preview-modal';
 
 export interface EmployeeDocRecord {
   id: string;
@@ -70,6 +71,8 @@ const DOC_GROUPS: Array<{ type: string; accent: string }> = [
   { type: 'visa', accent: 'text-violet-400' },
   { type: 'other', accent: 'text-amber-400' },
 ];
+
+const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 const inputCls = 'bg-slate-900/60 border-slate-700/60 text-slate-200 placeholder:text-slate-500 focus-visible:ring-blue-500/40';
 
@@ -131,6 +134,19 @@ export function EmployeeDocumentsPanel({
   const [deleteTarget, setDeleteTarget] = React.useState<EmployeeDocRecord | null>(null);
   const replaceInputRef = React.useRef<HTMLInputElement | null>(null);
   const [replaceTarget, setReplaceTarget] = React.useState<EmployeeDocRecord | null>(null);
+  // §7 — in-app preview (PDF viewer / image with zoom)
+  const [previewDoc, setPreviewDoc] = React.useState<PreviewDoc | null>(null);
+  // §8 — "older documents" expanders per category
+  const [expandedCats, setExpandedCats] = React.useState<Record<string, boolean>>({});
+
+  const openPreview = (doc: EmployeeDocRecord) => {
+    setPreviewDoc({
+      url: `/api/documents/employee/${doc.id}/file?mode=inline&_=${Date.now()}`,
+      downloadableUrl: `/api/documents/employee/${doc.id}/file?mode=download&_=${Date.now()}`,
+      name: doc.docName || doc.fileName,
+      mimeType: doc.mimeType,
+    });
+  };
 
   const effectiveEmployeeId = employeeId || selectedEmployee?.id;
 
@@ -263,59 +279,21 @@ export function EmployeeDocumentsPanel({
     }
   };
 
-  const renderDocRow = (doc: EmployeeDocRecord) => {
-    const exp = expiryInfo(doc.expiryDate);
-    return (
-      <div key={doc.id} className="flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-900/40 px-3 py-2">
-        <FileText className="h-4 w-4 shrink-0 text-slate-400" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-medium text-slate-200 truncate">{doc.docName}</span>
-            {exp && (
-              <Badge variant="secondary" className={cn(
-                'text-[9px] px-1.5 py-0 h-4',
-                exp.tone === 'ok' && 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/20',
-                exp.tone === 'warn' && 'bg-amber-500/15 text-amber-300 border border-amber-500/20',
-                exp.tone === 'danger' && 'bg-red-500/15 text-red-300 border border-red-500/20',
-              )}>
-                {exp.label}
-              </Badge>
-            )}
-          </div>
-          <div className="text-[11px] text-slate-400 truncate">
-            {doc.fileName} · {formatBytes(doc.fileSize)} · {new Date(doc.createdAt).toLocaleDateString()}
-            {doc.notes ? ` · ${doc.notes}` : ''}
-          </div>
-        </div>
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button type="button" title="Rename / edit expiry" onClick={() => { setRenameTarget(doc); setRenameValue(doc.docName); setRenameExpiry(doc.expiryDate || ''); }} className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700/60 transition-colors">
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" title="View" onClick={() => window.open(`/api/documents/employee/${doc.id}/file?mode=inline&_=${Date.now()}`, '_blank')} className="rounded p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors">
-            <Eye className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" title="Replace file" onClick={() => { setReplaceTarget(doc); setTimeout(() => replaceInputRef.current?.click(), 50); }} className="rounded p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors">
-            <Replace className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" title="Download" onClick={() => {
-            const a = document.createElement('a');
-            a.href = `/api/documents/employee/${doc.id}/file?mode=download`;
-            a.download = doc.fileName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-          }} className="rounded p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors">
-            <Download className="h-3.5 w-3.5" />
-          </button>
-          {canDelete && (
-            <button type="button" title="Delete" onClick={() => setDeleteTarget(doc)} className="rounded p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors">
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const renderDocActions = (doc: EmployeeDocRecord) => (
+    <div className="flex items-center gap-0.5 shrink-0">
+      <button type="button" title="Rename / edit expiry" onClick={() => { setRenameTarget(doc); setRenameValue(doc.docName); setRenameExpiry(doc.expiryDate || ''); }} className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700/60 transition-colors">
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+      <button type="button" title="Replace file" onClick={() => { setReplaceTarget(doc); setTimeout(() => replaceInputRef.current?.click(), 50); }} className="rounded p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors">
+        <Replace className="h-3.5 w-3.5" />
+      </button>
+      {canDelete && (
+        <button type="button" title="Delete" onClick={() => setDeleteTarget(doc)} className="rounded p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className={compact ? 'space-y-4' : 'space-y-5'}>
@@ -375,37 +353,150 @@ export function EmployeeDocumentsPanel({
       ) : loading ? (
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-10 text-center text-sm text-slate-400">Loading documents…</div>
       ) : (
-        <div className={compact ? 'space-y-4' : 'grid grid-cols-1 lg:grid-cols-2 gap-4'}>
+        /* §8 — TWO documents per row, fixed order:
+           Row 1: Passport | Emirates ID · Row 2: Visa | Medical / Other (§66) */
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {DOC_GROUPS.map(({ type, accent }) => {
-            const groupDocs = docs.filter((d) => d.docType === type);
-            const hasDoc = groupDocs.length > 0;
+            const groupDocs = [...docs.filter((d) => d.docType === type)].sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+            );
+            const latest = groupDocs[0] || null;
+            const older = groupDocs.slice(1);
+            const expanded = !!expandedCats[type];
+            const latestExp = latest ? expiryInfo(latest.expiryDate) : null;
+            const isImage = latest ? IMAGE_MIMES.includes(latest.mimeType) : false;
             return (
-              <div key={type} className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4">
+              <div key={type} className={cn('rounded-xl border bg-slate-800/40 p-4', latest ? 'border-slate-700/50' : 'border-dashed border-slate-700/70')}>
+                {/* card header — category + availability (§8/§9) */}
                 <div className="flex items-center gap-2 mb-3">
                   <FileText className={cn('h-4 w-4', accent)} />
                   <h4 className="text-sm font-semibold text-white">{DOC_TYPE_LABELS[type]}</h4>
-                  {hasDoc ? (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  {latest ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 rounded-md px-1.5 py-0.5">
+                      <CheckCircle2 className="h-3 w-3" /> Available
+                    </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-400">
-                      <AlertTriangle className="h-3 w-3" /> Missing
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-md px-1.5 py-0.5">
+                      <AlertTriangle className="h-3 w-3" /> Not Available
                     </span>
                   )}
-                  <Badge variant="secondary" className="bg-slate-700 text-slate-300 text-[10px] ml-1">{groupDocs.length}</Badge>
-                  <div className="ml-auto">
-                    <Button size="sm" variant="outline" onClick={() => openUpload(type)} className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white h-8">
-                      <Upload className="h-3.5 w-3.5 mr-1" /> Upload
-                    </Button>
-                  </div>
+                  {groupDocs.length > 0 && <Badge variant="secondary" className="bg-slate-700 text-slate-300 text-[10px] ml-auto">{groupDocs.length}</Badge>}
                 </div>
 
-                {groupDocs.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-700/70 px-3 py-4 text-center text-xs text-slate-500">
-                    No {DOC_TYPE_LABELS[type].toLowerCase()} documents yet.
-                  </div>
+                {latest ? (
+                  <>
+                    {/* latest document — the card's primary content */}
+                    <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
+                      <div className="flex items-start gap-2">
+                        {isImage ? (
+                          <div className="h-10 w-10 shrink-0 rounded-md overflow-hidden border border-slate-700 bg-slate-800">
+                            <img src={`/api/documents/employee/${latest.id}/file?mode=inline&_=${Date.now()}`} alt={latest.docName} className="h-full w-full object-cover" />
+                          </div>
+                        ) : (
+                          <FileText className="h-5 w-5 shrink-0 text-slate-400 mt-0.5" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[13px] font-medium text-slate-200 truncate">{latest.docName}</span>
+                            {latestExp && (
+                              <Badge variant="secondary" className={cn(
+                                'text-[9px] px-1.5 py-0 h-4',
+                                latestExp.tone === 'ok' && 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/20',
+                                latestExp.tone === 'warn' && 'bg-amber-500/15 text-amber-300 border border-amber-500/20',
+                                latestExp.tone === 'danger' && 'bg-red-500/15 text-red-300 border border-red-500/20',
+                              )}>
+                                {latestExp.label}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                            {formatBytes(latest.fileSize)} · uploaded {new Date(latest.createdAt).toLocaleDateString()}
+                            {latest.notes ? ` · ${latest.notes}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      {/* §8 — [Preview] [Download] always visible on the card */}
+                      <div className="flex items-center gap-2 mt-3">
+                        <Button size="sm" variant="outline" onClick={() => openPreview(latest)} className="h-7 flex-1 border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white">
+                          <Eye className="h-3.5 w-3.5 mr-1.5" /> Preview
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const a = document.createElement('a');
+                            a.href = `/api/documents/employee/${latest.id}/file?mode=download&_=${Date.now()}`;
+                            a.download = latest.fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                          }}
+                          className="h-7 flex-1 border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white"
+                        >
+                          <Download className="h-3.5 w-3.5 mr-1.5" /> Download
+                        </Button>
+                        {renderDocActions(latest)}
+                      </div>
+                    </div>
+
+                    {/* older documents — collapsed by default */}
+                    {older.length > 0 && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          className="text-[11px] text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                          onClick={() => setExpandedCats((p) => ({ ...p, [type]: !p[type] }))}
+                        >
+                          {expanded ? 'Hide' : `+${older.length} older document${older.length !== 1 ? 's' : ''}`}
+                        </button>
+                        {expanded && (
+                          <div className="mt-2 space-y-1.5">
+                            {older.map((doc) => {
+                              const exp = expiryInfo(doc.expiryDate);
+                              return (
+                                <div key={doc.id} className="flex items-center gap-2 rounded-lg border border-slate-700/40 bg-slate-900/30 px-2.5 py-1.5">
+                                  <FileText className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-[12px] text-slate-300 truncate">{doc.docName}</div>
+                                    <div className="text-[10px] text-slate-500 truncate">
+                                      {formatBytes(doc.fileSize)} · {new Date(doc.createdAt).toLocaleDateString()}
+                                      {exp ? ` · ${exp.label}` : ''}
+                                    </div>
+                                  </div>
+                                  <button type="button" title="Preview" onClick={() => openPreview(doc)} className="rounded p-1 text-slate-400 hover:text-white hover:bg-slate-700/60">
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Download"
+                                    onClick={() => {
+                                      const a = document.createElement('a');
+                                      a.href = `/api/documents/employee/${doc.id}/file?mode=download&_=${Date.now()}`;
+                                      a.download = doc.fileName;
+                                      document.body.appendChild(a);
+                                      a.click();
+                                      a.remove();
+                                    }}
+                                    className="rounded p-1 text-slate-400 hover:text-white hover:bg-slate-700/60"
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </button>
+                                  {renderDocActions(doc)}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="space-y-2">
-                    {groupDocs.map(renderDocRow)}
+                  /* §9 — missing: never hidden, with a direct upload action */
+                  <div className="rounded-lg border border-dashed border-slate-700/70 px-3 py-4 text-center">
+                    <div className="text-xs text-slate-500 mb-2.5">No {DOC_TYPE_LABELS[type].toLowerCase()} on file yet.</div>
+                    <Button size="sm" variant="outline" onClick={() => openUpload(type)} className="border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white h-8">
+                      <Upload className="h-3.5 w-3.5 mr-1.5" /> Upload
+                    </Button>
                   </div>
                 )}
               </div>
@@ -413,6 +504,9 @@ export function EmployeeDocumentsPanel({
           })}
         </div>
       )}
+
+      {/* §7 — in-app document preview (PDF viewer / image zoom) */}
+      <DocumentPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />
 
       {/* upload modal */}
       <AlertDialog open={uploadOpen} onOpenChange={setUploadOpen}>

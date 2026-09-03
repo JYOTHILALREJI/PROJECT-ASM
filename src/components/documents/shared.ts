@@ -54,6 +54,8 @@ export interface StampOption {
   id: string;
   name: string;
   imagePath: string;
+  companyId?: string | null;
+  companyName?: string | null;
   isDefault: boolean;
 }
 

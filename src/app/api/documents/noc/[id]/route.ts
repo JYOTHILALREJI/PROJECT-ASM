@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { logActivity } from '@/lib/activity-logger';
-import { generateNocPdf, buildNocFileName, monthKeyFromNocDate, type NocEmployeeRow } from '@/lib/noc-pdf';
+import { generateNocPdf, buildNocFileName, monthKeyFromNocDate, type NocEmployeeRow, type StampRectMeta } from '@/lib/noc-pdf';
 import { resolveNocAssets } from '@/lib/noc-pdf-server';
 import { ensureStorageDir, resolveStoragePath, slugify, uniqueFilePath } from '@/lib/document-storage';
 import fs from 'fs';
@@ -99,6 +99,9 @@ export async function GET(
           stampEnabled: noc.stampEnabled,
           stampId: noc.stampId,
           stampName: noc.stamp?.name ?? null,
+          stampAppliedAt: noc.stampAppliedAt,
+          stampAppliedBy: noc.stampAppliedBy,
+          stampRect: noc.stampRect ? JSON.parse(noc.stampRect) as StampRectMeta : null,
           companyId: noc.companyId,
           company: noc.company,
           employeeCount: noc.employeeCount,
@@ -125,7 +128,7 @@ async function renderNocBytes(noc: {
   contactPerson: string; contactPhone: string; contactEmail: string;
   stampType: string; stampId: string | null; companyId: string | null;
   employeesJson: string;
-}, opts: { stampEnabled: boolean }): Promise<Buffer> {
+}, opts: { stampEnabled: boolean; meta?: { stampRect?: StampRectMeta | null } }): Promise<Buffer> {
   const employees = JSON.parse(noc.employeesJson || '[]') as NocEmployeeRow[];
   const assets = await resolveNocAssets({
     companyId: noc.companyId,
@@ -151,7 +154,7 @@ async function renderNocBytes(noc: {
     employees,
     bodyText: assets.bodyText,
     companyName: assets.companyName,
-  });
+  }, opts.meta);
   return Buffer.from(pdfBytes);
 }
 
@@ -179,6 +182,17 @@ export async function PATCH(
 
     const body = (await request.json()) as NocPatchPayload;
 
+    /** §32 — a stamp belongs to a company; a mismatched company is rejected. */
+    const validateStampForCompany = async (stampId: string | null | undefined, nocCompanyId: string | null): Promise<string | null> => {
+      if (!stampId) return null;
+      const stamp = await db.stamp.findFirst({ where: { id: stampId, deletedAt: null } });
+      if (!stamp) return 'The selected stamp no longer exists.';
+      if (nocCompanyId && stamp.companyId && stamp.companyId !== nocCompanyId) {
+        return 'INVALID_STAMP_FOR_COMPANY';
+      }
+      return null;
+    };
+
     // ── FINAL NOC: stamp-only update (toggle stamp / choose which stamp) ──
     // The ORIGINAL as-issued PDF (originalFilePath) is never destroyed — the
     // stamped version is a separate rendition file. Removing the stamp reverts
@@ -186,9 +200,12 @@ export async function PATCH(
     if (noc.status === 'final' && body.stampUpdate === true) {
       const stampEnabled = body.stampEnabled === true;
       if (stampEnabled && body.stampId) {
-        const stamp = await db.stamp.findFirst({ where: { id: body.stampId, deletedAt: null } });
-        if (!stamp) {
-          return NextResponse.json({ success: false, error: 'The selected stamp no longer exists.' }, { status: 400 });
+        const stampError = await validateStampForCompany(body.stampId, noc.companyId);
+        if (stampError === 'INVALID_STAMP_FOR_COMPANY') {
+          return NextResponse.json({ success: false, code: 'INVALID_STAMP_FOR_COMPANY', error: 'This stamp belongs to a different company than the NOC.' }, { status: 400 });
+        }
+        if (stampError) {
+          return NextResponse.json({ success: false, error: stampError }, { status: 400 });
         }
       }
       const data: Record<string, unknown> = {
@@ -209,8 +226,26 @@ export async function PATCH(
       }
 
       if (stampEnabled) {
-        // render + write the stamped rendition as its own file
-        const stampedBytes = await renderNocBytes(noc, { stampEnabled: true });
+        // render + write the stamped rendition as its own file (capture WHERE the stamp lands)
+        // IMPORTANT: render with the UPDATED stamp decision (stampId/stampType) —
+        // a NOC finalized without a stamp has stampId=null on the stored row and
+        // must still get its stamp now (§9 — stamp later).
+        let stampedBytes: Buffer;
+        const stampedMeta: { stampRect?: StampRectMeta | null } = {};
+        try {
+          stampedBytes = await renderNocBytes(
+            { ...noc, stampId: body.stampId || null, stampType: data.stampType as string },
+            { stampEnabled: true, meta: stampedMeta },
+          );
+        } catch (renderError) {
+          // a corrupt/unreadable stamp image must never silently stamp with a
+          // DIFFERENT image (§28) — fail loudly with a clear message
+          console.error('stamp rendition render failed:', renderError);
+          return NextResponse.json(
+            { success: false, error: 'The stamp image file could not be read — re-upload the stamp in NOC Settings, then try again.' },
+            { status: 400 },
+          );
+        }
         const stampedAbs = uniqueFilePath(dir, stampedVariantName(plainName));
         fs.writeFileSync(stampedAbs, stampedBytes);
         const stampedRel = toRel(stampedAbs);
@@ -218,6 +253,9 @@ export async function PATCH(
         if (noc.filePath && noc.filePath !== originalRel && noc.filePath !== stampedRel) removeFileQuiet(noc.filePath);
         data.filePath = stampedRel;
         data.fileName = path.basename(stampedAbs);
+        data.stampRect = stampedMeta.stampRect ? JSON.stringify(stampedMeta.stampRect) : null;
+        data.stampAppliedAt = new Date();
+        data.stampAppliedBy = body.actorDisplayName || 'Admin';
       } else {
         if (originalRel && fs.existsSync(resolveStoragePath(originalRel))) {
           // revert to the byte-identical original
@@ -233,6 +271,8 @@ export async function PATCH(
           data.filePath = toRel(plainAbs);
           data.fileName = path.basename(plainAbs);
         }
+        data.stampRect = null;
+        data.stampAppliedAt = null;
       }
       data.originalFilePath = originalRel;
 
@@ -278,8 +318,11 @@ export async function PATCH(
       if (!company) return NextResponse.json({ success: false, error: 'The selected company no longer exists.' }, { status: 400 });
     }
     if (stampEnabled && body.stampId) {
-      const stamp = await db.stamp.findFirst({ where: { id: body.stampId, deletedAt: null } });
-      if (!stamp) return NextResponse.json({ success: false, error: 'The selected stamp no longer exists.' }, { status: 400 });
+      const stampError = await validateStampForCompany(body.stampId, companyId ?? noc.companyId);
+      if (stampError === 'INVALID_STAMP_FOR_COMPANY') {
+        return NextResponse.json({ success: false, code: 'INVALID_STAMP_FOR_COMPANY', error: 'This stamp belongs to a different company than the NOC.' }, { status: 400 });
+      }
+      if (stampError) return NextResponse.json({ success: false, error: stampError }, { status: 400 });
     }
 
     const data: Record<string, unknown> = {
