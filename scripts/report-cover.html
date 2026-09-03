@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --c-accent: #927520;
+    --c-cover-block: #7b735a;
+    --c-text: #1a1917;
+    --c-muted: #7e7b74;
+    --c-bg: #ffffff;
+  }
+  @page { size: 794px 1123px; margin: 0; }
+  html, body { margin: 0; padding: 0; background: var(--c-bg); }
+  .cover { position: relative; width: 794px; height: 1123px; background: var(--c-bg); border: none; outline: none; box-shadow: none; font-family: Georgia, 'Times New Roman', serif; }
+  /* Layer 1 — background grid (clipped) */
+  .layer1 { position: absolute; inset: 0; overflow: hidden; z-index: 1;
+    background-image: linear-gradient(rgba(146,117,32,0.05) 0.5px, transparent 0.5px), linear-gradient(90deg, rgba(146,117,32,0.05) 0.5px, transparent 0.5px);
+    background-size: 50px 50px; }
+  /* Layer 2 — structure */
+  .layer2 { position: absolute; inset: 0; z-index: 2; }
+  .anchor-line { position: absolute; left: 95px; top: 112px; bottom: 112px; width: 6px; background: var(--c-accent); }
+  /* Layer 3 — content */
+  .layer3 { position: absolute; inset: 0; z-index: 3; }
+  .kicker { position: absolute; left: 141px; top: 168px; font-family: Arial, Helvetica, sans-serif; font-size: 16px; letter-spacing: 3px; text-transform: uppercase; color: var(--c-text); opacity: 0.6; font-weight: 400; }
+  .hero { position: absolute; left: 141px; top: 320px; max-width: 560px; font-size: 58px; line-height: 1.15; font-weight: 900; color: var(--c-text); }
+  .summary { position: absolute; left: 141px; top: 562px; max-width: 470px; font-size: 17px; line-height: 1.6; color: var(--c-text); opacity: 0.85; }
+  .meta { position: absolute; left: 141px; top: 842px; font-size: 17px; line-height: 1.7; color: var(--c-text); }
+  .meta .lbl { font-family: Arial, Helvetica, sans-serif; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--c-muted); }
+  .footer { position: absolute; left: 141px; top: 1010px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; letter-spacing: 3px; text-transform: uppercase; color: var(--c-text); opacity: 0.6; }
+</style>
+</head>
+<body>
+<div class="cover">
+  <div class="layer1"></div>
+  <div class="layer2"><div class="anchor-line"></div></div>
+  <div class="layer3">
+    <div class="kicker">Full A-to-Z System Test &amp; Quality Report</div>
+    <div class="hero">ASM Workforce Management Platform</div>
+    <div class="summary">End-to-end verification of the entire platform: every sidebar module, every database relation, the full API surface and concurrency headroom — seeded at production scale with 200 workers, 5 camps and 6 sites, then tested to destruction.</div>
+    <div class="meta">
+      <span class="lbl">Prepared by</span><br>
+      QA &amp; Engineering — Z.ai<br>
+      <span class="lbl" style="display:inline-block; margin-top:14px;">Build under test</span><br>
+      commit 66e32e6 · main
+    </div>
+    <div class="footer">385 Automated Checks · 0 Failures</div>
+  </div>
+</div>
+</body>
+</html>
