@@ -1,0 +1,2369 @@
+Absolutely. This should be designed as a **Documents Management module inside the existing application**, with **NOC automation as the first document workflow**, rather than as a standalone NOC generator.
+
+I reviewed the four NOC references you provided. They establish the core document structure: recipient/date, subject, project, responsibility paragraph, employee table containing **Sl.No, Name, Trade, Company, Nationality and Passport**, followed by the organization/signatory/contact details. The references also show that NOCs may span multiple A4 pages while retaining the same document identity and table structure.    
+
+# PRODUCT REQUIREMENTS DOCUMENT
+
+# Documents & NOC Automation Module
+
+**Product:** Existing Workforce / Operations Web Application
+**Module:** Documents
+**Feature:** NOC Automation + Employee Document Management
+**Version:** 1.0
+**Status:** Product Specification
+**Platform:** Existing Web Application
+**Primary Users:** HR, PRO, Operations, Admin, Management
+
+---
+
+# 1. Executive Summary
+
+The existing application will be extended with a new **Documents** section in the main side-panel navigation.
+
+The Documents module will become the central repository for:
+
+1. **NOCs**
+2. **Employee Documents**
+3. Future document categories
+
+The first major workflow will be **automated NOC creation**.
+
+Instead of manually preparing an NOC in Word/PDF and copying employee information, the user will:
+
+> Create NOC Request → Enter Client/Project Details → Select/Identify Employees → System Retrieves Employee Records → Review Employee Table → Edit/Add/Remove Employees → Confirm → Generate NOC → Preview → Download / Print → Automatically Store
+
+The employee information should originate from the application's existing employee database wherever possible, reducing manual entry and preventing passport/name/company inconsistencies.
+
+The generated NOC must reproduce the provided reference format as closely as technically possible, including:
+
+* Header
+* Arabic header text
+* Company branding/logo
+* Contact information
+* Recipient block
+* Date
+* Subject
+* Project
+* NOC body
+* Employee table
+* Signature/contact section
+* Footer
+* A4 page dimensions
+* Multi-page behavior
+
+The reference documents consistently use the employee fields **Name, Trade, Company, Nationality and Passport #** in the NOC table. 
+
+---
+
+# 2. Product Vision
+
+## Vision
+
+Create a centralized **document operating system for workforce administration**, starting with automated NOC generation and employee document management.
+
+The module should eliminate repetitive administrative work and provide a single source of truth for:
+
+* Employee identity information
+* Passport information
+* Employee documents
+* NOCs
+* Client-specific documentation
+* Historical document records
+
+---
+
+# 3. Business Objectives
+
+### Primary objectives
+
+* Reduce manual NOC preparation time.
+* Eliminate repetitive employee data entry.
+* Reduce passport/name/employee-data errors.
+* Standardize NOC formatting.
+* Make NOCs immediately printable.
+* Maintain a searchable historical archive.
+* Centralize employee documents.
+* Make documents accessible from the employee record.
+* Enable easy retrieval of historical NOCs by client, month and year.
+* Provide auditability for document creation and modification.
+
+### Target outcome
+
+A user should be able to prepare a complete NOC for 20–50 employees in a few minutes rather than manually constructing the document.
+
+---
+
+# 4. New Side Panel Navigation
+
+Add a new primary navigation item:
+
+```text
+DOCUMENTS
+│
+├── NOC
+│   ├── All NOCs
+│   ├── Create NOC
+│   └── Drafts
+│
+└── Employee Documents
+    ├── All Employees
+    └── Document Categories
+```
+
+Future categories can be added without changing the overall architecture:
+
+```text
+DOCUMENTS
+│
+├── NOC
+├── Employee Documents
+├── Visa Documents
+├── Labour Documents
+├── Client Documents
+└── Other Documents
+```
+
+For MVP, only **NOC** and **Employee Documents** are required.
+
+---
+
+# 5. Documents Dashboard
+
+Clicking **Documents** should open a dedicated document-management dashboard.
+
+## Dashboard structure
+
+### Header
+
+```text
+Documents
+
+Manage NOCs, employee documents and company records.
+```
+
+### Summary cards
+
+```text
+Total NOCs
+124
+
+This Month
+18
+
+Draft NOCs
+4
+
+Employees With Documents
+1,248
+```
+
+### Quick actions
+
+```text
++ Create NOC
+
+Upload Employee Document
+
+Search Documents
+```
+
+### Recent Documents
+
+Display:
+
+| Document       | Client       | Project      | Date       | Employees | Status | Actions |
+| -------------- | ------------ | ------------ | ---------- | --------: | ------ | ------- |
+| NOC-2026-00124 | PROSCAPE LLC | DAMAC LAGOON | 03-09-2026 |        10 | Final  | View    |
+| NOC-2026-00123 | GREEN & MORE | WARSAN       | 03-09-2026 |        26 | Final  | View    |
+| NOC-2026-00122 | INTERMASS    | JOURI HILLS  | 03-09-2026 |        19 | Final  | View    |
+
+---
+
+# 6. NOC Management
+
+## 6.1 NOC List
+
+The NOC section should provide a searchable and filterable list.
+
+### Columns
+
+| Column         | Description                    |
+| -------------- | ------------------------------ |
+| NOC Number     | System-generated unique ID     |
+| Date           | NOC date                       |
+| Client         | Recipient company              |
+| Project        | Project/site                   |
+| Employee Count | Number of workers              |
+| Created By     | User who created it            |
+| Status         | Draft / Final                  |
+| Actions        | View / Edit / Print / Download |
+
+### Filters
+
+* Date
+* Month
+* Year
+* Client
+* Project
+* Status
+* Created By
+* Employee
+* Trade
+
+### Search
+
+Search should support:
+
+```text
+Client name
+Project name
+NOC number
+Employee name
+Passport number
+```
+
+---
+
+# 7. Create NOC Workflow
+
+This is the core feature.
+
+## Step 1 — Create NOC
+
+User clicks:
+
+**+ Create NOC**
+
+Open a dedicated NOC creation workspace.
+
+---
+
+# 8. NOC Request Details
+
+First section:
+
+### Recipient Details
+
+```text
+Client / Company Name *
+Address Line 1
+Address Line 2
+City
+Country
+```
+
+Example:
+
+```text
+M/S PROSCAPE LLC
+Business Bay-Bay Square
+Dubai, UAE
+```
+
+The reference NOCs demonstrate this recipient structure. 
+
+---
+
+## Project Details
+
+```text
+Project Name *
+NOC Date *
+```
+
+Example:
+
+```text
+Project: ARABIAN RANCHES
+Date: 02-09-2026
+```
+
+
+
+---
+
+# 9. Employee Selection
+
+After entering client/project information:
+
+### Employee Selection
+
+User can search employees from the existing database.
+
+Search:
+
+```text
+Search by name / passport / employee ID
+```
+
+Results:
+
+| Select | Name             | Trade  | Company           | Nationality | Passport  |
+| ------ | ---------------- | ------ | ----------------- | ----------- | --------- |
+| ☑      | PACIFIQUE IRUMVA | HELPER | AL DARAA...       | BURUNDI     | P00032399 |
+| ☑      | PROSPER CIZA     | HELPER | AL DARAA...       | BURUNDI     | OP0316316 |
+| ☐      | JEAN BOSCO...    | HELPER | ARABIAN SHIELD... | BURUNDI     | P00044291 |
+
+The reference NOCs contain examples of employees appearing across different NOCs, making database lookup particularly valuable. For example, employees such as PACIFIQUE IRUMVA, PROSPER CIZA and JEAN BOSCO NIYONKURU appear in the supplied documents.  
+
+---
+
+# 10. Employee Table Confirmation Screen
+
+This is a **critical screen**.
+
+After employees are selected, the application should display the exact data that will be inserted into the NOC.
+
+## Table
+
+| Sl.No | Name              | Trade  | Company     | Nationality | Passport # | Actions       |
+| ----: | ----------------- | ------ | ----------- | ----------- | ---------- | ------------- |
+|     1 | PACIFIQUE IRUMVA  | HELPER | AL DARAA... | BURUNDI     | P00032399  | Edit / Remove |
+|     2 | PROSPER CIZA      | HELPER | AL DARAA... | BURUNDI     | OP0316316  | Edit / Remove |
+|     3 | PROSPER NIYONKURU | HELPER | AL DARAA... | BURUNDI     | P00041935  | Edit / Remove |
+
+This directly follows the structure of the reference NOCs. 
+
+---
+
+# 11. Editable Employee Table
+
+The table must **not be read-only**.
+
+Every field should be editable.
+
+Editable fields:
+
+* Name
+* Trade
+* Company
+* Nationality
+* Passport Number
+
+Example:
+
+```text
+Name
+[ PACIFIQUE IRUMVA             ]
+
+Trade
+[ HELPER                       ]
+
+Company
+[ AL DARAA AL ARABI...         ]
+
+Nationality
+[ BURUNDI                      ]
+
+Passport #
+[ P00032399                    ]
+```
+
+### Important behavior
+
+When a database employee is selected, the system initially populates the values from the employee record.
+
+However, the NOC preparation table becomes a **document snapshot**.
+
+Therefore:
+
+> Editing the NOC should NOT automatically modify the master employee record.
+
+Instead:
+
+```text
+Employee Database
+       ↓
+NOC Snapshot
+       ↓
+User edits NOC
+       ↓
+Generated NOC
+```
+
+This is important for historical accuracy.
+
+---
+
+# 12. Add Employee
+
+User should be able to add another employee after initial selection.
+
+Button:
+
+**+ Add Employee**
+
+Two options:
+
+### Option A — Search Database
+
+```text
+Search Employee
+[________________________]
+
+Results
+```
+
+### Option B — Add Manually
+
+For exceptional cases:
+
+```text
+Name *
+Trade *
+Company *
+Nationality *
+Passport *
+```
+
+The system should clearly indicate manually entered employees:
+
+```text
+Source: Manual
+```
+
+versus:
+
+```text
+Source: Employee Database
+```
+
+---
+
+# 13. Remove Employee
+
+Every row should have:
+
+```text
+Edit
+Remove
+```
+
+Removing an employee should only remove them from the current NOC.
+
+It must **not delete the employee from the employee database**.
+
+Confirmation:
+
+> Remove this employee from the NOC?
+
+```text
+Cancel     Remove
+```
+
+---
+
+# 14. Change Employee
+
+User should be able to replace an employee.
+
+Example:
+
+```text
+Employee 7
+
+Current:
+GILBERT KAMATARI
+
+[Change Employee]
+```
+
+Search database → select replacement.
+
+The row is replaced while retaining the correct sequence number.
+
+---
+
+# 15. Sorting
+
+The employee table must support sorting.
+
+Sortable columns:
+
+* Sl.No
+* Name
+* Trade
+* Company
+* Nationality
+* Passport
+
+Examples:
+
+```text
+Sort by Trade ↑
+Sort by Company ↑
+Sort by Nationality ↑
+Sort by Name ↑
+```
+
+The user specifically requires sorting by trade and other columns.
+
+### Important
+
+Once the user confirms the table, the displayed order becomes the order used in the generated NOC.
+
+---
+
+# 16. Manual Row Reordering
+
+In addition to sorting, provide:
+
+```text
+Move Up
+Move Down
+```
+
+or drag-to-reorder within the table.
+
+This allows the user to control the exact final employee sequence.
+
+---
+
+# 17. Validation Before NOC Generation
+
+Before enabling **Generate NOC**, validate:
+
+### Required fields
+
+* Client
+* Recipient address
+* Date
+* Project
+* At least one employee
+* Employee name
+* Trade
+* Company
+* Nationality
+* Passport number
+
+### Passport validation
+
+The system should flag:
+
+* Empty passport
+* Duplicate passport
+* Invalid/unusual formatting
+* Same employee appearing twice
+
+Example warning:
+
+> Passport number OP0316316 is already used by another employee in this NOC.
+
+Duplicate handling should be a warning initially rather than an automatic block, because exceptional operational cases may exist.
+
+---
+
+# 18. NOC Template Engine
+
+The application should not generate the PDF directly from an arbitrary browser print layout.
+
+Create a dedicated **NOC template engine**.
+
+Conceptually:
+
+```text
+NOC Data
+   ↓
+NOC Template
+   ↓
+A4 Document Renderer
+   ↓
+PDF
+```
+
+The template should contain configurable fields:
+
+```text
+{{date}}
+
+{{client_name}}
+
+{{client_address}}
+
+{{project_name}}
+
+{{employee_table}}
+
+{{company_name}}
+
+{{signatory_name}}
+
+{{phone}}
+
+{{email}}
+```
+
+---
+
+# 19. Exact Reference Design
+
+The generated document should reproduce the supplied NOC design rather than introducing a new modern document style.
+
+The reference documents show:
+
+### Header
+
+* Company name
+* Arabic company description
+* Central ASM logo/branding
+* Telephone/contact information
+* Address
+* Email
+* Website
+* Horizontal separator lines
+
+### Main content
+
+* `To:`
+* Client name
+* Client address
+* Date aligned toward the right
+* `Subject: NO OBJECTION CERTIFICATE`
+* `Project: PROJECT NAME`
+* Responsibility paragraph
+* Employee table
+
+### Table
+
+Columns:
+
+```text
+Sl.No
+Name / Name of Employee
+Trade
+Company
+Nationality
+Passport #
+```
+
+The supplied examples use both capitalization variants such as `Sl.No`, `Sl.NO`, and `Sl #`, so the production template should standardize on the approved master version rather than inherit OCR/text inconsistencies.   
+
+---
+
+# 20. NOC Body
+
+The NOC body must be template-driven.
+
+The reference samples use wording substantially along the following lines:
+
+> The organization confirms that the listed workers may work with the recipient company and accepts responsibility for their salary, welfare and other requirements, including liabilities and claims arising from injury or untoward incidents at site. 
+
+However, the supplied samples contain slightly different wording, such as "We would like..." and "We want...".  
+
+Therefore, the system should implement a **controlled template**, rather than automatically rewriting the legal wording.
+
+### Admin capability
+
+Admin can configure:
+
+```text
+NOC Template Name
+Body Text
+Company Name
+Arabic Header
+Logo
+Footer
+Signatory Name
+Designation
+Phone
+Email
+Website
+```
+
+Normal users should not be able to casually change the approved legal wording.
+
+---
+
+# 21. A4 PDF Generation
+
+Generated NOCs must be true **A4 documents**.
+
+### Requirements
+
+* A4 portrait
+* Correct printable margins
+* Correct header position
+* Correct footer position
+* Table must remain inside printable area
+* No horizontal clipping
+* No employee row disappearing
+* Automatic multi-page support
+* Table header repeats on every page
+* Page numbering can be added if approved
+* Consistent font sizing
+* Consistent line spacing
+
+---
+
+# 22. Multi-Page NOC Behavior
+
+This is important because the reference NOCs contain different employee counts and some span two pages.
+
+For example, the supplied Arabian Ranches NOC contains 20 employees. 
+
+The Warsan example contains 26 employees across two pages. 
+
+The system should therefore dynamically paginate.
+
+### Rules
+
+If the employee table reaches the bottom of page 1:
+
+```text
+Page 1
+Header
+NOC information
+Body
+Employee table
+↓
+Page break
+↓
+Page 2
+Header
+Employee table continued
+Footer/signature
+```
+
+The table header should repeat:
+
+```text
+Sl.No | Name | Trade | Company | Nationality | Passport
+```
+
+Rows should never be cut horizontally.
+
+Preferably, a single employee row should not be split across two pages.
+
+---
+
+# 23. NOC Preview
+
+Before finalizing, show:
+
+# NOC Preview
+
+A true A4 preview should be rendered using the same engine that generates the final PDF.
+
+This avoids:
+
+> Browser Preview ≠ Generated PDF
+
+The preview should include:
+
+```text
+[Zoom -] [100%] [Zoom +]
+
+Page 1 / 2
+```
+
+Actions:
+
+```text
+← Back to Employee Table
+
+Edit NOC
+
+Confirm & Generate
+```
+
+---
+
+# 24. Final NOC Actions
+
+After generation:
+
+### Primary actions
+
+```text
+Download PDF
+
+Print
+
+Close
+```
+
+### Download
+
+The PDF should download using a standardized filename.
+
+Example:
+
+```text
+NOC - PROSCAPE LLC - ARABIAN RANCHES - 02-09-2026.pdf
+```
+
+Better internal naming:
+
+```text
+NOC_PROSCAPE_LLC_ARABIAN_RANCHES_2026-09-02.pdf
+```
+
+---
+
+# 25. Direct Print
+
+Provide:
+
+**Print NOC**
+
+The system should open the native browser/system print dialog.
+
+The print output must use the same A4 rendering as the PDF.
+
+The user should not have to:
+
+```text
+Download → Open PDF → Ctrl+P
+```
+
+Instead:
+
+```text
+NOC Preview
+     ↓
+Print
+     ↓
+System Print Dialog
+```
+
+---
+
+# 26. NOC Storage Structure
+
+Generated NOCs must automatically be stored in Documents.
+
+Recommended logical structure:
+
+```text
+Documents
+│
+└── NOC
+    │
+    ├── PROSCAPE LLC
+    │   │
+    │   ├── 2026
+    │   │   ├── September
+    │   │   │   ├── NOC - Arabian Ranches
+    │   │   │   └── NOC - DAMAC Lagoon
+    │   │   └── October
+    │   │
+    │
+    ├── GREEN & MORE LANDSCAPE GARDENING LLC
+    │   └── 2026
+    │       └── September
+    │
+    └── INTERMASS ENGINEERING & CONTRACTING COMPANY LLC
+        └── 2026
+            └── September
+```
+
+This maps well to the client/project/date structure visible in the reference documents, such as PROSCAPE / ARABIAN RANCHES, PROSCAPE / DAMAC LAGOON, GREEN & MORE / WARSAN, and INTERMASS / JOURI HILLS.    
+
+---
+
+# 27. NOC Folder View
+
+Clicking a client:
+
+```text
+PROSCAPE LLC
+```
+
+shows:
+
+```text
+2026
+
+September
+    02 Sep
+        NOC - Arabian Ranches
+        20 Employees
+        Final
+
+    03 Sep
+        NOC - DAMAC Lagoon
+        10 Employees
+        Final
+```
+
+Each NOC should show:
+
+```text
+View
+Download
+Print
+Duplicate
+Edit
+Delete
+```
+
+Delete should be permission-controlled.
+
+---
+
+# 28. NOC Detail Page
+
+When opening an existing NOC:
+
+```text
+NOC-2026-00124
+
+PROSCAPE LLC
+ARABIAN RANCHES
+02-09-2026
+
+20 Employees
+Created by: Admin
+Created: 02-09-2026 10:32
+Status: Final
+```
+
+Actions:
+
+```text
+View PDF
+Download
+Print
+Duplicate NOC
+Edit
+```
+
+---
+
+# 29. Employee Documents
+
+The second major component of Documents is the **Employee Document Repository**.
+
+Each employee should have a dedicated document area.
+
+Example:
+
+```text
+Employee
+PACIFIQUE IRUMVA
+
+Documents
+│
+├── Passport
+├── Emirates ID / ID Card
+├── Visa
+└── Other Documents
+```
+
+---
+
+# 30. Employee Document Categories
+
+MVP:
+
+### Passport
+
+```text
+Passport.pdf
+```
+
+### ID Card
+
+```text
+ID Card.pdf
+```
+
+### Visa
+
+```text
+Visa.pdf
+```
+
+### Other
+
+User can create a custom document name.
+
+Example:
+
+```text
+Medical Certificate.pdf
+Labour Contract.pdf
+Offer Letter.pdf
+Insurance.pdf
+Driving License.pdf
+```
+
+---
+
+# 31. Upload Employee Document
+
+From employee profile:
+
+```text
+Documents
+
++ Upload Document
+```
+
+Modal:
+
+```text
+Document Type *
+
+[ Passport ▼ ]
+
+Document Name *
+
+[ Passport ]
+
+File *
+
+[ Choose File ]
+
+Expiry Date
+[ Optional ]
+
+Notes
+[ Optional ]
+
+Upload
+```
+
+---
+
+# 32. Other Document Naming
+
+For "Other":
+
+```text
+Document Type
+[ Other ]
+
+Document Name
+[ Labour Contract ]
+
+File
+[ Select File ]
+```
+
+The system stores:
+
+```text
+Labour Contract.pdf
+```
+
+rather than:
+
+```text
+IMG_48273.pdf
+document(7).pdf
+scan0004.pdf
+```
+
+The original file name may be retained internally for audit purposes.
+
+---
+
+# 33. Document Preview
+
+Supported documents should have:
+
+```text
+Preview
+Download
+Rename
+Replace
+Delete
+```
+
+For PDFs:
+
+```text
+PDF viewer
+```
+
+For images:
+
+```text
+Image viewer
+```
+
+---
+
+# 34. Employee Document Status
+
+Employee profile should display document status.
+
+Example:
+
+| Document        | Status    | Expiry     | Action |
+| --------------- | --------- | ---------- | ------ |
+| Passport        | Available | 14-08-2028 | View   |
+| ID Card         | Available | 02-03-2027 | View   |
+| Visa            | Available | 15-01-2027 | View   |
+| Labour Contract | Available | —          | View   |
+
+Missing documents should be clearly identifiable:
+
+```text
+Passport     ✓
+ID Card      ✓
+Visa         ⚠ Missing
+Other        —
+```
+
+---
+
+# 35. Employee Documents Search
+
+Documents should be searchable by:
+
+* Employee name
+* Employee ID
+* Passport
+* Document type
+* Document name
+* Expiry date
+
+Example:
+
+```text
+Search: P00032399
+```
+
+→ PACIFIQUE IRUMVA
+
+---
+
+# 36. Employee Document Expiry
+
+Although not strictly required for the initial NOC workflow, the data model should support document expiry.
+
+For example:
+
+```text
+Visa expires in 12 days
+Passport expires in 8 months
+```
+
+This allows future automation without redesigning the database.
+
+---
+
+# 37. Integration With Employee Database
+
+The Documents module must integrate with the existing employee database.
+
+Employee should have a stable internal ID:
+
+```text
+employee_id
+```
+
+NOC should reference the employee:
+
+```text
+noc_employee.employee_id
+```
+
+But also save the values used at the time of generation:
+
+```text
+name_snapshot
+trade_snapshot
+company_snapshot
+nationality_snapshot
+passport_snapshot
+```
+
+This creates a historical document snapshot.
+
+---
+
+# 38. Recommended Database Model
+
+## employees
+
+```text
+id
+employee_code
+full_name
+trade_id
+company_id
+nationality_id
+passport_number
+status
+created_at
+updated_at
+```
+
+---
+
+## companies
+
+```text
+id
+name
+address
+city
+country
+status
+created_at
+updated_at
+```
+
+---
+
+## trades
+
+```text
+id
+name
+status
+```
+
+---
+
+## clients
+
+```text
+id
+name
+address_line_1
+address_line_2
+city
+country
+created_at
+updated_at
+```
+
+---
+
+# 39. NOC Table
+
+## nocs
+
+```text
+id
+noc_number
+client_id
+client_name_snapshot
+client_address_snapshot
+project_name
+noc_date
+template_id
+status
+pdf_path
+created_by
+created_at
+updated_at
+finalized_at
+```
+
+---
+
+# 40. NOC Employees
+
+## noc_employees
+
+```text
+id
+noc_id
+employee_id
+sequence_number
+name_snapshot
+trade_snapshot
+company_snapshot
+nationality_snapshot
+passport_snapshot
+source_type
+created_at
+```
+
+`source_type`:
+
+```text
+DATABASE
+MANUAL
+```
+
+This is important because the generated NOC must remain historically accurate even if an employee later changes company, trade or passport.
+
+---
+
+# 41. Document Table
+
+## employee_documents
+
+```text
+id
+employee_id
+document_type
+document_name
+file_name
+storage_path
+mime_type
+file_size
+expiry_date
+notes
+uploaded_by
+created_at
+updated_at
+```
+
+Document types:
+
+```text
+PASSPORT
+ID_CARD
+VISA
+OTHER
+```
+
+---
+
+# 42. NOC Templates
+
+## noc_templates
+
+```text
+id
+name
+version
+header_configuration
+body_text
+footer_configuration
+logo_path
+arabic_header
+company_name
+phone
+email
+website
+signatory_name
+signatory_designation
+is_active
+created_at
+updated_at
+```
+
+This allows the company to change the template in the future without rewriting the NOC system.
+
+---
+
+# 43. Document Storage Architecture
+
+Do not store large PDFs directly inside the relational database.
+
+Use object/file storage.
+
+Recommended logical path:
+
+```text
+documents/
+    employees/
+        {employee_id}/
+            passport/
+            id-card/
+            visa/
+            other/
+
+    nocs/
+        {client_id}/
+            {year}/
+                {month}/
+                    {noc_id}/
+                        noc.pdf
+```
+
+The database stores metadata and storage references.
+
+---
+
+# 44. NOC State Machine
+
+Use explicit document states.
+
+```text
+DRAFT
+  ↓
+EMPLOYEES_REVIEW
+  ↓
+READY_FOR_GENERATION
+  ↓
+GENERATED
+  ↓
+FINAL
+```
+
+Optional:
+
+```text
+CANCELLED
+```
+
+Once finalized, the original PDF should be retained.
+
+---
+
+# 45. Editing Final NOCs
+
+A finalized NOC should not silently overwrite the historical document.
+
+Instead:
+
+```text
+Final NOC
+   ↓
+Edit
+   ↓
+Create New Version
+```
+
+Example:
+
+```text
+NOC-2026-00124
+Version 1
+
+NOC-2026-00124
+Version 2
+```
+
+This is especially important when an employee is added or removed after the NOC has already been issued.
+
+---
+
+# 46. Duplicate NOC
+
+Add:
+
+**Duplicate NOC**
+
+This should copy:
+
+* Client
+* Project
+* Template
+* Employee selection
+
+But create a **new NOC number and date**.
+
+This will significantly accelerate recurring client requests.
+
+Example:
+
+```text
+Existing:
+PROSCAPE → ARABIAN RANCHES → 20 employees
+
+Duplicate
+
+Change:
+Project
+Date
+Employees
+
+Generate
+```
+
+---
+
+# 47. Permissions
+
+The Documents module should integrate with the existing RBAC system.
+
+### Admin
+
+Full access:
+
+```text
+Create
+Edit
+Delete
+Download
+Print
+Manage templates
+Manage employee documents
+```
+
+### HR / Operations
+
+```text
+Create NOC
+Edit draft
+Upload documents
+View
+Download
+Print
+```
+
+### Viewer
+
+```text
+View
+Download
+Print
+```
+
+### Template Administrator
+
+```text
+Manage NOC templates
+Manage branding
+Manage legal wording
+```
+
+---
+
+# 48. Audit Trail
+
+Every important action should be logged.
+
+Example:
+
+```text
+02-09-2026 10:32
+Admin created NOC-2026-00124
+
+02-09-2026 10:35
+Employee PACIFIQUE IRUMVA added
+
+02-09-2026 10:37
+Employee 7 removed
+
+02-09-2026 10:40
+NOC finalized
+
+02-09-2026 10:41
+PDF downloaded
+```
+
+For employee documents:
+
+```text
+Passport uploaded
+Passport replaced
+Visa deleted
+Document renamed
+```
+
+---
+
+# 49. UX Requirements
+
+The module should feel native to the existing application.
+
+Do **not** create a separate application or radically different UI.
+
+It should inherit:
+
+* Existing sidebar
+* Existing typography
+* Existing authentication
+* Existing user roles
+* Existing employee database
+* Existing company/client database
+* Existing notifications
+* Existing design system
+
+The NOC workflow itself should be a guided workspace.
+
+Recommended flow:
+
+```text
+01
+NOC DETAILS
+     ↓
+02
+SELECT EMPLOYEES
+     ↓
+03
+REVIEW EMPLOYEE TABLE
+     ↓
+04
+PREVIEW NOC
+     ↓
+05
+GENERATE
+     ↓
+06
+DOWNLOAD / PRINT / SAVE
+```
+
+---
+
+# 50. Progress Indicator
+
+At the top:
+
+```text
+NOC Creation
+
+① Details
+   ─────
+② Employees
+   ─────
+③ Review
+   ─────
+④ Preview
+   ─────
+⑤ Complete
+```
+
+The user should always know where they are.
+
+---
+
+# 51. Employee Table UX
+
+Because this is the most operationally important screen, it should support:
+
+* Inline editing
+* Column sorting
+* Search
+* Add employee
+* Remove employee
+* Replace employee
+* Multi-select
+* Row numbering
+* Pagination if extremely large
+* Sticky table header
+* Horizontal scrolling only where necessary
+* Keyboard navigation
+* Unsaved-change warning
+
+Recommended toolbar:
+
+```text
+[ + Add Employee ] [ Search ] [ Sort ] [ Reset Order ]
+
+20 Employees Selected
+```
+
+---
+
+# 52. Confirmation Before Generation
+
+Display:
+
+```text
+Ready to Generate NOC
+
+Client
+PROSCAPE LLC
+
+Project
+ARABIAN RANCHES
+
+Date
+02-09-2026
+
+Employees
+20
+
+All required employee information is complete.
+
+[ Back & Edit ]
+
+[ Preview NOC ]
+```
+
+---
+
+# 53. Error Handling
+
+The system must prevent silent failures.
+
+Example:
+
+### Missing passport
+
+> 2 employees are missing passport numbers.
+
+```text
+[Review Employees]
+```
+
+### Duplicate employee
+
+> JEAN BOSCO NIYONKURU has already been added to this NOC.
+
+### Missing client
+
+> Client information is required.
+
+### PDF generation failure
+
+> The NOC could not be generated. Your entered information has been saved as a draft.
+
+This ensures the user does not lose work.
+
+---
+
+# 54. Draft Auto-Save
+
+NOC creation should automatically save drafts.
+
+Example:
+
+```text
+Draft saved 10:42 PM
+```
+
+If the browser closes:
+
+```text
+Documents
+→ NOC
+→ Drafts
+
+PROSCAPE LLC
+ARABIAN RANCHES
+20 employees
+Last edited: 10:42 PM
+```
+
+---
+
+# 55. NOC Numbering
+
+Automatically generate unique NOC numbers.
+
+Recommended:
+
+```text
+NOC-2026-000001
+NOC-2026-000002
+NOC-2026-000003
+```
+
+Alternative if the organization prefers:
+
+```text
+ASM/NOC/2026/0001
+```
+
+The numbering format should be configurable by Admin.
+
+---
+
+# 56. Document Naming Standards
+
+### NOC
+
+```text
+NOC_{CLIENT}_{PROJECT}_{DATE}.pdf
+```
+
+Example:
+
+```text
+NOC_PROSCAPE_LLC_ARABIAN_RANCHES_2026-09-02.pdf
+```
+
+### Employee documents
+
+```text
+{DOCUMENT_TYPE}_{EMPLOYEE_NAME}.pdf
+```
+
+Example:
+
+```text
+PASSPORT_PACIFIQUE_IRUMVA.pdf
+ID_CARD_PACIFIQUE_IRUMVA.pdf
+VISA_PACIFIQUE_IRUMVA.pdf
+LABOUR_CONTRACT_PACIFIQUE_IRUMVA.pdf
+```
+
+---
+
+# 57. Security Requirements
+
+Employee documents such as passports and ID cards are sensitive business records.
+
+Therefore:
+
+* Authenticated access only
+* Role-based access
+* No public file URLs
+* Signed/private storage URLs
+* Access logging
+* Permission checks on every document request
+* File type validation
+* File size limits
+* Malware/security scanning where infrastructure supports it
+* Secure deletion
+* Audit trail
+
+---
+
+# 58. Performance Requirements
+
+NOC employee search should feel instantaneous for normal datasets.
+
+Target:
+
+```text
+Employee search response: < 500 ms
+Table editing: immediate
+Sorting: immediate
+NOC preview: < 3 seconds
+PDF generation: < 5 seconds for normal NOCs
+Document list loading: < 2 seconds
+```
+
+For very large NOCs, generation can display:
+
+```text
+Generating NOC...
+```
+
+---
+
+# 59. Recommended Technical Architecture
+
+Assuming the existing application continues using the current architecture, the module should be implemented as a modular domain.
+
+```text
+Frontend
+│
+├── Documents
+│   ├── Dashboard
+│   ├── NOC
+│   │   ├── List
+│   │   ├── Create
+│   │   ├── Employee Review
+│   │   ├── Preview
+│   │   └── Detail
+│   │
+│   └── Employee Documents
+│       ├── List
+│       └── Employee Document View
+│
+Backend
+│
+├── documents
+│
+├── nocs
+│
+├── noc-templates
+│
+├── employee-documents
+│
+└── document-storage
+│
+Database
+│
+├── nocs
+├── noc_employees
+├── noc_templates
+└── employee_documents
+│
+Storage
+│
+├── NOCs
+└── Employee Documents
+```
+
+---
+
+# 60. PDF Rendering Architecture
+
+This should be treated as a dedicated service/component.
+
+```text
+NOC JSON
+   ↓
+Template Renderer
+   ↓
+HTML / Document Layout
+   ↓
+Headless PDF Renderer
+   ↓
+A4 PDF
+```
+
+The critical principle is:
+
+> **The same rendering engine must power Preview, PDF Download and Print.**
+
+This prevents layout discrepancies.
+
+---
+
+# 61. NOC Data Payload
+
+Conceptually, the renderer receives:
+
+```text
+{
+  nocNumber,
+  date,
+  client,
+  address,
+  project,
+  template,
+  employees: [
+    {
+      sequence,
+      name,
+      trade,
+      company,
+      nationality,
+      passport
+    }
+  ],
+  signatory
+}
+```
+
+The frontend should never be responsible for constructing the final legal document independently.
+
+The backend should generate the authoritative PDF.
+
+---
+
+# 62. Template Administration
+
+Admin should have:
+
+### NOC Template Manager
+
+```text
+NOC Templates
+
+Default NOC Template
+Version 1.0
+Active
+
+[Edit]
+[Preview]
+[Duplicate]
+```
+
+Template configuration:
+
+```text
+Branding
+Header
+Arabic Text
+Contact Details
+Body
+Employee Table
+Footer
+Signature
+```
+
+A template preview should be shown before activation.
+
+---
+
+# 63. Reference Template Requirements
+
+The supplied PDFs should be treated as **visual and content references**, not as editable PDFs that the system overlays text onto.
+
+The production system should recreate the layout as a proper document template.
+
+The reference header includes the ASM branding and contact information, while the body and employee table follow the NOC structure described above. 
+
+This provides:
+
+* Better pagination
+* Better text wrapping
+* Better table control
+* Better print quality
+* Better long-term maintainability
+
+---
+
+# 64. Important Design Decision — Do Not Use the PDF as the Database
+
+The system should never treat:
+
+```text
+Existing NOC.pdf
+```
+
+as the primary source of employee information.
+
+Instead:
+
+```text
+Employee Database
+        ↓
+NOC Data
+        ↓
+NOC Snapshot
+        ↓
+PDF
+```
+
+The PDF is the final document output.
+
+The structured NOC data remains searchable and editable.
+
+---
+
+# 65. Search Architecture
+
+The user should be able to find a historical NOC using:
+
+```text
+NOC number
+Client
+Project
+Employee
+Passport
+Date
+Month
+Year
+```
+
+Example:
+
+Search:
+
+```text
+P00041935
+```
+
+Results:
+
+```text
+PROSCAPE
+ARABIAN RANCHES
+02-09-2026
+
+INTERMASS
+JOURI HILLS
+03-09-2026
+```
+
+This is particularly useful because employees can appear in multiple NOCs, as demonstrated in the supplied reference documents.  
+
+---
+
+# 66. Reporting / Future Analytics
+
+The architecture should prepare for future reporting.
+
+Examples:
+
+```text
+NOCs generated this month
+Employees included in NOCs
+Most frequent clients
+Employees assigned to projects
+Missing employee documents
+Expiring documents
+NOCs by client
+NOCs by month
+```
+
+Not all of this needs to be implemented in MVP.
+
+---
+
+# 67. MVP Scope
+
+## Must Have
+
+### Documents
+
+* [x] New Documents side-menu
+* [x] Documents dashboard
+* [x] NOC section
+* [x] Employee Documents section
+
+### NOC
+
+* [x] Create NOC
+* [x] Client details
+* [x] Project
+* [x] Date
+* [x] Employee database search
+* [x] Employee selection
+* [x] Employee table
+* [x] Inline editing
+* [x] Add employee
+* [x] Remove employee
+* [x] Replace employee
+* [x] Sorting
+* [x] Reordering
+* [x] Validation
+* [x] NOC preview
+* [x] A4 PDF
+* [x] Multi-page PDF
+* [x] Download
+* [x] Direct print
+* [x] Save generated NOC
+* [x] Client folders
+* [x] Year/month grouping
+
+### Employee Documents
+
+* [x] Passport upload
+* [x] ID card upload
+* [x] Visa upload
+* [x] Other document upload
+* [x] Custom document naming
+* [x] Preview
+* [x] Download
+* [x] Rename
+* [x] Replace
+* [x] Delete
+* [x] Employee document association
+
+---
+
+# 68. Phase 2
+
+Potential additions:
+
+* Document expiry notifications
+* WhatsApp/email NOC sharing
+* NOC approval workflow
+* Digital signatures
+* Client portal
+* Bulk employee import
+* Bulk document upload
+* OCR passport extraction
+* Automatic passport data extraction
+* Automatic employee matching
+* NOC version comparison
+* Advanced reporting
+* Document expiry dashboard
+
+---
+
+# 69. Future OCR Automation
+
+A very strong future enhancement would be:
+
+```text
+Upload Passport
+       ↓
+OCR
+       ↓
+Extract:
+Name
+Passport Number
+Nationality
+Date of Birth
+Expiry
+       ↓
+Match Existing Employee
+       ↓
+Suggest Update
+```
+
+Similarly, when a user receives a request containing employee names, the system could intelligently match them against the employee database.
+
+---
+
+# 70. Acceptance Criteria
+
+The feature is considered complete when:
+
+### NOC creation
+
+* User can create an NOC from Documents.
+* User can enter client/project/date information.
+* User can search the existing employee database.
+* User can select employees.
+* Employee information automatically populates.
+* User can edit every employee field.
+* User can add employees.
+* User can remove employees.
+* User can replace employees.
+* User can sort by every relevant column.
+* User can control employee ordering.
+* System validates required information.
+
+### PDF
+
+* NOC visually matches the approved reference template.
+* PDF is A4.
+* Header is correctly positioned.
+* Footer is correctly positioned.
+* Table is correctly aligned.
+* Long company names wrap correctly.
+* Long employee names wrap correctly.
+* Multi-page NOCs work correctly.
+* Table headers repeat on subsequent pages.
+* No content is clipped.
+* Preview and downloaded PDF match.
+* Print output matches PDF.
+
+### Storage
+
+* Generated NOC is automatically saved.
+* NOC is associated with client.
+* NOC is grouped by year.
+* NOC is grouped by month.
+* NOC can be searched.
+* Historical NOC can be opened.
+* PDF can be downloaded.
+* PDF can be printed.
+
+### Employee documents
+
+* Passport can be uploaded.
+* ID card can be uploaded.
+* Visa can be uploaded.
+* Other documents can be uploaded.
+* Other documents can be named.
+* Documents are associated with the correct employee.
+* Documents can be previewed.
+* Documents can be downloaded.
+* Documents can be renamed/replaced/deleted according to permissions.
+
+---
+
+# 71. Recommended Final User Experience
+
+The complete workflow should feel like this:
+
+```text
+SIDEBAR
+
+Documents
+    │
+    ├── NOC
+    │
+    └── Employee Documents
+```
+
+User clicks:
+
+```text
+NOC
+```
+
+Then:
+
+```text
++ CREATE NOC
+```
+
+↓
+
+```text
+CLIENT / PROJECT / DATE
+```
+
+↓
+
+```text
+SELECT EMPLOYEES
+```
+
+↓
+
+```text
+EMPLOYEE REVIEW TABLE
+
+Name | Trade | Company | Nationality | Passport
+
+[Edit] [Remove]
+[+ Add Employee]
+[Sort]
+```
+
+↓
+
+```text
+CONFIRM EMPLOYEES
+```
+
+↓
+
+```text
+A4 NOC PREVIEW
+```
+
+↓
+
+```text
+[Edit] [Print] [Download PDF] [Finalize]
+```
+
+↓
+
+```text
+AUTOMATICALLY STORED
+
+Documents
+   → NOC
+      → Client
+         → Year
+            → Month
+               → NOC
+```
+
+At the same time, employees have their own document repository:
+
+```text
+Employee
+   ↓
+Documents
+   ├── Passport
+   ├── ID Card
+   ├── Visa
+   └── Other
+```
+
+---
+
+# 72. Key Product Principle
+
+The most important architectural principle for this module is:
+
+> **The employee database is the source of truth, the NOC is a controlled historical snapshot, and the PDF is the final presentation layer.**
+
+That gives you three clean layers:
+
+```text
+EMPLOYEE MASTER DATA
+        ↓
+NOC WORKING DATA / SNAPSHOT
+        ↓
+FINAL A4 DOCUMENT
+```
+
+This prevents a major operational problem where changing an employee's passport, trade, company, or nationality months later accidentally changes an old NOC.
+
+---
+
+# 73. Final Recommended Module Structure
+
+I would ultimately structure the new module as:
+
+```text
+DOCUMENTS
+│
+├── Dashboard
+│
+├── NOC
+│   ├── All NOCs
+│   ├── Create NOC
+│   ├── Drafts
+│   └── Clients
+│       └── Client
+│           └── Year
+│               └── Month
+│                   └── NOCs
+│
+├── EMPLOYEE DOCUMENTS
+│   ├── All Employees
+│   └── Employee
+│       ├── Passport
+│       ├── ID Card
+│       ├── Visa
+│       └── Other
+│
+└── SETTINGS
+    └── NOC Templates
+```
+
+**This is the structure I would give directly to the development team.** It keeps the feature modular, integrates with the existing application instead of creating another subsystem, and gives you a foundation to expand Documents beyond NOCs later.
+
+One important implementation step before development: the **four supplied NOCs should be used as the visual QA baseline**, with the approved master template locked down first. Their content/layout variations should not be accidentally merged; for example, the recipient/project information and employee counts differ between PROSCAPE/ARABIAN RANCHES, PROSCAPE/DAMAC LAGOON, GREEN & MORE/WARSAN, and INTERMASS/JOURI HILLS.    
+
+The Employee records such as passport copy, id copy, and other documents can be uploaded while registering a new employee, so look at the database and structure it correctly, and also we should be able to add these documents later through employee details page or the NOC page. All the sidebar should have permission system to access it as we already have that for most of the menus and also we need the permission management system in the documents page, not all users of the app with permission enable to documents menu can access the documents in the documents page, so need to implement that permission also, only selected accounts should be able to do that.
