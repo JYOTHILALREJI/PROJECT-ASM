@@ -71,6 +71,7 @@ interface NocDetail {
   stampAppliedAt?: string | null;
   stampAppliedBy?: string | null;
   stampRect?: StampRectMeta | null;
+  companyId?: string | null;
   updatedAt?: string;
 }
 
@@ -548,6 +549,10 @@ export function NocViewPage({
       const updated = data.data.noc as { stampRect?: string | null; stampAppliedAt?: string | null };
       let nextRect: StampRectMeta | null = null;
       try { nextRect = updated.stampRect ? (JSON.parse(updated.stampRect) as StampRectMeta) : null; } catch { nextRect = null; }
+      // Sync BOTH the header chip (noc.*) and the Switch/Select state — the
+      // toggle must reflect the new decision immediately, without a refresh.
+      setStampEnabled(nextEnabled);
+      if (nextEnabled && nextStampId) setStampId(nextStampId);
       setNoc((prev) => (prev ? {
         ...prev,
         stampEnabled: nextEnabled,
@@ -561,8 +566,8 @@ export function NocViewPage({
       toast({
         title: nextEnabled ? 'Stamp applied' : 'Stamp removed',
         description: nextEnabled
-          ? `${noc.nocNumber} was re-rendered with ${stamps.find((s) => s.id === nextStampId)?.name || 'the selected stamp'} — the original unstamped NOC remains preserved.`
-          : `${noc.nocNumber} reverted to the original unstamped PDF.`,
+          ? `${noc.nocNumber} will show ${stamps.find((s) => s.id === nextStampId)?.name || 'the selected stamp'} on preview and download — the PDF on file stays unstamped, and a snapshot is saved with each stamped download.`
+          : `${noc.nocNumber} now serves the original unstamped PDF.`,
       });
     } catch (e) {
       toast({ title: 'Stamp update failed', description: e instanceof Error ? e.message : 'Unknown error', variant: 'destructive' });
@@ -610,6 +615,13 @@ export function NocViewPage({
 
   const animStampSrc = stampAnim?.imageSrc || null;
   const stampLabel = noc.stampEnabled ? (noc.stampName || 'Applied') : 'Not Applied';
+  // Stamps are company-scoped: a NOC can switch between ANY stamps of its own
+  // company (multiple stamps per company are supported) + universal ones.
+  // A NOC without a company has no restriction — it can use ANY stamp
+  // (mirrors the backend validation, which only rejects company mismatches).
+  const companyStamps = noc.companyId
+    ? stamps.filter((s) => !s.companyId || s.companyId === noc.companyId)
+    : stamps;
 
   return (
     <div className="space-y-4">
@@ -649,7 +661,7 @@ export function NocViewPage({
                 checked={stampEnabled}
                 disabled={savingStamp}
                 onCheckedChange={(checked) => {
-                  const def = stamps.find((s) => s.isDefault) || stamps[0];
+                  const def = companyStamps.find((s) => s.isDefault) || companyStamps[0];
                   const nextId = checked ? (stampId || def?.id || '') : stampId;
                   if (checked) setStampId(nextId);
                   requestStampChange(checked, nextId);
@@ -668,8 +680,8 @@ export function NocViewPage({
                     <SelectValue placeholder="Choose stamp" />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
-                    {stamps.length === 0 && <SelectItem value="_none" disabled>No stamps in library</SelectItem>}
-                    {stamps.map((s) => (
+                    {companyStamps.length === 0 && <SelectItem value="_none" disabled>No stamps for this company</SelectItem>}
+                    {companyStamps.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}{s.isDefault ? ' (default)' : ''}
                       </SelectItem>
@@ -744,8 +756,8 @@ export function NocViewPage({
             </DialogTitle>
             <DialogDescription className="text-slate-400">
               {pendingStamp?.enabled
-                ? `NOC ${noc.nocNumber} will be re-rendered with the selected stamp. The original unstamped NOC remains preserved.`
-                : `NOC ${noc.nocNumber} will revert to the original unstamped PDF.`}
+                ? `NOC ${noc.nocNumber} will show the selected stamp on preview, print and download. The PDF on file stays the unstamped original — a snapshot is saved only when a stamped PDF is downloaded.`
+                : `NOC ${noc.nocNumber} will serve the original unstamped PDF again.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -754,7 +766,7 @@ export function NocViewPage({
               {/* §43 — replacing an existing stamp warns first */}
               {noc.stampEnabled && (
                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  This NOC already has a stamp{noc.stampName ? ` (${noc.stampName})` : ''}. Applying a different stamp will replace the existing stamped PDF — the original unstamped NOC will remain preserved.
+                  This NOC already has a stamp{noc.stampName ? ` (${noc.stampName})` : ''}. Switching stamps updates which stamp is shown — no copy of the old stamped PDF is kept, and the unstamped original on file is never modified.
                 </div>
               )}
               <div className="flex flex-col items-center gap-3 rounded-xl border border-slate-700/60 bg-slate-800/50 p-4">

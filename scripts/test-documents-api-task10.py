@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Task 10 API tests — spec hardening:
+Task 10 API tests — spec hardening (UPDATED for the Task 13 snapshot model):
   1. DELETE response contract: {success:true, id} + 404 {code:"NOC_NOT_FOUND"}
-  2. Original as-issued PDF preserved: finalize with stamp -> originalFilePath
-     (unstamped) + filePath (stamped) BOTH exist on disk (spec §37)
-  3. Stamp switch on a final NOC keeps the original untouched
-  4. Stamp removal on a final NOC reverts the active rendition to the original
+  2. Stored PDF is ALWAYS the unstamped original: finalize with stamp ->
+     filePath == originalFilePath (plain); NO stamped file on disk
+  3. Stamp switch on a final NOC only updates the DB decision (no file writes)
+  4. Stamp removal on a final NOC keeps serving the unstamped original
   5. currentStep persisted on draft save + returned by GET detail (§28)
   6. Finalize without stamp: filePath == originalFilePath (one plain file)
   7. Database indexes present (§41)
@@ -98,7 +98,7 @@ def main():
     st, data = req("GET", f"/api/documents/noc/{draft['id']}")
     check("GET deleted draft -> 404", st == 404, str(st))
 
-    print("\n── 3. finalize WITH stamp: original + stamped renditions (§37) ──")
+    print("\n── 3. finalize WITH stamp: stored PDF stays the plain original ──")
     st, data = req("POST", "/api/documents/noc", {
         "status": "final", "clientName": "QA T10 RENDITION CLIENT LLC", "projectName": "RENDITION PROJECT",
         "nocDate": "16-09-2026", "stampEnabled": True, "stampId": stamp_a, "employees": EMP,
@@ -109,34 +109,32 @@ def main():
     detail = data["data"]["noc"]
     fp, ofp = detail.get("filePath"), detail.get("originalFilePath")
     check("originalFilePath set (unstamped original)", bool(ofp), str(ofp))
-    check("active rendition differs from original when stamped", fp and ofp and fp != ofp, f"{fp} vs {ofp}")
-    check("original file name is plain", ofp and "(stamped)" not in ofp, str(ofp))
-    check("active file name carries (stamped)", fp and "(stamped)" in fp, str(fp))
+    check("filePath == originalFilePath (stored PDF never stamped)", fp and fp == ofp, f"{fp} vs {ofp}")
+    check("file name is plain (no stamped rendition)", fp and "(stamped)" not in fp, str(fp))
     check("original file exists on disk", ofp and os.path.exists(os.path.join(ROOT, ofp)), str(ofp))
-    check("stamped file exists on disk", fp and os.path.exists(os.path.join(ROOT, fp)), str(fp))
+    check("no (stamped) file written at finalize", not any("(stamped)" in f for f in os.listdir(os.path.dirname(os.path.join(ROOT, ofp)))) if ofp else False)
     st, headers2 = req("GET", f"/api/documents/noc/{noc['id']}/pdf?mode=inline")
     check("PDF serves for stamped final", st == 200, str(st))
 
-    print("\n── 4. stamp SWITCH keeps the original untouched (§37) ──")
+    print("\n── 4. stamp SWITCH is DB-only: base bytes untouched, no copies ──")
     orig_size = os.path.getsize(os.path.join(ROOT, ofp))
     st, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": True, "stampId": stamp_b})
     check("switch stamp A->B", st == 200 and data.get("success"), f"{st} {data}")
     st, data = req("GET", f"/api/documents/noc/{noc['id']}")
     d2 = data["data"]["noc"]
     check("originalFilePath unchanged after switch", d2.get("originalFilePath") == ofp, f"{d2.get('originalFilePath')} vs {ofp}")
-    check("original file bytes untouched", os.path.getsize(os.path.join(ROOT, ofp)) == orig_size)
-    check("stamped rendition updated", d2.get("filePath") != fp, f"{d2.get('filePath')} vs {fp}")
-    check("old stamped rendition removed (no orphan)", os.path.exists(os.path.join(ROOT, fp)) == False, str(fp))
+    check("base file bytes untouched", os.path.getsize(os.path.join(ROOT, ofp)) == orig_size)
+    check("filePath still the plain original (no rendition)", d2.get("filePath") == ofp, str(d2.get("filePath")))
+    check("no (stamped) file appeared after switch", not any("(stamped)" in f for f in os.listdir(os.path.dirname(os.path.join(ROOT, ofp)))))
     fp = d2.get("filePath")
 
-    print("\n── 5. stamp REMOVAL reverts to the byte-identical original (§37) ──")
+    print("\n── 5. stamp REMOVAL keeps serving the unstamped original ──")
     st, data = req("PATCH", f"/api/documents/noc/{noc['id']}", {"stampUpdate": True, "stampEnabled": False})
     check("remove stamp on final", st == 200 and data.get("success"), f"{st} {data}")
     st, data = req("GET", f"/api/documents/noc/{noc['id']}")
     d3 = data["data"]["noc"]
-    check("active rendition reverted to original", d3.get("filePath") == d3.get("originalFilePath") == ofp, f"{d3.get('filePath')} / {d3.get('originalFilePath')}")
+    check("filePath still the plain original", d3.get("filePath") == d3.get("originalFilePath") == ofp, f"{d3.get('filePath')} / {d3.get('originalFilePath')}")
     check("original still on disk", os.path.exists(os.path.join(ROOT, ofp)))
-    check("stamped rendition cleaned up", os.path.exists(os.path.join(ROOT, fp)) == False, str(fp))
     st, _ = req("GET", f"/api/documents/noc/{noc['id']}/pdf?mode=inline")
     check("PDF still serves after removal", st == 200)
 
@@ -146,7 +144,7 @@ def main():
     st, data = req("GET", f"/api/documents/noc/{noc['id']}")
     d4 = data["data"]["noc"]
     check("original STILL preserved", d4.get("originalFilePath") == ofp and os.path.exists(os.path.join(ROOT, ofp)), str(d4.get("originalFilePath")))
-    check("stamped rendition active again", d4.get("filePath") != d4.get("originalFilePath"), str(d4.get("filePath")))
+    check("filePath still the plain original (no rendition)", d4.get("filePath") == ofp, str(d4.get("filePath")))
 
     print("\n── 7. finalize WITHOUT stamp: single plain file ──")
     st, data = req("POST", "/api/documents/noc", {
@@ -160,7 +158,7 @@ def main():
     check("filePath == originalFilePath (no stamp)", pd.get("filePath") == pd.get("originalFilePath"), f"{pd.get('filePath')} vs {pd.get('originalFilePath')}")
     check("plain file exists", pd.get("filePath") and os.path.exists(os.path.join(ROOT, pd["filePath"])))
 
-    print("\n── 8. DELETE removes BOTH renditions + page-edge data ──")
+    print("\n── 8. DELETE removes the base + snapshot files + page-edge data ──")
     st, data = req("DELETE", f"/api/documents/noc/{noc['id']}")
     check("delete rendition NOC", st == 200 and data.get("id") == noc["id"], f"{st} {data}")
     check("original file removed from disk", os.path.exists(os.path.join(ROOT, ofp)) == False, str(ofp))

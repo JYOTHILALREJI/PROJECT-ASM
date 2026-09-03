@@ -118,7 +118,9 @@ export function CampDetailPage() {
   }, [campId, toast]);
 
   useEffect(() => {
-    fetchCampData();
+    // deferred so the effect body itself never sets state synchronously
+    const t = setTimeout(fetchCampData, 0);
+    return () => clearTimeout(t);
   }, [fetchCampData]);
 
   // Search employees for assignment
@@ -134,7 +136,8 @@ export function CampDetailPage() {
         const res = await fetch(`/api/employees?search=${encodeURIComponent(searchQuery)}&limit=20`);
         const data = await res.json();
         if (data.success) {
-          setSearchResults(data.employees || []);
+          // /api/employees nests the rows under data.data.employees
+          setSearchResults(data.data?.employees || []);
         }
       } catch {
         // silent

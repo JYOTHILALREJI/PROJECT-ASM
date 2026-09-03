@@ -3,12 +3,15 @@ import fs from 'fs';
 import path from 'path';
 import { db } from '@/lib/db';
 import { resolveStoragePath, ensureStorageDir } from '@/lib/document-storage';
-import type { NocEmployeeRow } from '@/lib/noc-pdf';
+import { generateNocPdf, type NocEmployeeRow, type StampRectMeta } from '@/lib/noc-pdf';
+import { resolveNocAssets } from '@/lib/noc-pdf-server';
 
 /**
  * NOC ZIP package builder (PRD §1-27, §45, §59).
  *
- * Outer ZIP  = NOC PDF (stamped rendition when the NOC is stamped, §45)
+ * Outer ZIP  = NOC PDF (rendered WITH the stamp on the fly when the NOC is
+ *              stamped — the stored file itself is always the unstamped
+ *              original, §45)
  *              + one nested ZIP per NOC employee.
  * Employee ZIP = latest VALID document per category, normalized names:
  *                Passport.pdf / Emirates ID.jpg / Visa.pdf / Medical.pdf.
@@ -133,6 +136,9 @@ export async function buildNocPackage(noc: {
   id: string; nocNumber: string; clientName: string; projectName: string; nocDate: string;
   fileName: string; filePath: string | null; stampEnabled: boolean;
   employeesJson: string;
+  // extra fields needed to render the stamped NOC PDF on the fly
+  clientAddress?: string; stampType?: string; stampId?: string | null; companyId?: string | null;
+  contactPerson?: string | null; contactPhone?: string | null; contactEmail?: string | null;
 }): Promise<{ buffer: Buffer; summary: PackageSummary; zipName: string }> {
   const zipName = buildPackageZipName(noc);
   const snapshots = JSON.parse(noc.employeesJson || '[]') as NocEmployeeRow[];
@@ -169,6 +175,9 @@ export async function buildNocPackage(noc: {
   };
 
   // ── 1. NOC PDF — mandatory (§55) ──
+  // The stored file is ALWAYS the unstamped original; when the NOC carries a
+  // stamp the stamped version is rendered on the fly so the package ships
+  // exactly what would be downloaded (§45).
   let nocPdfBytes: Buffer | null = null;
   if (noc.filePath) {
     try {
@@ -179,6 +188,43 @@ export async function buildNocPackage(noc: {
   }
   if (!nocPdfBytes) {
     throw new Error('The NOC PDF file could not be read — the package cannot be built without the NOC itself.');
+  }
+  let nocPdfName = (noc.fileName || 'NOC.pdf').replace(/\.(pdf|PDF)$/, '') + '.pdf';
+  if (noc.stampEnabled) {
+    try {
+      const employees = JSON.parse(noc.employeesJson || '[]') as NocEmployeeRow[];
+      const stampedMeta: { stampRect?: StampRectMeta | null } = {};
+      const assets = await resolveNocAssets({
+        companyId: noc.companyId ?? null,
+        stampId: noc.stampId ?? null,
+        stampEnabled: true,
+        stampType: noc.stampType || 'procurement',
+        contactPerson: noc.contactPerson || null,
+        contactPhone: noc.contactPhone || null,
+        contactEmail: noc.contactEmail || null,
+      });
+      nocPdfBytes = Buffer.from(await generateNocPdf({
+        clientName: noc.clientName,
+        projectName: noc.projectName,
+        clientAddress: noc.clientAddress || '',
+        nocDate: noc.nocDate,
+        contactPerson: assets.contactPerson,
+        contactPhone: assets.contactPhone,
+        contactEmail: assets.contactEmail,
+        stampType: noc.stampType || 'procurement',
+        stampEnabled: true,
+        stampImagePath: assets.stampImagePath,
+        letterheadPath: assets.letterheadPath,
+        employees,
+        bodyText: assets.bodyText,
+        companyName: assets.companyName,
+      }, stampedMeta));
+      nocPdfName = (noc.fileName || 'NOC.pdf').replace(/\s*\(\s*stamped\s*\)\s*/i, ' ').replace(/\.(pdf|PDF)$/, '') + ' (stamped).pdf';
+    } catch (e) {
+      // a broken stamp image must not block the whole package — ship the
+      // unstamped original and say so in the summary
+      console.error('package: stamped NOC render failed, falling back to the unstamped original:', e);
+    }
   }
   summary.nocPdfIncluded = true;
 
@@ -266,7 +312,7 @@ export async function buildNocPackage(noc: {
     outer.on('end', resolve);
     outer.on('error', reject);
   });
-  outer.append(nocPdfBytes, { name: zipName.replace(/\.zip$/i, '.pdf') });
+  outer.append(nocPdfBytes, { name: nocPdfName });
   for (const entry of employeeZipEntries) {
     outer.append(entry.buffer, { name: entry.name });
   }

@@ -350,8 +350,11 @@ export async function POST(request: NextRequest) {
     };
 
     if (status === 'final') {
-      // Write the ORIGINAL as-issued PDF (always unstamped — audit copy) plus
-      // the ACTIVE rendition (stamped when a stamp is enabled) — spec §37.
+      // Write ONLY the ORIGINAL as-issued PDF — the stored PDF is ALWAYS
+      // unstamped (never a stamped rendition on disk). When a stamp is
+      // enabled, a pure in-memory render validates the stamp image and
+      // captures the placement; the stamped output is rendered on the fly at
+      // preview/download time and a snapshot is saved when it is downloaded.
       const assetOpts = {
         companyId,
         stampId: body.stampId,
@@ -383,39 +386,44 @@ export async function POST(request: NextRequest) {
       });
       const plainAbs = uniqueFilePath(dir, plainName);
       fs.writeFileSync(plainAbs, plainBytes);
-      recordData.originalFilePath = path.relative(process.cwd(), plainAbs).replace(/\\/g, '/');
 
-      let activeAbs = plainAbs;
       if (stampEnabled) {
-        const stampedAssets = await resolveNocAssets(assetOpts);
         const stampedMeta: { stampRect?: StampRectMeta | null } = {};
-        const stampedBytes = await generateNocPdf({
-          clientName,
-          projectName: recordData.projectName as string,
-          clientAddress: recordData.clientAddress as string,
-          nocDate,
-          contactPerson: stampedAssets.contactPerson,
-          contactPhone: stampedAssets.contactPhone,
-          contactEmail: stampedAssets.contactEmail,
-          stampType,
-          stampEnabled: true,
-          stampImagePath: stampedAssets.stampImagePath,
-          letterheadPath: stampedAssets.letterheadPath,
-          employees,
-          bodyText: stampedAssets.bodyText,
-          companyName: stampedAssets.companyName,
-        }, stampedMeta);
-        const stampedAbs = uniqueFilePath(dir, plainName.replace(/\.pdf$/i, ' (stamped).pdf'));
-        fs.writeFileSync(stampedAbs, stampedBytes);
-        activeAbs = stampedAbs;
-        if (stampedMeta.stampRect) {
-          recordData.stampRect = JSON.stringify(stampedMeta.stampRect);
-          recordData.stampAppliedAt = new Date();
-          recordData.stampAppliedBy = body.actorDisplayName || null;
+        try {
+          const stampedAssets = await resolveNocAssets(assetOpts);
+          await generateNocPdf({
+            clientName,
+            projectName: recordData.projectName as string,
+            clientAddress: recordData.clientAddress as string,
+            nocDate,
+            contactPerson: stampedAssets.contactPerson,
+            contactPhone: stampedAssets.contactPhone,
+            contactEmail: stampedAssets.contactEmail,
+            stampType,
+            stampEnabled: true,
+            stampImagePath: stampedAssets.stampImagePath,
+            letterheadPath: stampedAssets.letterheadPath,
+            employees,
+            bodyText: stampedAssets.bodyText,
+            companyName: stampedAssets.companyName,
+          }, stampedMeta);
+          if (stampedMeta.stampRect) {
+            recordData.stampRect = JSON.stringify(stampedMeta.stampRect);
+          }
+        } catch (renderError) {
+          console.error('stamp validation render failed:', renderError);
+          return NextResponse.json(
+            { success: false, error: 'The stamp image file could not be read — create the NOC without the stamp or re-upload it in NOC Settings.' },
+            { status: 400 },
+          );
         }
+        recordData.stampAppliedAt = new Date();
+        recordData.stampAppliedBy = body.actorDisplayName || null;
       }
-      recordData.fileName = path.basename(activeAbs);
-      recordData.filePath = path.relative(process.cwd(), activeAbs).replace(/\\/g, '/');
+
+      recordData.fileName = path.basename(plainAbs);
+      recordData.filePath = path.relative(process.cwd(), plainAbs).replace(/\\/g, '/');
+      recordData.originalFilePath = recordData.filePath;
     }
 
     const noc = await db.nocDocument.create({ data: recordData as Prisma.NocDocumentUncheckedCreateInput });
