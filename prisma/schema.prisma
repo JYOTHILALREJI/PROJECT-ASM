@@ -917,6 +917,9 @@ model BaseRate {
 // ---------------------------------------------------------------------------
 model NocDocument {
   id            String   @id @default(cuid())
+  nocNumber     String // system-generated, e.g. "NOC-2026-000001" (shared across versions)
+  status        String   @default("draft") // "draft" | "final"
+  version       Int      @default(1) // bumped when a FINAL NOC is edited (original PDF retained)
   clientName    String // e.g. "M/S PROSCAPE LLC" (folder grouping key, uppercased)
   projectName   String   @default("") // e.g. "ARABIAN RANCHES"
   clientAddress String   @default("") // address lines (newline separated)
@@ -935,9 +938,11 @@ model NocDocument {
   updatedAt     DateTime @updatedAt
   deletedAt     DateTime?
 
+  @@unique([nocNumber, version])
   @@index([clientName])
   @@index([monthKey])
   @@index([createdAt])
+  @@index([nocNumber])
 }
 
 // ---------------------------------------------------------------------------
@@ -956,6 +961,8 @@ model EmployeeDocument {
   filePath   String // relative path under storage/
   mimeType   String   @default("application/pdf")
   fileSize   Int      @default(0)
+  expiryDate String? // optional ISO date (YYYY-MM-DD) for expiry tracking
+  notes      String? // optional free-text note
   createdBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -965,4 +972,21 @@ model EmployeeDocument {
 
   @@index([employeeId])
   @@index([docType])
+}
+
+// ---------------------------------------------------------------------------
+// NocTemplate — admin-controlled NOC letter configuration (singleton)
+// ---------------------------------------------------------------------------
+// Keeps the approved legal wording and signatory block out of the code so
+// admins can update them without a redeploy. The body text supports a
+// {{company}} placeholder which is rendered bold (the contractor name).
+// ---------------------------------------------------------------------------
+model NocTemplate {
+  id            String   @id @default("singleton")
+  bodyText      String   @default("We would like the following workers of our organization to work with your company. Our company takes full responsibility for our workers as regards to their salary, welfare and any other requirements. In case of any injury or untoward incident at site we M/s {{company}}., take all Liabilities & Claims and take full responsibility for our workers.")
+  companyName   String   @default("ARABIAN SHIELD A/C. UNITS FIX. CONT")
+  contactPerson String   @default("Ms. Mafeeda Kader")
+  contactPhone  String   @default("050 797 4153")
+  contactEmail  String   @default("mafeedaarabianshieldmanpower@gmail.com")
+  updatedAt     DateTime @updatedAt
 }

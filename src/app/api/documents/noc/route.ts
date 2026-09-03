@@ -3,15 +3,16 @@ import { db } from '@/lib/db';
 import { logActivity } from '@/lib/activity-logger';
 import { generateNocPdf, buildNocFileName, monthKeyFromNocDate, type NocEmployeeRow } from '@/lib/noc-pdf';
 import { ensureStorageDir, slugify, uniqueFilePath } from '@/lib/document-storage';
+import { getNocTemplate } from '@/lib/noc-template';
 import fs from 'fs';
 import path from 'path';
 
 // ---------------------------------------------------------------------------
 // /api/documents/noc
-//   GET  — list all issued NOCs (newest first)
-//   POST — create an NOC: validate payload, generate the PDF with the exact
-//          reference layout, store it under storage/noc/<client>/<YYYY-MM>/,
-//          and persist metadata + employee snapshot.
+//   GET  — list all NOCs (drafts + finals, newest first)
+//   POST — create a NOC.
+//          status "draft": metadata only (auto-save / manual save), no PDF.
+//          status "final": full validation, PDF generated + stored.
 // ---------------------------------------------------------------------------
 
 interface NocPayload {
@@ -23,30 +24,29 @@ interface NocPayload {
   contactPhone?: string;
   contactEmail?: string;
   stampType?: string;
+  status?: string; // "draft" | "final"
   employees?: Array<Partial<NocEmployeeRow>>;
   actorUserId?: string;
   actorDisplayName?: string;
 }
 
-function validatePayload(body: NocPayload): { errors: string[]; employees: NocEmployeeRow[] } {
+/** System-generated sequential NOC number: NOC-YYYY-NNNNNN */
+async function nextNocNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `NOC-${year}-`;
+  const last = await db.nocDocument.findFirst({
+    where: { nocNumber: { startsWith: prefix } },
+    orderBy: { nocNumber: 'desc' },
+    select: { nocNumber: true },
+  });
+  const lastNum = last ? parseInt(last.nocNumber.split('-')[2], 10) : 0;
+  return `${prefix}${String(lastNum + 1).padStart(6, '0')}`;
+}
+
+function parseEmployees(raw: unknown): { employees: NocEmployeeRow[]; errors: string[] } {
   const errors: string[] = [];
-  const clientName = (body.clientName || '').trim();
-  if (clientName.length < 2) errors.push('Client name is required (min 2 characters).');
-
-  const nocDate = (body.nocDate || '').trim();
-  if (!/^(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})$/.test(nocDate)) {
-    errors.push('Date must be in DD-MM-YYYY format.');
-  }
-
-  const stampType = body.stampType || 'procurement';
-  if (!['procurement', 'signature', 'none'].includes(stampType)) {
-    errors.push('Invalid stamp selection.');
-  }
-
-  const rawRows = Array.isArray(body.employees) ? body.employees : [];
-  if (rawRows.length === 0) errors.push('Add at least one employee to the NOC.');
+  const rawRows = Array.isArray(raw) ? raw : [];
   if (rawRows.length > 500) errors.push('A single NOC supports up to 500 employees.');
-
   const employees: NocEmployeeRow[] = [];
   rawRows.forEach((row, idx) => {
     const name = (row?.name || '').toString().trim().toUpperCase();
@@ -62,21 +62,33 @@ function validatePayload(body: NocPayload): { errors: string[]; employees: NocEm
       passport: (row?.passport || '').toString().trim().toUpperCase(),
     });
   });
+  return { employees, errors };
+}
 
-  return { errors, employees };
+function validateForFinal(body: NocPayload, employees: NocEmployeeRow[]): string[] {
+  const errors: string[] = [];
+  if ((body.clientName || '').trim().length < 2) errors.push('Client name is required (min 2 characters).');
+  const nocDate = (body.nocDate || '').trim();
+  if (!/^(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})$/.test(nocDate)) errors.push('Date must be in DD-MM-YYYY format.');
+  const stampType = body.stampType || 'procurement';
+  if (!['procurement', 'signature', 'none'].includes(stampType)) errors.push('Invalid stamp selection.');
+  if (employees.length === 0) errors.push('Add at least one employee to the NOC.');
+  return errors;
 }
 
 export async function GET() {
   try {
     const rows = await db.nocDocument.findMany({
-      where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }],
     });
     return NextResponse.json({
       success: true,
       data: {
         nocs: rows.map((r) => ({
           id: r.id,
+          nocNumber: r.nocNumber,
+          status: r.status,
+          version: r.version,
           clientName: r.clientName,
           projectName: r.projectName,
           clientAddress: r.clientAddress,
@@ -91,6 +103,7 @@ export async function GET() {
           filePath: r.filePath,
           createdBy: r.createdBy,
           createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
           employees: JSON.parse(r.employeesJson || '[]') as NocEmployeeRow[],
         })),
       },
@@ -104,66 +117,82 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as NocPayload;
-    const { errors, employees } = validatePayload(body);
-    if (errors.length > 0) {
-      return NextResponse.json({ success: false, error: errors.join(' ') }, { status: 400 });
+    const status = body.status === 'final' ? 'final' : 'draft';
+    const { employees, errors: employeeErrors } = parseEmployees(body.employees);
+
+    if (status === 'final') {
+      const errors = [...validateForFinal(body, employees), ...employeeErrors];
+      if (errors.length > 0) {
+        return NextResponse.json({ success: false, error: errors.join(' ') }, { status: 400 });
+      }
+    } else if (employeeErrors.length > 0) {
+      // drafts tolerate incomplete data but never unnamed rows
+      return NextResponse.json({ success: false, error: employeeErrors.join(' ') }, { status: 400 });
     }
 
     const clientName = (body.clientName || '').trim().toUpperCase();
     const nocDate = (body.nocDate || '').trim();
-    const monthKey = monthKeyFromNocDate(nocDate);
+    const monthKey = nocDate ? monthKeyFromNocDate(nocDate) : '';
     const stampType = body.stampType || 'procurement';
+    const nocNumber = await nextNocNumber();
 
-    const nocData = {
+    const recordData = {
+      nocNumber,
+      status,
+      version: 1,
       clientName,
       projectName: (body.projectName || '').trim().toUpperCase(),
       clientAddress: (body.clientAddress || '').trim(),
       nocDate,
+      monthKey,
       contactPerson: (body.contactPerson || '').trim(),
       contactPhone: (body.contactPhone || '').trim(),
       contactEmail: (body.contactEmail || '').trim(),
       stampType,
-      employees,
+      employeesJson: JSON.stringify(employees),
+      employeeCount: employees.length,
+      fileName: '',
+      filePath: null as string | null,
+      createdBy: body.actorDisplayName || null,
     };
 
-    // Generate the PDF bytes with the exact reference layout
-    const pdfBytes = await generateNocPdf(nocData);
-
-    // Persist under storage/noc/<CLIENT>/<YYYY-MM>/<file>.pdf
-    const dir = ensureStorageDir('noc', slugify(clientName), monthKey);
-    const fileName = buildNocFileName(nocData);
-    const absPath = uniqueFilePath(dir, fileName);
-    fs.writeFileSync(absPath, pdfBytes);
-    const relativePath = path.relative(process.cwd(), absPath).replace(/\\/g, '/');
-
-    const noc = await db.nocDocument.create({
-      data: {
+    if (status === 'final') {
+      const template = await getNocTemplate();
+      const pdfBytes = await generateNocPdf({
         clientName,
-        projectName: nocData.projectName,
-        clientAddress: nocData.clientAddress,
+        projectName: recordData.projectName,
+        clientAddress: recordData.clientAddress,
         nocDate,
-        monthKey,
-        contactPerson: nocData.contactPerson,
-        contactPhone: nocData.contactPhone,
-        contactEmail: nocData.contactEmail,
+        contactPerson: recordData.contactPerson || template.contactPerson,
+        contactPhone: recordData.contactPhone || template.contactPhone,
+        contactEmail: recordData.contactEmail || template.contactEmail,
         stampType,
-        employeesJson: JSON.stringify(employees),
-        employeeCount: employees.length,
-        fileName: path.basename(absPath),
-        filePath: relativePath,
-        createdBy: body.actorDisplayName || null,
-      },
-    });
+        employees,
+        bodyText: template.bodyText,
+        companyName: template.companyName,
+      });
+      const dir = ensureStorageDir('noc', slugify(clientName), monthKey);
+      const fileName = buildNocFileName({ clientName, projectName: recordData.projectName, nocDate });
+      const absPath = uniqueFilePath(dir, fileName);
+      fs.writeFileSync(absPath, pdfBytes);
+      recordData.fileName = path.basename(absPath);
+      recordData.filePath = path.relative(process.cwd(), absPath).replace(/\\/g, '/');
+    }
+
+    const noc = await db.nocDocument.create({ data: recordData });
 
     await logActivity({
       userId: body.actorUserId,
       displayName: body.actorDisplayName || 'Admin',
-      action: 'noc_create',
+      action: status === 'final' ? 'noc_create' : 'noc_draft_save',
       entityType: 'noc_document',
       entityId: noc.id,
-      entityName: noc.fileName,
-      description: `Created NOC for ${clientName} — ${nocData.projectName || 'no project'} (${employees.length} employees, dated ${nocDate})`,
-      details: { clientName, projectName: nocData.projectName, nocDate, monthKey, employeeCount: employees.length },
+      entityName: noc.nocNumber,
+      description:
+        status === 'final'
+          ? `Created NOC ${noc.nocNumber} for ${clientName} — ${recordData.projectName || 'no project'} (${employees.length} employees, dated ${nocDate})`
+          : `Saved draft ${noc.nocNumber} (${clientName || 'untitled'})`,
+      details: { clientName, projectName: recordData.projectName, nocDate, monthKey, employeeCount: employees.length, status },
     }).catch(() => undefined);
 
     return NextResponse.json({ success: true, data: { noc } }, { status: 201 });

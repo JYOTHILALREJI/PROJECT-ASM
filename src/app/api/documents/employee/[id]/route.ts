@@ -21,15 +21,25 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: 'Document not found' }, { status: 404 });
     }
 
-    const body = (await request.json()) as { docName?: string; docType?: string };
+    const body = (await request.json()) as { docName?: string; docType?: string; expiryDate?: string | null; notes?: string | null };
     const docName = (body.docName || '').trim();
     if (!docName) {
       return NextResponse.json({ success: false, error: 'Document name cannot be empty' }, { status: 400 });
     }
 
-    const data: Record<string, string> = { docName };
+    const data: Record<string, unknown> = { docName };
     if (body.docType && ['passport', 'id_card', 'visa', 'other'].includes(body.docType)) {
       data.docType = body.docType;
+    }
+    if (body.expiryDate !== undefined) {
+      const exp = (body.expiryDate || '').toString().trim();
+      if (exp && !/^\d{4}-\d{2}-\d{2}$/.test(exp)) {
+        return NextResponse.json({ success: false, error: 'Expiry date must be in YYYY-MM-DD format' }, { status: 400 });
+      }
+      data.expiryDate = exp || null;
+    }
+    if (body.notes !== undefined) {
+      data.notes = (body.notes || '').toString().trim() || null;
     }
 
     const updated = await db.employeeDocument.update({ where: { id }, data });

@@ -843,6 +843,8 @@ export function EmployeePage() {
     currentTotalWorkingHours: '' as string,
   });
   const [formPhoto, setFormPhoto] = useState<string | null>(null);
+  // Registration-time document uploads (PRD: passport/ID/visa/other while registering)
+  const [pendingDocs, setPendingDocs] = useState<Array<{ docType: string; docName: string; expiryDate: string; file: File }>>([]);
   const [showNewSiteInput, setShowNewSiteInput] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [isCreatingSite, setIsCreatingSite] = useState(false);
@@ -1206,10 +1208,33 @@ export function EmployeePage() {
 
       const json = await res.json();
       if (json.success) {
+        // Upload any registration-time documents for the new employee
+        const newEmployeeId = json.data?.employee?.id || json.data?.id;
+        if (formMode === 'add' && newEmployeeId && pendingDocs.length > 0) {
+          for (const doc of pendingDocs) {
+            try {
+              const fd = new FormData();
+              fd.append('employeeId', newEmployeeId);
+              fd.append('docType', doc.docType);
+              if (doc.docName.trim()) fd.append('docName', doc.docName.trim());
+              if (doc.expiryDate) fd.append('expiryDate', doc.expiryDate);
+              fd.append('actorDisplayName', user?.name || user?.email || '');
+              fd.append('actorUserId', user?.id || '');
+              fd.append('file', doc.file);
+              const docRes = await fetch('/api/documents/employee', { method: 'POST', body: fd });
+              if (!docRes.ok) console.error('Registration document upload failed:', doc.docType);
+            } catch (docErr) {
+              console.error('Registration document upload error:', docErr);
+            }
+          }
+        }
         toast({
           title: formMode === 'add' ? 'Employee Created' : 'Employee Updated',
-          description: `${formData.fullName} has been ${formMode === 'add' ? 'added' : 'updated'} successfully.`,
+          description: formMode === 'add' && pendingDocs.length > 0
+            ? `${formData.fullName} has been added with ${pendingDocs.length} document${pendingDocs.length !== 1 ? 's' : ''}.`
+            : `${formData.fullName} has been ${formMode === 'add' ? 'added' : 'updated'} successfully.`,
         });
+        setPendingDocs([]);
         setFormDialogOpen(false);
         setCurrentView('employees');
         fetchEmployees();
@@ -1580,6 +1605,11 @@ export function EmployeePage() {
                 <TabsTrigger value="professional" className="flex-1 data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400">
                   Professional & Work
                 </TabsTrigger>
+                {formMode === 'add' && (
+                  <TabsTrigger value="documents" className="flex-1 data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400">
+                    Documents
+                  </TabsTrigger>
+                )}
               </TabsList>
 
               {/* ── Personal Tab ── */}
@@ -1994,6 +2024,61 @@ export function EmployeePage() {
                   </div>
                 </div>
               </TabsContent>
+
+              {/* ── Documents Tab (registration-time uploads) ── */}
+              {formMode === 'add' && (
+                <TabsContent value="documents" className="space-y-4 pt-4">
+                  <p className="text-xs text-slate-400">
+                    Optionally attach the employee&apos;s scanned documents now. Files are stored in
+                    Documents → Employee Documents after the employee is created, and can be added
+                    or replaced anytime from the employee&apos;s detail page.
+                  </p>
+                  {[
+                    { type: 'passport', label: 'Passport scan' },
+                    { type: 'id_card', label: 'ID card (Emirates ID) scan' },
+                    { type: 'visa', label: 'Visa scan' },
+                    { type: 'other', label: 'Other document (named below)' },
+                  ].map(({ type, label }) => {
+                    const staged = pendingDocs.find((d) => d.docType === type);
+                    return (
+                      <div key={type} className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-sm text-slate-300 w-56 shrink-0">{label}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx"
+                            className="text-xs text-slate-300 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setPendingDocs((prev) => {
+                                const rest = prev.filter((d) => d.docType !== type);
+                                return file ? [...rest, { docType: type, docName: '', expiryDate: '', file }] : rest;
+                              });
+                            }}
+                          />
+                          {staged && (
+                            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                              <Input
+                                placeholder={type === 'other' ? 'Document name (e.g. Labour Contract)' : 'Optional display name'}
+                                value={staged.docName}
+                                onChange={(e) => setPendingDocs((prev) => prev.map((d) => (d.docType === type ? { ...d, docName: e.target.value } : d)))}
+                                className="h-8 text-xs"
+                              />
+                              <Input
+                                type="date"
+                                value={staged.expiryDate}
+                                onChange={(e) => setPendingDocs((prev) => prev.map((d) => (d.docType === type ? { ...d, expiryDate: e.target.value } : d)))}
+                                className="h-8 text-xs w-36"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </TabsContent>
+              )}
             </Tabs>
 
             {/* Action buttons */}
@@ -2001,7 +2086,9 @@ export function EmployeePage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  if (formTab === 'professional') {
+                  if (formTab === 'documents') {
+                    setFormTab('professional');
+                  } else if (formTab === 'professional') {
                     setFormTab('personal');
                   } else {
                     setFormDialogOpen(false);
@@ -2020,6 +2107,14 @@ export function EmployeePage() {
                 {formTab === 'personal' && (
                   <Button
                     onClick={() => setFormTab('professional')}
+                    className="bg-slate-700 hover:bg-slate-600 text-white"
+                  >
+                    Next <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                )}
+                {formTab === 'professional' && formMode === 'add' && (
+                  <Button
+                    onClick={() => setFormTab('documents')}
                     className="bg-slate-700 hover:bg-slate-600 text-white"
                   >
                     Next <ChevronRight className="h-4 w-4 ml-1" />

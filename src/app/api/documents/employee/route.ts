@@ -19,6 +19,18 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 export async function GET(request: NextRequest) {
   try {
+    // Dashboard summary: distinct employees holding at least one document
+    if (request.nextUrl.searchParams.get('stats') === '1') {
+      const rows = await db.employeeDocument.findMany({
+        where: { deletedAt: null },
+        select: { employeeId: true, docType: true },
+      });
+      const employeesWithDocuments = new Set(rows.map((r) => r.employeeId)).size;
+      const byType: Record<string, number> = {};
+      for (const r of rows) byType[r.docType] = (byType[r.docType] || 0) + 1;
+      return NextResponse.json({ success: true, data: { employeesWithDocuments, total: rows.length, byType } });
+    }
+
     const employeeId = request.nextUrl.searchParams.get('employeeId');
 
     const where: Record<string, unknown> = { deletedAt: null };
@@ -49,6 +61,8 @@ export async function GET(request: NextRequest) {
           fileName: d.fileName,
           mimeType: d.mimeType,
           fileSize: d.fileSize,
+          expiryDate: d.expiryDate,
+          notes: d.notes,
           createdBy: d.createdBy,
           createdAt: d.createdAt,
         })),
@@ -66,6 +80,8 @@ export async function POST(request: NextRequest) {
     const employeeId = (form.get('employeeId') || '').toString().trim();
     const docType = (form.get('docType') || 'other').toString().trim();
     const customName = (form.get('docName') || '').toString().trim();
+    const expiryDate = (form.get('expiryDate') || '').toString().trim();
+    const notes = (form.get('notes') || '').toString().trim();
     const actorDisplayName = (form.get('actorDisplayName') || '').toString().trim();
     const actorUserId = (form.get('actorUserId') || '').toString().trim();
     const file = form.get('file');
@@ -75,6 +91,9 @@ export async function POST(request: NextRequest) {
     }
     if (!ALLOWED_DOC_TYPES.includes(docType)) {
       return NextResponse.json({ success: false, error: 'Invalid document type' }, { status: 400 });
+    }
+    if (expiryDate && !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) {
+      return NextResponse.json({ success: false, error: 'Expiry date must be in YYYY-MM-DD format' }, { status: 400 });
     }
     if (!(file instanceof File)) {
       return NextResponse.json({ success: false, error: 'A file is required' }, { status: 400 });
@@ -101,9 +120,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Employee not found' }, { status: 404 });
     }
 
-    // Persist under storage/employee-documents/<employeeId>/
+    // Persist under storage/employee-documents/<employeeId>/ with the
+    // standardized name {DOC_TYPE}_{EMPLOYEE_NAME}.{ext} (PRD §56).
     const dir = ensureStorageDir('employee-documents', employeeId);
-    const safeName = sanitizeFileName(file.name);
+    const stdBase = `${docType.toUpperCase()}_${employee.fullName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').toUpperCase()}`;
+    const safeName = sanitizeFileName(`${stdBase}${ext || '.pdf'}`);
     const absPath = uniqueFilePath(dir, safeName);
     const buffer = Buffer.from(await file.arrayBuffer());
     fs.writeFileSync(absPath, buffer);
@@ -118,6 +139,8 @@ export async function POST(request: NextRequest) {
         filePath: relativePath,
         mimeType: file.type || 'application/octet-stream',
         fileSize: file.size,
+        expiryDate: expiryDate || null,
+        notes: notes || null,
         createdBy: actorDisplayName || null,
       },
     });

@@ -28,6 +28,9 @@ export interface NocData {
   contactEmail: string;
   stampType: string; // "procurement" | "signature" | "none"
   employees: NocEmployeeRow[];
+  /** Admin-configurable legal wording; {{company}} is rendered bold. */
+  bodyText?: string;
+  companyName?: string;
 }
 
 const A4_W = 595.28;
@@ -194,17 +197,24 @@ export async function generateNocPdf(data: NocData): Promise<Uint8Array> {
   }
   y -= 15;
 
-  // ── Body paragraph ──
+  // ── Body paragraph (template-driven; {{company}} renders bold) ──
   y -= 12;
   const bodyWidth = TABLE_W;
   const bodyLineH = 13.4;
   const bodySize = 12.3;
+  const companyName = (data.companyName || 'ARABIAN SHIELD A/C. UNITS FIX. CONT').toUpperCase();
+  const rawBody =
+    data.bodyText && data.bodyText.trim()
+      ? data.bodyText
+      : 'We would like the following workers of our organization to work with your company. Our company takes full responsibility for our workers as regards to their salary, welfare and any other requirements. In case of any injury or untoward incident at site we M/s {{company}}., take all Liabilities & Claims and take full responsibility for our workers.';
   // Token stream: word + bold flag, then greedy wrap across the flow.
-  const bodyTexts: Array<{ t: string; b: boolean }> = [
-    { t: 'We would like the following workers of our organization to work with your company. Our company takes full responsibility for our workers as regards to their salary, welfare and any other requirements. In case of any injury or untoward incident at site we M/s', b: false },
-    { t: 'ARABIAN SHIELD A/C. UNITS FIX. CONT', b: true },
-    { t: '., take all Liabilities & Claims and take full responsibility for our workers.', b: false },
-  ];
+  const bodyTexts: Array<{ t: string; b: boolean }> = rawBody
+    .split('{{company}}')
+    .flatMap((segment, i, arr) => {
+      const parts: Array<{ t: string; b: boolean }> = [{ t: segment, b: false }];
+      if (i < arr.length - 1) parts.push({ t: companyName, b: true });
+      return parts;
+    });
   const tokens: Array<{ w: string; b: boolean }> = [];
   for (const part of bodyTexts) {
     for (const w of part.t.split(' ').filter(Boolean)) tokens.push({ w, b: part.b });
@@ -252,12 +262,14 @@ export async function generateNocPdf(data: NocData): Promise<Uint8Array> {
     return Math.max(ROW_MIN_H, maxLines * CELL_LINE_H + ROW_PAD_TOTAL);
   };
 
-  // helper: ensure space for a row of h pt; page-break if needed
+  // helper: ensure space for a row of h pt; page-break if needed.
+  // The table header REPEATS on every continuation page (PRD §21/§70).
   const ensureSpace = (needed: number): void => {
     if (y - needed < FOOTER_TOP + 6) {
       drawFooter(page, fontBold);
       page = pdf.addPage([A4_W, A4_H]);
       y = A4_H - 40;
+      y = drawTableHeader(page, y);
     }
   };
 
@@ -353,10 +365,11 @@ export function buildNocFileName(data: { clientName: string; projectName: string
       .replace(/[\\/:*?"<>|]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  // Reference files drop the "M/S" / "M/s." prefix: "NOC PROSCAPE ARABIAN RANCHES 02-09-2026.pdf"
+  // Reference files drop the "M/S" / "M/s." prefix.
+  // Standard: "NOC - CLIENT - PROJECT - DD-MM-YYYY.pdf"
   const clientForFile = clean(data.clientName).replace(/^M\s*\/?\s*S\.?\s+/i, '');
   const parts = ['NOC', clientForFile, clean(data.projectName), data.nocDate].filter(Boolean);
-  return parts.join(' ').replace(/\.+$/, '') + '.pdf';
+  return parts.join(' - ').replace(/\.+$/, '') + '.pdf';
 }
 
 /** YYYY-MM month key from a DD-MM-YYYY date string (falls back to today). */

@@ -39,6 +39,7 @@ import {
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
 import { SearchableCompanySelect, SearchableTradeSelect } from '@/components/employees/searchable-selects';
+import { EmployeeDocumentsPanel } from '@/components/documents/employee-documents-panel';
 import jsPDF from 'jspdf';
 
 // ─── Constants ───────────────────────────────────────────────────────────
@@ -1173,6 +1174,11 @@ export function EmployeeDetailPage() {
           </div>
         </SectionCard>
       </div>
+
+      {/* ─── Documents (passport / ID / visa / other) ─── */}
+      <SectionCard title="Documents" icon={FileText}>
+        <EmployeeDocumentsPanel employeeId={employee.id} employeeName={employee.fullName} compact />
+      </SectionCard>
 
       {/* ─── Meta Info ─── */}
       <Card className="bg-slate-800/30 border-slate-700/30">

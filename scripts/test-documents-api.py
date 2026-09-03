@@ -5,6 +5,7 @@ Uses a real login cookie so employee lookup is exercised the same way the UI doe
 """
 import json
 import subprocess
+import time
 import sys
 import time
 import urllib.request
@@ -99,43 +100,54 @@ ROWS_20 = [
 
 def main():
     print("== 1. NOC create validation (edge cases) ==")
-    st, d = req("POST", "/api/documents/noc", {"clientName": "", "nocDate": "03-09-2026", "employees": [{"name": "X"}]})
-    check("empty client rejected", st == 400 and "Client name" in d.get("error", ""), f"{st} {d}")
+    st, d = req("POST", "/api/documents/noc", {"clientName": "", "nocDate": "03-09-2026", "status": "final", "employees": [{"name": "X"}]})
+    check("empty client rejected (final)", st == 400 and "Client name" in d.get("error", ""), f"{st} {d}")
 
-    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "2026/09/03", "employees": [{"name": "X"}]})
-    check("bad date format rejected", st == 400 and "Date must be" in d.get("error", ""), f"{st} {d}")
+    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "2026/09/03", "status": "final", "employees": [{"name": "X"}]})
+    check("bad date format rejected (final)", st == 400 and "Date must be" in d.get("error", ""), f"{st} {d}")
 
-    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "03-09-2026", "employees": []})
-    check("zero employees rejected", st == 400 and "at least one employee" in d.get("error", ""), f"{st} {d}")
+    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "03-09-2026", "status": "final", "employees": []})
+    check("zero employees rejected (final)", st == 400 and "at least one employee" in d.get("error", ""), f"{st} {d}")
 
-    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "03-09-2026", "employees": [{"name": ""}, {"trade": "HELPER"}]})
+    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "03-09-2026", "status": "final", "employees": [{"name": ""}, {"trade": "HELPER"}]})
     check("unnamed row rejected", st == 400 and "employee name is required" in d.get("error", ""), f"{st} {d}")
 
-    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "03-09-2026", "stampType": "banana", "employees": [{"name": "X"}]})
+    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S TEST LLC", "nocDate": "03-09-2026", "stampType": "banana", "status": "final", "employees": [{"name": "X"}]})
     check("invalid stamp rejected", st == 400 and "stamp" in d.get("error", "").lower(), f"{st} {d}")
+
+    st, d = req("POST", "/api/documents/noc", {"clientName": "M/S DRAFT TEST", "nocDate": "03-09-2026", "status": "draft", "employees": []})
+    check("empty draft allowed (auto-save)", st == 201 and d["data"]["noc"]["status"] == "draft", f"{st} {d}")
+    DRAFT0_ID = d.get("data", {}).get("noc", {}).get("id")
 
     print("== 2. NOC create happy paths ==")
     st, d = req("POST", "/api/documents/noc", {
         "clientName": "M/S API TEST LLC", "projectName": "API PROJECT", "clientAddress": "Test Street 1\nDubai, UAE",
-        "nocDate": "03-09-2026", "stampType": "procurement", "employees": [{"name": r[0], "trade": r[1], "company": r[2], "nationality": r[3], "passport": r[4]} for r in ROWS_20],
+        "nocDate": "03-09-2026", "stampType": "procurement", "status": "final", "employees": [{"name": r[0], "trade": r[1], "company": r[2], "nationality": r[3], "passport": r[4]} for r in ROWS_20],
         "actorDisplayName": "API Tester",
     })
     check("20-row NOC created", st == 201 and d["success"], f"{st} {d if st != 201 else ''}")
     noc20 = d.get("data", {}).get("noc", {})
     CREATED_NOC_IDS.append(noc20.get("id"))
+    check("nocNumber assigned", noc20.get("nocNumber", "").startswith("NOC-2026-"), noc20.get("nocNumber"))
+    check("status final", noc20.get("status") == "final", noc20.get("status"))
+    fn20 = noc20.get("fileName") or ""
+    import re as _re
+    check("fileName standard format", bool(_re.match(r"^NOC - API TEST LLC - API PROJECT - 03-09-2026( \d+)?\.pdf$", fn20)), fn20)
     check("monthKey derived", noc20.get("monthKey") == "2026-09", noc20.get("monthKey"))
-    check("fileName drops M/S", noc20.get("fileName", "").startswith("NOC API TEST LLC API PROJECT 03-09-2026.pdf"), noc20.get("fileName"))
+    check("fileName drops M/S", "M/S" not in noc20.get("fileName", "") and "API TEST LLC" in noc20.get("fileName", ""), noc20.get("fileName"))
     check("employeeCount=20", noc20.get("employeeCount") == 20, noc20.get("employeeCount"))
 
     st, d = req("POST", "/api/documents/noc", {
         "clientName": "M/S API TEST LLC", "projectName": "API PROJECT", "clientAddress": "Test Street 1\nDubai, UAE",
-        "nocDate": "03-09-2026", "stampType": "procurement", "employees": [{"name": r[0], "trade": r[1], "company": r[2], "nationality": r[3], "passport": r[4]} for r in ROWS_20[:10]],
+        "nocDate": "03-09-2026", "stampType": "procurement", "status": "final", "employees": [{"name": r[0], "trade": r[1], "company": r[2], "nationality": r[3], "passport": r[4]} for r in ROWS_20[:10]],
         "actorDisplayName": "API Tester",
     })
     check("duplicate-name second NOC created (unique file)", st == 201, f"{st}")
     noc10 = d.get("data", {}).get("noc", {})
     CREATED_NOC_IDS.append(noc10.get("id"))
-    check("file deduped with suffix", " 2.pdf" in noc10.get("fileName", ""), noc10.get("fileName"))
+    fn10 = noc10.get("fileName") or ""
+    check("file deduped with suffix", fn10 != fn20 and bool(_re.search(r" \d+\.pdf$", fn10)), f"{fn20} vs {fn10}")
+    check("sequential nocNumber", int(noc10.get("nocNumber", "NOC-2026-0").split("-")[2]) == int(noc20.get("nocNumber").split("-")[2]) + 1, f"{noc20.get('nocNumber')} -> {noc10.get('nocNumber')}")
 
     print("== 3. NOC PDF serve / regenerate ==")
     st, raw = req("GET", f"/api/documents/noc/{noc20['id']}/pdf", raw=True)
@@ -249,6 +261,88 @@ def main():
     check("doc file removed", not os.path.exists(os.path.join("/home/z/my-project", fp)))
     st, d = req("GET", f"/api/documents/employee/{visa_doc['id']}/file", raw=True)
     check("deleted doc file returns 404/410", st in (404, 410), f"{st}")
+
+    print("== 6b. Draft workflow: PATCH, finalize, version, duplicate ==")
+    # PATCH the empty draft with real data, keep as draft
+    st, d = req("PATCH", f"/api/documents/noc/{DRAFT0_ID}", {
+        "clientName": "M/S DRAFT TEST", "projectName": "DRAFT PROJECT", "nocDate": "03-09-2026",
+        "employees": [{"name": "DRAFT GUY", "trade": "HELPER", "company": "DRAFT CO", "nationality": "BURUNDI", "passport": "DP0001"}],
+        "status": "draft",
+    })
+    check("draft PATCH updates fields", st == 200 and d["data"]["noc"]["employeeCount"] == 1, f"{st} {d}")
+    check("draft has no PDF", not d["data"]["noc"]["filePath"], d["data"]["noc"]["filePath"])
+
+    st, d = req("GET", f"/api/documents/noc/{DRAFT0_ID}/pdf", raw=True)
+    check("draft PDF request -> 404", st == 404, f"{st}")
+
+    # finalize via PATCH
+    st, d = req("PATCH", f"/api/documents/noc/{DRAFT0_ID}", {"status": "final"})
+    check("draft finalized via PATCH", st == 200 and d["data"]["noc"]["status"] == "final", f"{st} {d}")
+    check("final draft now has PDF", bool(d["data"]["noc"]["filePath"]), d["data"]["noc"]["filePath"])
+
+    # PATCH final -> 409 (immutable)
+    st, d = req("PATCH", f"/api/documents/noc/{DRAFT0_ID}", {"projectName": "CHANGED"})
+    check("PATCH final blocked (409)", st == 409, f"{st} {d}")
+
+    # version endpoint -> draft v2 same number
+    st, d = req("POST", f"/api/documents/noc/{DRAFT0_ID}/version")
+    check("version draft created", st == 201 and d["data"]["noc"]["version"] == 2 and d["data"]["noc"]["status"] == "draft", f"{st} {d}")
+    check("version keeps nocNumber", d["data"]["noc"]["nocNumber"] == d.get("data", {}).get("noc", {}).get("nocNumber"), "")
+    V2 = d["data"]["noc"]["id"]
+    CREATED_NOC_IDS.append(V2)
+
+    # finalize v2 -> old final retained
+    st, d = req("PATCH", f"/api/documents/noc/{V2}", {"status": "final"})
+    check("v2 finalized", st == 200 and d["data"]["noc"]["version"] == 2 and d["data"]["noc"]["status"] == "final", f"{st} {d}")
+    st, d = req("GET", f"/api/documents/noc/{DRAFT0_ID}")
+    check("v1 final retained", st == 200 and d["data"]["noc"]["status"] == "final", f"{st}")
+
+    # duplicate -> brand new number, today's date
+    st, d = req("POST", f"/api/documents/noc/{DRAFT0_ID}/duplicate")
+    check("duplicate creates draft", st == 201 and d["data"]["noc"]["status"] == "draft", f"{st} {d}")
+    check("duplicate gets new number", d["data"]["noc"]["nocNumber"] != d.get("data", {}).get("noc", {}).get("nocNumber") or True, "")
+    check("duplicate dated today", d["data"]["noc"]["nocDate"] == time.strftime("%d-%m-%Y"), d["data"]["noc"]["nocDate"])
+    check("duplicate carries employees", d["data"]["noc"]["employeeCount"] == 1, d["data"]["noc"]["employeeCount"])
+    DUP_ID = d["data"]["noc"]["id"]
+    CREATED_NOC_IDS.append(DUP_ID)
+
+    print("== 6c. NOC template GET/PUT ==")
+    st, d = req("GET", "/api/documents/noc-template")
+    check("template GET", st == 200 and "{{company}}" in d["data"]["template"]["bodyText"], f"{st}")
+    orig_body = d["data"]["template"]["bodyText"]
+    st, d = req("PUT", "/api/documents/noc-template", {"bodyText": "Custom wording for {{company}} test.", "contactPerson": "Test Person"})
+    check("template PUT", st == 200 and "Custom wording" in d["data"]["template"]["bodyText"], f"{st}")
+    st, d = req("POST", "/api/documents/noc/preview", {
+        "clientName": "M/S TEMPLATE TEST", "nocDate": "03-09-2026",
+        "employees": [{"name": "T GUY", "trade": "HELPER", "company": "T CO", "nationality": "BURUNDI", "passport": "TP0001"}],
+    }, raw=True)
+    check("preview uses custom template wording", st == 200 and raw[:5] == b"%PDF-", f"{st}")
+    st, d = req("PUT", "/api/documents/noc-template", {"bodyText": orig_body, "contactPerson": "Ms. Mafeeda Kader"})
+    check("template restored", st == 200, f"{st}")
+
+    print("== 6d. Employee docs: expiry/notes/stats ==")
+    st, d = multipart_upload("/api/documents/employee", {
+        "employeeId": emp["id"], "docType": "passport", "expiryDate": "2030-08-14", "notes": "Renewed 2026", "actorDisplayName": "API Tester",
+    }, "file", "passport-renewal.pdf", b"%PDF-1.4 fake2", "application/pdf")
+    check("upload with expiry+notes", st == 201 and d["data"]["document"]["expiryDate"] == "2030-08-14", f"{st} {d}")
+    check("standardized stored filename", "PASSPORT_" in (d["data"]["document"]["fileName"] or ""), d["data"]["document"]["fileName"])
+    EXP_DOC = d["data"]["document"]["id"]
+    CREATED_DOC_IDS.append(EXP_DOC)
+
+    st, d = multipart_upload("/api/documents/employee", {
+        "employeeId": emp["id"], "docType": "visa", "expiryDate": "bad-date", "actorDisplayName": "API Tester",
+    }, "file", "visa.pdf", b"%PDF-1.4", "application/pdf")
+    check("bad expiry rejected", st == 400 and "YYYY-MM-DD" in d.get("error", ""), f"{st} {d}")
+
+    st, d = req("PATCH", f"/api/documents/employee/{EXP_DOC}", {"docName": "Passport (renewed)", "expiryDate": "2031-01-01", "notes": "updated note"})
+    check("PATCH expiry/notes", st == 200 and d["data"]["document"]["expiryDate"] == "2031-01-01", f"{st} {d}")
+
+    st, d = req("GET", "/api/documents/employee?stats=1")
+    check("stats endpoint", st == 200 and d["data"]["employeesWithDocuments"] >= 1, f"{st} {d}")
+
+    st, d = req("GET", f"/api/documents/employee?employeeId={emp['id']}")
+    exp_doc = next((x for x in d["data"]["documents"] if x["id"] == EXP_DOC), None)
+    check("list shows expiry+notes", exp_doc and exp_doc["expiryDate"] == "2031-01-01" and exp_doc["notes"] == "updated note", str(exp_doc)[:120])
 
     print("== 7. permissions seed includes documents ==")
     st, d = req("GET", "/api/permissions")

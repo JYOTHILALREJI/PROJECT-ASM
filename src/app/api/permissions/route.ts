@@ -13,6 +13,9 @@ const PERMISSION_SEEDS = [
   { name: 'Employee Hours', slug: 'employee_hours', group: 'finance' },
   { name: 'Materials Registry', slug: 'uniform_registry', group: 'workforce' },
   { name: 'Documents', slug: 'documents', group: 'workforce' },
+  { name: 'Documents — NOC', slug: 'documents_noc', group: 'documents' },
+  { name: 'Documents — Employee Documents', slug: 'documents_employee_docs', group: 'documents' },
+  { name: 'Documents — Delete', slug: 'documents_delete', group: 'documents' },
   { name: 'Leave Requests', slug: 'leave_requests', group: 'workforce' },
   { name: 'Cancellations', slug: 'cancellation_requests', group: 'workforce' },
   { name: 'Notifications', slug: 'notifications', group: 'general' },
@@ -35,6 +38,49 @@ async function ensurePermissionsSeeded() {
       update: { name: seed.name, group: seed.group },
       create: { name: seed.name, slug: seed.slug, group: seed.group },
     });
+  }
+
+    // ── One-time migration: auto-grant the Documents sub-permissions to every
+  //    admin who already has the Documents menu, so existing access keeps
+  //    working now that finer-grained checks exist. Uses a flag row
+  //    (__migration_documents_v1__) so revocations are never overridden. ──
+  try {
+    const docsMigrationFlag = await db.permission.findUnique({
+      where: { slug: '__migration_documents_v1__' },
+    });
+    if (!docsMigrationFlag) {
+      const docsPerm = await db.permission.findUnique({ where: { slug: 'documents' } });
+      if (docsPerm) {
+        const subSlugs = ['documents_noc', 'documents_employee_docs', 'documents_delete'];
+        const subPerms: Record<string, string> = {};
+        for (const slug of subSlugs) {
+          let sub = await db.permission.findUnique({ where: { slug } });
+          if (!sub) {
+            const seed = PERMISSION_SEEDS.find((s) => s.slug === slug)!;
+            sub = await db.permission.create({ data: { name: seed.name, slug: seed.slug, group: seed.group } });
+          }
+          subPerms[slug] = sub.id;
+        }
+        const docGrants = await db.adminPermission.findMany({
+          where: { permissionId: docsPerm.id, deletedAt: null },
+          select: { adminId: true },
+        });
+        for (const g of docGrants) {
+          for (const slug of subSlugs) {
+            await db.adminPermission.upsert({
+              where: { adminId_permissionId: { adminId: g.adminId, permissionId: subPerms[slug] } },
+              update: { deletedAt: null },
+              create: { adminId: g.adminId, permissionId: subPerms[slug] },
+            });
+          }
+        }
+      }
+      await db.permission.create({
+        data: { name: 'Migration: documents v1', slug: '__migration_documents_v1__', group: 'general' },
+      });
+    }
+  } catch {
+    // Migration failure should not block the API
   }
 
   // ── One-time migration: auto-grant 'uniform_registry' to existing

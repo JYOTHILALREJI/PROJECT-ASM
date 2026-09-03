@@ -22,6 +22,10 @@ export async function GET(
     if (!noc) {
       return NextResponse.json({ success: false, error: 'NOC not found' }, { status: 404 });
     }
+    // Drafts have no issued PDF — only finalized NOCs are served here.
+    if (noc.status !== 'final') {
+      return NextResponse.json({ success: false, error: 'This NOC is still a draft — preview it in the builder instead.' }, { status: 404 });
+    }
 
     let bytes: Buffer | null = null;
 
