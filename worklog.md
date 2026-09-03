@@ -575,3 +575,24 @@ Work Log:
 Stage Summary:
 - Camp occupancy management works again end to end (the search never received results due to an API response-shape mismatch).
 - The stamp system now follows the user's exact model: the issued PDF on disk is ALWAYS the unstamped original; stamps are a pure per-NOC decision that can be toggled or switched (multiple stamps per company) instantly and without refresh; switching leaves NO old stamped copies; and every stamped download persists a fresh audit snapshot "... (stamped).pdf" while the original stays untouched. The animation still lands on the exact renderer position, and corrupt stamp images fail loudly at the moments that matter (apply, download, package).
+
+---
+Task ID: 14
+Agent: main (Z.ai Code)
+Task: Camps -> View Camp — replace the employee card grid with a proper table: paginated, searchable, trade-based sorting, inline-editable bed space number per employee, name + ID stacked in the same column, and an always-visible Remove action. Push.
+
+Work Log:
+- Schema: Employee +bedSpaceNumber (bed number inside the assigned camp); db:push honoured, dev server restarted (readonly-inode rule).
+- APIs: GET /api/camps/[id] now returns bedSpaceNumber per employee. NEW PATCH /api/camps/[id]/assign-employee sets/updates/clears a bed space (trim + 50-char cap, employee-must-be-in-this-camp guard, camp existence 404). POST assign now RESETS bedSpaceNumber (a fresh assignment never inherits a bed from a previous camp — incl. confirmed transfers) and DELETE (remove from camp) also clears it.
+- camp-detail-page.tsx rebuilt employee section: dark <Table> with # / Employee / Trade / Current Site / Bed Space / Actions columns; name + employeeId stacked in ONE column (2 rows) with avatar, TL/Sup badges; row numbers continue across pages.
+- Trade header is a 3-state sort cycle (none -> asc -> desc) with ArrowUp/Down/UpDown indicator; employees without a trade always sort last, ties broken by name.
+- Search box filters by name / employeeId / trade / currentSite / bedSpaceNumber (client-side, resets page); "No employees match your search" empty state with Clear search; "Showing X–Y of Z (filtered from N)".
+- Pagination: 10/20/50 per-page Select, First/Prev/Next/Last buttons, "Page X of Y", page-edge correction when the filtered list shrinks.
+- BedSpaceCell: click to edit, Enter or blur commits, Escape cancels (skipBlur guard vs double-fire), draft re-initialized at each edit start (no setState-in-effect — lint clean), optimistic update + server reconcile + revert on failure, saving spinner in the cell.
+- Remove: always-visible red Remove button per row (was hover-only X on cards), optimistic row removal + stats adjustment + silent refetch (no loading flash), revert on failure.
+- Tests: scripts/test-camp-bedspace.py — 31 checks ALL PASS (set/trim, update, clear via ""/null, missing employeeId/non-string/51-char/unknown-employee/unknown-camp errors, isolation, remove clears bed, transfer resets bed, fresh assign starts null, cleanup). QA artifacts (camp + employees) hard-purged from DB.
+- Browser E2E (agent-browser): table renders with all columns; bed edit B-12 via Enter (toast + DB) and Escape-cancel path; clear via keyboard -> "Not set" + DB null; 12 QA employees -> pagination (Page 1 of 2, Showing 11-14, last page), Trade asc (Carpenter->...->Mason) / desc / none cycle verified, search "Electrician" (3 rows, filtered-from note) / "John" (1 row) / no-match empty state; UI Remove -> row gone, count 14->13, DB campId+bed null. All QA data removed afterwards; Yousuf Camp back to baseline (2 employees, occupancy 2/798/800).
+- eslint clean (fixed react-hooks/set-state-in-effect by event-driven draft init); tsc 54 errors = exact pre-existing baseline, zero new.
+
+Stage Summary:
+- View Camp now manages residents through a real data table: instantly searchable, trade-sortable, paginated, with per-employee editable bed space numbers that never leak across camps (assign/transfer/remove all reset them), and one-click removal — all with optimistic UI that reconciles with the server.

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   ArrowLeft,
   Tent,
@@ -13,18 +13,35 @@ import {
   ShieldCheck,
   Pencil,
   Trash2,
-  User,
-  Building2,
-  Phone,
   Search,
-  X,
   AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -65,6 +82,7 @@ interface CampEmployee {
   status: string;
   phone: string | null;
   photo: string | null;
+  bedSpaceNumber: string | null;
 }
 
 interface SearchEmployee {
@@ -77,8 +95,104 @@ interface SearchEmployee {
   campId: string | null;
 }
 
+type TradeSort = 'none' | 'asc' | 'desc';
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
 function getInitials(name: string): string {
   return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+}
+
+// ---------------------------------------------------------------------------
+// BedSpaceCell — inline-editable bed space number.
+// Enter or blur saves, Escape cancels. Saving state is owned by the parent
+// (optimistic update + revert on failure happens there).
+// ---------------------------------------------------------------------------
+function BedSpaceCell({
+  emp,
+  saving,
+  onSave,
+}: {
+  emp: CampEmployee;
+  saving: boolean;
+  onSave: (employeeId: string, value: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(emp.bedSpaceNumber ?? '');
+  const skipBlur = useRef(false);
+
+  // draft is (re-)initialized on every edit start — no sync effect needed
+  const startEditing = () => {
+    setDraft(emp.bedSpaceNumber ?? '');
+    skipBlur.current = false;
+    setEditing(true);
+  };
+
+  const commit = async () => {
+    const current = emp.bedSpaceNumber ?? '';
+    if (draft.trim() === current) {
+      setEditing(false);
+      return;
+    }
+    await onSave(emp.id, draft);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        maxLength={50}
+        disabled={saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            skipBlur.current = true;
+            setEditing(false);
+          }
+        }}
+        onBlur={() => {
+          if (skipBlur.current) {
+            skipBlur.current = false;
+            return;
+          }
+          void commit();
+        }}
+        className="h-7 w-24 bg-slate-900 border-blue-500/50 text-white text-xs font-mono"
+        placeholder="Bed #"
+        title="Enter to save — Esc to cancel"
+        aria-label={`Bed space number for ${emp.fullName}`}
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={startEditing}
+      disabled={saving}
+      className="group/bed inline-flex items-center gap-1.5 rounded-md px-2 py-1 -ml-2 hover:bg-slate-700/40 transition-colors disabled:opacity-50"
+      title="Click to edit bed space number"
+      aria-label={`Edit bed space number for ${emp.fullName}`}
+    >
+      {saving ? (
+        <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+      ) : (
+        <>
+          {emp.bedSpaceNumber ? (
+            <span className="text-xs font-mono text-slate-200">{emp.bedSpaceNumber}</span>
+          ) : (
+            <span className="text-xs text-slate-600 italic">Not set</span>
+          )}
+          <Pencil className="h-3 w-3 text-slate-500 opacity-0 group-hover/bed:opacity-100 transition-opacity" />
+        </>
+      )}
+    </button>
+  );
 }
 
 export function CampDetailPage() {
@@ -90,6 +204,14 @@ export function CampDetailPage() {
   const [employees, setEmployees] = useState<CampEmployee[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Employee table state
+  const [tableSearch, setTableSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [tradeSort, setTradeSort] = useState<TradeSort>('none');
+  const [bedSavingId, setBedSavingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
   // Add employee dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,20 +220,22 @@ export function CampDetailPage() {
   const [assigning, setAssigning] = useState<string | null>(null);
   const [confirmTransfer, setConfirmTransfer] = useState<SearchEmployee | null>(null);
 
-  const fetchCampData = useCallback(async () => {
+  const fetchCampData = useCallback(async (silent = false) => {
     if (!campId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const res = await fetch(`/api/camps/${campId}`);
       const data = await res.json();
       if (data.success) {
         setCamp(data.data.camp);
         setEmployees(data.data.employees);
-      } else {
+      } else if (!silent) {
         toast({ title: 'Error', description: data.error || 'Failed to load camp', variant: 'destructive' });
       }
     } catch {
-      toast({ title: 'Error', description: 'Failed to load camp', variant: 'destructive' });
+      if (!silent) {
+        toast({ title: 'Error', description: 'Failed to load camp', variant: 'destructive' });
+      }
     } finally {
       setLoading(false);
     }
@@ -119,7 +243,7 @@ export function CampDetailPage() {
 
   useEffect(() => {
     // deferred so the effect body itself never sets state synchronously
-    const t = setTimeout(fetchCampData, 0);
+    const t = setTimeout(() => fetchCampData(), 0);
     return () => clearTimeout(t);
   }, [fetchCampData]);
 
@@ -177,19 +301,82 @@ export function CampDetailPage() {
   };
 
   const handleRemoveEmployee = async (employeeId: string, employeeName: string) => {
+    setRemovingId(employeeId);
+    // optimistic removal — revert on failure
+    const prevEmployees = employees;
+    const prevCamp = camp;
+    setEmployees((list) => list.filter((e) => e.id !== employeeId));
+    if (camp) {
+      const occupied = Math.max(0, camp.occupiedBedSpaces - 1);
+      setCamp({
+        ...camp,
+        occupiedBedSpaces: occupied,
+        availableBedSpaces: Math.max(0, camp.totalBedSpaces - occupied),
+      });
+    }
     try {
       const res = await fetch(`/api/camps/${campId}/assign-employee?employeeId=${employeeId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) {
-        toast({ title: 'Employee Removed', description: `${employeeName} has been removed from ${camp?.name}.` });
-        fetchCampData();
-      } else {
-        toast({ title: 'Error', description: data.error || 'Failed to remove employee', variant: 'destructive' });
-      }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to remove employee', variant: 'destructive' });
+      if (!data.success) throw new Error(data.error || 'Failed to remove employee');
+      toast({ title: 'Employee Removed', description: `${employeeName} has been removed from ${camp?.name}.` });
+      // silent reconcile with the server (no loading flash)
+      fetchCampData(true);
+    } catch (err) {
+      setEmployees(prevEmployees);
+      setCamp(prevCamp);
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to remove employee',
+        variant: 'destructive',
+      });
+    } finally {
+      setRemovingId(null);
     }
   };
+
+  const handleSaveBedSpace = useCallback(async (employeeId: string, value: string) => {
+    const trimmed = value.trim();
+    const target = employees.find((e) => e.id === employeeId);
+    const prev = target?.bedSpaceNumber ?? null;
+    if ((prev ?? '') === trimmed) return;
+
+    setBedSavingId(employeeId);
+    // optimistic update
+    setEmployees((list) =>
+      list.map((e) => (e.id === employeeId ? { ...e, bedSpaceNumber: trimmed || null } : e)),
+    );
+    try {
+      const res = await fetch(`/api/camps/${campId}/assign-employee`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeId, bedSpaceNumber: trimmed || null }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update bed space');
+      const serverValue: string | null = data.data?.bedSpaceNumber ?? null;
+      setEmployees((list) =>
+        list.map((e) => (e.id === employeeId ? { ...e, bedSpaceNumber: serverValue } : e)),
+      );
+      toast({
+        title: 'Bed Space Updated',
+        description: serverValue
+          ? `${target?.fullName ?? 'Employee'} — bed space set to "${serverValue}".`
+          : `${target?.fullName ?? 'Employee'} — bed space cleared.`,
+      });
+    } catch (err) {
+      // revert
+      setEmployees((list) =>
+        list.map((e) => (e.id === employeeId ? { ...e, bedSpaceNumber: prev } : e)),
+      );
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to update bed space',
+        variant: 'destructive',
+      });
+    } finally {
+      setBedSavingId(null);
+    }
+  }, [campId, employees, toast]);
 
   const viewEmployeeDetail = (employeeId: string) => {
     // Store the camp ID in localStorage so the back button returns to the camp
@@ -204,6 +391,69 @@ export function CampDetailPage() {
     setSelectedEmployeeId(null);
     setCurrentView('camps');
   };
+
+  // ---------------------------------------------------------------------------
+  // Table derived data: search filter → trade sort → pagination
+  // ---------------------------------------------------------------------------
+  const filteredEmployees = useMemo(() => {
+    const q = tableSearch.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter((emp) => {
+      const haystack = [
+        emp.fullName,
+        emp.employeeId,
+        emp.trade,
+        emp.currentSite,
+        emp.bedSpaceNumber,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [employees, tableSearch]);
+
+  const sortedEmployees = useMemo(() => {
+    if (tradeSort === 'none') return filteredEmployees;
+    const arr = [...filteredEmployees];
+    arr.sort((a, b) => {
+      const ta = (a.trade ?? '').trim().toLowerCase();
+      const tb = (b.trade ?? '').trim().toLowerCase();
+      // employees without a trade always sort last
+      if (!ta && tb) return 1;
+      if (ta && !tb) return -1;
+      if (!ta && !tb) return a.fullName.localeCompare(b.fullName);
+      const cmp = ta.localeCompare(tb) || a.fullName.localeCompare(b.fullName);
+      return tradeSort === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [filteredEmployees, tradeSort]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedEmployees.length / pageSize));
+
+  // page-edge correction when the filtered list shrinks
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const pageRows = useMemo(
+    () => sortedEmployees.slice((page - 1) * pageSize, page * pageSize),
+    [sortedEmployees, page, pageSize],
+  );
+
+  const cycleTradeSort = () => {
+    setPage(1);
+    setTradeSort((s) => (s === 'none' ? 'asc' : s === 'asc' ? 'desc' : 'none'));
+  };
+
+  const SortIcon = () =>
+    tradeSort === 'asc' ? (
+      <ArrowUp className="h-3 w-3 text-blue-400" />
+    ) : tradeSort === 'desc' ? (
+      <ArrowDown className="h-3 w-3 text-blue-400" />
+    ) : (
+      <ArrowUpDown className="h-3 w-3 text-slate-500" />
+    );
 
   // Pie chart data
   const pieData = useMemo(() => {
@@ -240,6 +490,9 @@ export function CampDetailPage() {
   const occupancyPct = camp.totalBedSpaces > 0
     ? Math.round((camp.occupiedBedSpaces / camp.totalBedSpaces) * 100)
     : 0;
+
+  const rangeStart = sortedEmployees.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, sortedEmployees.length);
 
   return (
     <div className="space-y-4 pb-8">
@@ -383,14 +636,27 @@ export function CampDetailPage() {
         </Card>
       </div>
 
-      {/* Employee List */}
+      {/* Employee Table */}
       <Card className="bg-slate-800/50 border-slate-700/50">
         <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
             <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
               <Users className="h-4 w-4 text-slate-400" />
               Employees in this Camp ({employees.length})
             </h3>
+            {/* Search */}
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+              <Input
+                value={tableSearch}
+                onChange={(e) => {
+                  setTableSearch(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-900 border-slate-600 text-white h-8 pl-9 text-xs"
+                placeholder="Search name, ID, trade, site or bed..."
+              />
+            </div>
           </div>
 
           {employees.length === 0 ? (
@@ -407,76 +673,204 @@ export function CampDetailPage() {
                 Add Employee
               </Button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {employees.map((emp) => (
-                <div
-                  key={emp.id}
-                  className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50 hover:border-slate-600 transition-colors group"
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Avatar */}
-                    <button
-                      onClick={() => viewEmployeeDetail(emp.id)}
-                      className="h-10 w-10 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0 border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer"
-                    >
-                      {emp.photo ? (
-                        <img src={emp.photo} alt={emp.fullName} className="h-full w-full rounded-lg object-cover" />
-                      ) : (
-                        <span className="text-xs font-bold text-blue-400">{getInitials(emp.fullName)}</span>
-                      )}
-                    </button>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <button
-                        onClick={() => viewEmployeeDetail(emp.id)}
-                        className="text-sm font-medium text-white hover:text-blue-400 transition-colors text-left truncate block w-full"
-                      >
-                        {emp.fullName}
-                      </button>
-                      <p className="text-[10px] text-slate-500 font-mono">{emp.employeeId}</p>
-                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                        {emp.isTeamLeader && (
-                          <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/25 text-[9px] px-1.5 py-0">
-                            <Crown className="h-2.5 w-2.5 mr-0.5" />
-                            TL
-                          </Badge>
-                        )}
-                        {emp.isSupervisor && (
-                          <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0">
-                            <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />
-                            Sup
-                          </Badge>
-                        )}
-                        {emp.trade && (
-                          <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/25 text-[9px] px-1.5 py-0">
-                            {emp.trade}
-                          </Badge>
-                        )}
-                      </div>
-                      {emp.currentSite && (
-                        <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-0.5">
-                          <Building2 className="h-2.5 w-2.5" />
-                          {emp.currentSite}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Remove button */}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleRemoveEmployee(emp.id, emp.fullName)}
-                      className="h-7 w-7 p-0 text-slate-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Remove from camp"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+          ) : filteredEmployees.length === 0 ? (
+            <div className="text-center py-12">
+              <Search className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+              <p className="text-slate-400 text-sm">No employees match your search</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3 border-slate-600 text-slate-300 hover:bg-slate-700"
+                onClick={() => setTableSearch('')}
+              >
+                Clear search
+              </Button>
             </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-lg border border-slate-700/50">
+                <Table className="min-w-[760px]">
+                  <TableHeader>
+                    <TableRow className="border-slate-700 hover:bg-transparent bg-slate-900/60">
+                      <TableHead className="w-10 text-slate-400 font-semibold text-xs">#</TableHead>
+                      <TableHead className="text-slate-400 font-semibold text-xs">Employee</TableHead>
+                      <TableHead className="w-36">
+                        <button
+                          onClick={cycleTradeSort}
+                          className="inline-flex items-center gap-1.5 text-slate-400 font-semibold text-xs hover:text-white transition-colors"
+                          title="Sort by trade"
+                        >
+                          Trade
+                          <SortIcon />
+                        </button>
+                      </TableHead>
+                      <TableHead className="text-slate-400 font-semibold text-xs">Current Site</TableHead>
+                      <TableHead className="w-32 text-slate-400 font-semibold text-xs">Bed Space</TableHead>
+                      <TableHead className="w-24 text-right text-slate-400 font-semibold text-xs">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map((emp, idx) => (
+                      <TableRow key={emp.id} className="border-slate-800 hover:bg-slate-900/40">
+                        <TableCell className="text-xs text-slate-500">
+                          {(page - 1) * pageSize + idx + 1}
+                        </TableCell>
+                        {/* Name + ID in the same column, two rows */}
+                        <TableCell>
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <button
+                              onClick={() => viewEmployeeDetail(emp.id)}
+                              className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"
+                              title="View employee"
+                            >
+                              {emp.photo ? (
+                                <img src={emp.photo} alt={emp.fullName} className="h-full w-full rounded-lg object-cover" />
+                              ) : (
+                                <span className="text-[10px] font-bold text-blue-400">{getInitials(emp.fullName)}</span>
+                              )}
+                            </button>
+                            <div className="flex flex-col min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => viewEmployeeDetail(emp.id)}
+                                  className="text-sm font-medium text-white hover:text-blue-400 transition-colors truncate max-w-[190px] text-left"
+                                  title="View employee"
+                                >
+                                  {emp.fullName}
+                                </button>
+                                {emp.isTeamLeader && (
+                                  <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/25 text-[9px] px-1.5 py-0 flex-shrink-0">
+                                    <Crown className="h-2.5 w-2.5 mr-0.5" />
+                                    TL
+                                  </Badge>
+                                )}
+                                {emp.isSupervisor && (
+                                  <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25 text-[9px] px-1.5 py-0 flex-shrink-0">
+                                    <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />
+                                    Sup
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-500 font-mono">{emp.employeeId}</span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {emp.trade ? (
+                            <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/25 text-[10px]">
+                              {emp.trade}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-slate-600">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-400">
+                          {emp.currentSite ?? <span className="text-slate-600">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          <BedSpaceCell
+                            emp={emp}
+                            saving={bedSavingId === emp.id}
+                            onSave={handleSaveBedSpace}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRemoveEmployee(emp.id, emp.fullName)}
+                            disabled={removingId === emp.id}
+                            className="h-7 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2"
+                            title="Remove from camp"
+                          >
+                            {removingId === emp.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                            Remove
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              <div className="flex items-center justify-between gap-3 flex-wrap mt-4">
+                <p className="text-[11px] text-slate-500">
+                  Showing <span className="text-slate-300 font-medium">{rangeStart}–{rangeEnd}</span> of{' '}
+                  <span className="text-slate-300 font-medium">{sortedEmployees.length}</span> employee(s)
+                  {tableSearch.trim() && employees.length !== sortedEmployees.length && (
+                    <span className="text-slate-500"> (filtered from {employees.length})</span>
+                  )}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    disabled={page <= 1}
+                    onClick={() => setPage(1)}
+                    title="First page"
+                  >
+                    <ChevronsLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="text-[11px] text-slate-300 px-2">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    title="Next page"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage(totalPages)}
+                    title="Last page"
+                  >
+                    <ChevronsRight className="h-3.5 w-3.5" />
+                  </Button>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(parseInt(v, 10));
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-[86px] text-[11px] bg-slate-900 border-slate-700 text-slate-200">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
+                      {PAGE_SIZE_OPTIONS.map((s) => (
+                        <SelectItem key={s} value={String(s)}>
+                          {s} / page
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -36,6 +36,7 @@ export async function GET(
             status: true,
             phone: true,
             photo: true,
+            bedSpaceNumber: true,
           },
           orderBy: { fullName: 'asc' },
         },

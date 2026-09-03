@@ -95,6 +95,7 @@ model Employee {
   isTeko           Boolean  @default(false) // If true, this employee is a "teko" (using another employee's ID)
   branchId         String?  // FK to Branch — which branch this employee belongs to
   campId           String?  // FK to Camp — which camp the employee lives in
+  bedSpaceNumber   String?  // Bed space number inside the assigned camp (editable from the camp detail table)
   // Custom current total working hours — manually settable at ANY point in time.
   // Represents the employee's running cumulative total hours and can be overridden
   // by an admin whenever needed (e.g. to correct historical data).

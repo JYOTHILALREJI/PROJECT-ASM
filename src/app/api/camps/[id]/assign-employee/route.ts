@@ -6,12 +6,27 @@ export const dynamic = 'force-dynamic';
 // ---------------------------------------------------------------------------
 // /api/camps/[id]/assign-employee
 // ---------------------------------------------------------------------------
-// POST — assign an employee to this camp.
-//        If the employee is already in another camp, the caller should set
-//        `confirmTransfer: true` to confirm the transfer.
-//        Returns a 409 with `needsConfirmation: true` if the employee is
-//        in another camp and confirmTransfer is not set.
+// POST   — assign an employee to this camp.
+//          If the employee is already in another camp, the caller should set
+//          `confirmTransfer: true` to confirm the transfer.
+//          Returns a 409 with `needsConfirmation: true` if the employee is
+//          in another camp and confirmTransfer is not set.
+// PATCH  — update the bed space number of an employee in this camp.
+// DELETE — remove an employee from this camp (unset campId)
 // ---------------------------------------------------------------------------
+
+const MAX_BED_SPACE_LENGTH = 50;
+
+function normalizeBedSpace(value: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === null || value === undefined || value === '') return { ok: true, value: null };
+  if (typeof value !== 'string') return { ok: false, error: 'bedSpaceNumber must be a string' };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, value: null };
+  if (trimmed.length > MAX_BED_SPACE_LENGTH) {
+    return { ok: false, error: `Bed space number must be ${MAX_BED_SPACE_LENGTH} characters or fewer` };
+  }
+  return { ok: true, value: trimmed };
+}
 
 export async function POST(
   request: NextRequest,
@@ -84,10 +99,11 @@ export async function POST(
       );
     }
 
-    // Assign the employee to the camp
+    // Assign the employee to the camp (a fresh assignment never inherits a
+    // bed space number from a previous camp — beds belong to a specific camp)
     await db.employee.update({
       where: { id: employeeId },
-      data: { campId },
+      data: { campId, bedSpaceNumber: null },
     });
 
     return NextResponse.json({
@@ -102,7 +118,77 @@ export async function POST(
 }
 
 // ---------------------------------------------------------------------------
-// DELETE — remove an employee from this camp (unset campId)
+// PATCH — update the bed space number of an employee in this camp.
+//         Body: { employeeId, bedSpaceNumber } (null / "" clears it)
+// ---------------------------------------------------------------------------
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: campId } = await params;
+    const body = await request.json();
+    const { employeeId } = body;
+
+    if (!employeeId || typeof employeeId !== 'string') {
+      return NextResponse.json(
+        { success: false, error: 'employeeId is required' },
+        { status: 400 },
+      );
+    }
+
+    const bed = normalizeBedSpace(body.bedSpaceNumber);
+    if (!bed.ok) {
+      return NextResponse.json(
+        { success: false, error: bed.error },
+        { status: 400 },
+      );
+    }
+
+    const camp = await db.camp.findUnique({ where: { id: campId } });
+    if (!camp || camp.deletedAt) {
+      return NextResponse.json(
+        { success: false, error: 'Camp not found' },
+        { status: 404 },
+      );
+    }
+
+    const employee = await db.employee.findUnique({
+      where: { id: employeeId },
+      select: { id: true, campId: true, fullName: true },
+    });
+    if (!employee) {
+      return NextResponse.json(
+        { success: false, error: 'Employee not found' },
+        { status: 404 },
+      );
+    }
+    if (employee.campId !== campId) {
+      return NextResponse.json(
+        { success: false, error: 'Employee is not in this camp' },
+        { status: 400 },
+      );
+    }
+
+    const updated = await db.employee.update({
+      where: { id: employeeId },
+      data: { bedSpaceNumber: bed.value },
+      select: { id: true, bedSpaceNumber: true },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { id: updated.id, bedSpaceNumber: updated.bedSpaceNumber },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[camps bed-space] Error:', message);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DELETE — remove an employee from this camp (unset campId + bed space)
 // ---------------------------------------------------------------------------
 export async function DELETE(
   request: NextRequest,
@@ -139,7 +225,7 @@ export async function DELETE(
 
     await db.employee.update({
       where: { id: employeeId },
-      data: { campId: null },
+      data: { campId: null, bedSpaceNumber: null },
     });
 
     return NextResponse.json({ success: true, data: { removed: true } });
