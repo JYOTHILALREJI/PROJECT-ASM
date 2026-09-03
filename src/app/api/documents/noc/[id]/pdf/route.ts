@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { generateNocPdf, type NocEmployeeRow } from '@/lib/noc-pdf';
+import { resolveNocAssets } from '@/lib/noc-pdf-server';
 import { ensureStorageDir, resolveStoragePath, slugify, uniqueFilePath } from '@/lib/document-storage';
 import fs from 'fs';
 import path from 'path';
@@ -39,16 +40,30 @@ export async function GET(
     if (!bytes) {
       // Regenerate from the snapshot and re-persist so future downloads are fast
       const employees = JSON.parse(noc.employeesJson || '[]') as NocEmployeeRow[];
+      const assets = await resolveNocAssets({
+        companyId: noc.companyId,
+        stampId: noc.stampId,
+        stampEnabled: noc.stampEnabled,
+        stampType: noc.stampType,
+        contactPerson: noc.contactPerson || null,
+        contactPhone: noc.contactPhone || null,
+        contactEmail: noc.contactEmail || null,
+      });
       const pdfBytes = await generateNocPdf({
         clientName: noc.clientName,
         projectName: noc.projectName,
         clientAddress: noc.clientAddress,
         nocDate: noc.nocDate,
-        contactPerson: noc.contactPerson,
-        contactPhone: noc.contactPhone,
-        contactEmail: noc.contactEmail,
+        contactPerson: assets.contactPerson,
+        contactPhone: assets.contactPhone,
+        contactEmail: assets.contactEmail,
         stampType: noc.stampType,
+        stampEnabled: assets.stampEnabled,
+        stampImagePath: assets.stampImagePath,
+        letterheadPath: assets.letterheadPath,
         employees,
+        bodyText: assets.bodyText,
+        companyName: assets.companyName,
       });
       bytes = Buffer.from(pdfBytes);
 

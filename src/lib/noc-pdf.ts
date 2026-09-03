@@ -26,7 +26,13 @@ export interface NocData {
   contactPerson: string;
   contactPhone: string;
   contactEmail: string;
-  stampType: string; // "procurement" | "signature" | "none"
+  stampType: string; // legacy: "procurement" | "signature" | "none"
+  /** Stamps are opt-in per NOC: when false NO stamp is drawn, whatever the legacy type. */
+  stampEnabled?: boolean;
+  /** Absolute path of the chosen stamp image (Stamp row). Overrides the legacy type. */
+  stampImagePath?: string;
+  /** Absolute path of a per-company letterhead image. Falls back to the ASM letterhead. */
+  letterheadPath?: string;
   employees: NocEmployeeRow[];
   /** Admin-configurable legal wording; {{company}} is rendered bold. */
   bodyText?: string;
@@ -154,13 +160,28 @@ export async function generateNocPdf(data: NocData): Promise<Uint8Array> {
   const font = await pdf.embedFont(StandardFonts.TimesRoman);
   const fontBold = await pdf.embedFont(StandardFonts.TimesRomanBold);
 
-  const letterhead = await pdf.embedPng(fs.readFileSync(assetPath('letterhead.png')));
-  const stampImg =
-    data.stampType === 'signature'
-      ? await pdf.embedPng(fs.readFileSync(assetPath('stamp-signature.png')))
-      : data.stampType === 'none'
-        ? null
-        : await pdf.embedPng(fs.readFileSync(assetPath('stamp-procurement.png')));
+  const letterheadSrc =
+    data.letterheadPath && fs.existsSync(data.letterheadPath)
+      ? data.letterheadPath
+      : assetPath('letterhead.png');
+  const letterhead = await pdf.embedPng(fs.readFileSync(letterheadSrc));
+
+  // Stamp resolution: explicit stampEnabled=false never draws a stamp; when
+  // enabled and a specific stamp image was resolved it wins; otherwise fall
+  // back to the legacy procurement/signature built-ins for old rows.
+  let stampImg: PDFImage | null = null;
+  if (data.stampEnabled !== false) {
+    if (data.stampImagePath && fs.existsSync(data.stampImagePath)) {
+      stampImg = await pdf.embedPng(fs.readFileSync(data.stampImagePath));
+    } else {
+      stampImg =
+        data.stampType === 'signature'
+          ? await pdf.embedPng(fs.readFileSync(assetPath('stamp-signature.png')))
+          : data.stampType === 'none'
+            ? null
+            : await pdf.embedPng(fs.readFileSync(assetPath('stamp-procurement.png')));
+    }
+  }
 
   // y where page-1 content starts, right under the letterhead block
   const page1ContentTop = A4_H - LETTERHEAD_H - 22;

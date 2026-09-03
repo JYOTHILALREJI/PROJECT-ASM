@@ -181,7 +181,10 @@ def main():
     st, d = req("GET", "/api/documents/noc")
     ids = [n["id"] for n in d["data"]["nocs"]]
     check("list contains both NOCs", noc20["id"] in ids and noc10["id"] in ids)
-    check("list parses employees", isinstance(d["data"]["nocs"][0].get("employees"), list))
+    # Task 9: the list is PAGINATED and returns LIGHT rows (employees live in the per-id detail)
+    check("list is paginated light rows", "totalPages" in d["data"] and all("employees" not in n for n in d["data"]["nocs"]))
+    st, d = req("GET", f"/api/documents/noc/{noc20['id']}")
+    check("detail parses employees", isinstance(d["data"]["noc"].get("employees"), list))
 
     st, d = req("DELETE", f"/api/documents/noc/{noc10['id']}")
     check("delete NOC ok", st == 200 and d["success"], f"{st} {d}")

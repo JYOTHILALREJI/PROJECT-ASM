@@ -27,6 +27,7 @@ const viewTitles: Record<string, string> = {
   advance: 'Advance Management',
   consolidated_salary: 'Consolidated Salary',
   documents: 'Documents',
+  noc_view: 'View NOC',
   employee_hours_ledger: 'Employee Hours Ledger',
   employee_detail: 'Employee Detail',
   employee_add: 'Add Employee',

@@ -28,6 +28,7 @@ import { AccountsPage } from '@/components/accounts/accounts-page';
 import { ConsolidatedSalaryPage } from '@/components/consolidated-salary/consolidated-salary-page';
 import { AdvancePage } from '@/components/advance/advance-page';
 import { DocumentsPage } from '@/components/documents/documents-page';
+import { NocViewPage } from '@/components/documents/noc-view-page';
 import { EmployeeHoursLedger } from '@/components/employees/employee-hours-ledger';
 import { EmployeeHoursDirectory } from '@/components/employees/employee-hours-directory';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -86,10 +87,10 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs', 'documents'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs', 'documents', 'noc_view'];
 
 function MainLayout() {
-  const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId, sidebarOpen, setSidebarOpen } = useAppStore();
+  const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId, selectedNocId, setSelectedNocId, sidebarOpen, setSidebarOpen } = useAppStore();
   const { user } = useAuthStore();
   const isMobile = useIsMobile();
   const [adminPermissions, setAdminPermissions] = useState<string[]>([]);
@@ -154,6 +155,7 @@ function MainLayout() {
     employee_hours_ledger: 'employee_hours', // View ID ≠ permission slug
     advance: 'accounts', // Advance is a sub-feature of Accounts
     all_logs: 'admins', // All Logs is a sub-feature of Admin Management
+    noc_view: 'documents', // NOC viewer rides on the Documents permission
   };
 
   // Dynamic view permission check
@@ -206,6 +208,22 @@ function MainLayout() {
         return <UniformRegistryPage />;
       case 'documents':
         return <DocumentsPage />;
+      case 'noc_view':
+        return selectedNocId ? (
+          <NocViewPage
+            nocId={selectedNocId}
+            onBack={() => {
+              setSelectedNocId(null);
+              setCurrentView('documents');
+            }}
+            onEditDraft={(id) => {
+              setSelectedNocId(id);
+              setCurrentView('documents');
+            }}
+          />
+        ) : (
+          <DocumentsPage />
+        );
       case 'leave_requests':
         return <LeaveRequestPage />;
       case 'cancellation_requests':

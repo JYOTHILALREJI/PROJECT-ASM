@@ -7,7 +7,12 @@ import path from 'path';
 
 // ---------------------------------------------------------------------------
 // /api/documents/employee
-//   GET  — list employee documents (?employeeId=... or ?limit=recent)
+//   GET  — ?view=employees : PAGINATED employee directory with per-type
+//          document counts (the Employee Documents tab — strict pagination
+//          because the archive grows with the company):
+//            ?view=employees&page=1&pageSize=12&search=&filter=all|with_docs
+//          ?employeeId=... : all documents of one employee
+//          ?stats=1        : dashboard counters
 //   POST — upload a scanned document (multipart form):
 //            employeeId, docType (passport|id_card|visa|other),
 //            docName (optional custom name), file (binary)
@@ -19,8 +24,11 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 export async function GET(request: NextRequest) {
   try {
+    const sp = request.nextUrl.searchParams;
+    const view = sp.get('view') || '';
+
     // Dashboard summary: distinct employees holding at least one document
-    if (request.nextUrl.searchParams.get('stats') === '1') {
+    if (sp.get('stats') === '1') {
       const rows = await db.employeeDocument.findMany({
         where: { deletedAt: null },
         select: { employeeId: true, docType: true },
@@ -31,7 +39,74 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: { employeesWithDocuments, total: rows.length, byType } });
     }
 
-    const employeeId = request.nextUrl.searchParams.get('employeeId');
+    // ── paginated employee directory with document counts ──
+    if (view === 'employees') {
+      const page = Math.max(parseInt(sp.get('page') || '1', 10) || 1, 1);
+      const pageSize = Math.min(Math.max(parseInt(sp.get('pageSize') || '12', 10) || 12, 1), 60);
+      const search = (sp.get('search') || '').trim();
+      const filter = sp.get('filter') || 'all'; // all | with_docs
+
+      const where: Record<string, unknown> = { deletedAt: null };
+      if (search) {
+        where.OR = [
+          { fullName: { contains: search } },
+          { employeeId: { contains: search } },
+          { passportNumber: { contains: search } },
+          { trade: { contains: search } },
+          { companyName: { contains: search } },
+        ];
+      }
+      if (filter === 'with_docs') {
+        where.documents = { some: { deletedAt: null } };
+      }
+
+      const [total, employees] = await Promise.all([
+        db.employee.count({ where }),
+        db.employee.findMany({
+          where,
+          orderBy: { fullName: 'asc' },
+          select: {
+            id: true, fullName: true, employeeId: true, trade: true,
+            companyName: true, nationality: true, passportNumber: true,
+          },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ]);
+
+      // per-type document counts for exactly this page's employees
+      const ids = employees.map((e) => e.id);
+      const counts = ids.length
+        ? await db.employeeDocument.groupBy({
+            by: ['employeeId', 'docType'],
+            where: { deletedAt: null, employeeId: { in: ids } },
+            _count: { _all: true },
+          })
+        : [];
+      const countMap = new Map<string, Record<string, number>>();
+      for (const c of counts) {
+        const entry = countMap.get(c.employeeId) || { passport: 0, id_card: 0, visa: 0, other: 0, total: 0 };
+        entry[c.docType] = (entry[c.docType] || 0) + (c._count._all || 0);
+        entry.total += c._count._all || 0;
+        countMap.set(c.employeeId, entry);
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          employees: employees.map((e) => ({
+            ...e,
+            docCounts: countMap.get(e.id) || { passport: 0, id_card: 0, visa: 0, other: 0, total: 0 },
+          })),
+          total,
+          page,
+          pageSize,
+          totalPages: Math.max(Math.ceil(total / pageSize), 1),
+        },
+      });
+    }
+
+    const employeeId = sp.get('employeeId');
 
     const where: Record<string, unknown> = { deletedAt: null };
     if (employeeId) where.employeeId = employeeId;

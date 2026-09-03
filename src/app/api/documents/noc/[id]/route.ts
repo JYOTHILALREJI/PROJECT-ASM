@@ -2,18 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { logActivity } from '@/lib/activity-logger';
 import { generateNocPdf, buildNocFileName, monthKeyFromNocDate, type NocEmployeeRow } from '@/lib/noc-pdf';
+import { resolveNocAssets } from '@/lib/noc-pdf-server';
 import { ensureStorageDir, resolveStoragePath, slugify, uniqueFilePath } from '@/lib/document-storage';
-import { getNocTemplate } from '@/lib/noc-template';
 import fs from 'fs';
 import path from 'path';
 
 // ---------------------------------------------------------------------------
 // /api/documents/noc/[id]
-//   GET      — single NOC (metadata + employee snapshot)
-//   PATCH    — update a DRAFT (fields/employees); status:"final" generates
-//              the PDF and finalizes. FINAL NOCs are immutable here — the UI
-//              creates a new version via /version instead.
-//   DELETE   — delete (draft: hard delete; final: soft delete, PDF kept)
+//   GET      — single NOC (metadata + employee snapshot + stamp/company names)
+//   PATCH    — DRAFT: update fields/employees; status:"final" finalizes.
+//              FINAL: only the stamp decision is editable after issue —
+//              { stampUpdate: true, stampEnabled, stampId } re-renders the
+//              stored PDF in place (toggle a stamp / switch which stamp is
+//              used). Any other change to a final → 409 (use /version).
+//   DELETE   — delete (draft: hard delete; final: soft delete, PDF removed)
 // ---------------------------------------------------------------------------
 
 interface NocPatchPayload {
@@ -24,8 +26,12 @@ interface NocPatchPayload {
   contactPerson?: string;
   contactPhone?: string;
   contactEmail?: string;
-  stampType?: string;
+  stampType?: string; // legacy
+  stampEnabled?: boolean;
+  stampId?: string | null;
+  companyId?: string | null;
   status?: string; // "draft" | "final"
+  stampUpdate?: boolean; // final-NOC stamp-only update
   employees?: Array<Partial<NocEmployeeRow>>;
   actorUserId?: string;
   actorDisplayName?: string;
@@ -59,7 +65,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const noc = await db.nocDocument.findUnique({ where: { id } });
+    const noc = await db.nocDocument.findUnique({
+      where: { id },
+      include: {
+        stamp: { select: { name: true } },
+        company: { select: { id: true, name: true, contactPerson: true, contactPhone: true, contactEmail: true } },
+      },
+    });
     if (!noc || noc.deletedAt) {
       return NextResponse.json({ success: false, error: 'NOC not found' }, { status: 404 });
     }
@@ -80,6 +92,11 @@ export async function GET(
           contactPhone: noc.contactPhone,
           contactEmail: noc.contactEmail,
           stampType: noc.stampType,
+          stampEnabled: noc.stampEnabled,
+          stampId: noc.stampId,
+          stampName: noc.stamp?.name ?? null,
+          companyId: noc.companyId,
+          company: noc.company,
           employeeCount: noc.employeeCount,
           fileName: noc.fileName,
           filePath: noc.filePath,
@@ -96,6 +113,49 @@ export async function GET(
   }
 }
 
+/** Re-render a final NOC's PDF with the current record + stamp choice. */
+async function regenerateFinalPdf(noc: {
+  id: string; clientName: string; projectName: string; clientAddress: string; nocDate: string;
+  monthKey: string; contactPerson: string; contactPhone: string; contactEmail: string;
+  stampType: string; stampEnabled: boolean; stampId: string | null; companyId: string | null;
+  employeesJson: string; filePath: string | null; fileName: string;
+}): Promise<{ fileName: string; filePath: string | null }> {
+  const employees = JSON.parse(noc.employeesJson || '[]') as NocEmployeeRow[];
+  const assets = await resolveNocAssets({
+    companyId: noc.companyId,
+    stampId: noc.stampId,
+    stampEnabled: noc.stampEnabled,
+    stampType: noc.stampType,
+    contactPerson: noc.contactPerson || null,
+    contactPhone: noc.contactPhone || null,
+    contactEmail: noc.contactEmail || null,
+  });
+  const pdfBytes = await generateNocPdf({
+    clientName: noc.clientName,
+    projectName: noc.projectName,
+    clientAddress: noc.clientAddress,
+    nocDate: noc.nocDate,
+    contactPerson: assets.contactPerson,
+    contactPhone: assets.contactPhone,
+    contactEmail: assets.contactEmail,
+    stampType: noc.stampType,
+    stampEnabled: assets.stampEnabled,
+    stampImagePath: assets.stampImagePath,
+    letterheadPath: assets.letterheadPath,
+    employees,
+    bodyText: assets.bodyText,
+    companyName: assets.companyName,
+  });
+  const dir = ensureStorageDir('noc', slugify(noc.clientName), noc.monthKey);
+  const fileName = buildNocFileName({ clientName: noc.clientName, projectName: noc.projectName, nocDate: noc.nocDate });
+  const absPath = uniqueFilePath(dir, fileName);
+  fs.writeFileSync(absPath, pdfBytes);
+  return {
+    fileName: path.basename(absPath),
+    filePath: path.relative(process.cwd(), absPath).replace(/\\/g, '/'),
+  };
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -106,6 +166,46 @@ export async function PATCH(
     if (!noc || noc.deletedAt) {
       return NextResponse.json({ success: false, error: 'NOC not found' }, { status: 404 });
     }
+
+    const body = (await request.json()) as NocPatchPayload;
+
+    // ── FINAL NOC: stamp-only update (toggle stamp / choose which stamp) ──
+    if (noc.status === 'final' && body.stampUpdate === true) {
+      const stampEnabled = body.stampEnabled === true;
+      if (stampEnabled && body.stampId) {
+        const stamp = await db.stamp.findFirst({ where: { id: body.stampId, deletedAt: null } });
+        if (!stamp) {
+          return NextResponse.json({ success: false, error: 'The selected stamp no longer exists.' }, { status: 400 });
+        }
+      }
+      const data: Record<string, unknown> = {
+        stampEnabled,
+        stampId: stampEnabled ? body.stampId || null : null,
+        // keep legacy column consistent with the decision
+        stampType: stampEnabled ? (body.stampId ? noc.stampType === 'none' ? 'procurement' : noc.stampType : noc.stampType === 'none' ? 'procurement' : noc.stampType) : 'none',
+      };
+      const regenerated = await regenerateFinalPdf({ ...noc, ...data } as typeof noc);
+      if (noc.filePath) {
+        const oldAbs = resolveStoragePath(noc.filePath);
+        if (fs.existsSync(oldAbs) && (!regenerated.filePath || oldAbs !== resolveStoragePath(regenerated.filePath))) {
+          try { fs.unlinkSync(oldAbs); } catch { /* best effort */ }
+        }
+      }
+      data.fileName = regenerated.fileName;
+      data.filePath = regenerated.filePath;
+      const updated = await db.nocDocument.update({ where: { id }, data });
+      await logActivity({
+        userId: body.actorUserId,
+        displayName: body.actorDisplayName || 'Admin',
+        action: 'noc_stamp_update',
+        entityType: 'noc_document',
+        entityId: noc.id,
+        entityName: noc.nocNumber,
+        description: `${stampEnabled ? 'Applied' : 'Removed'} stamp on final NOC ${noc.nocNumber} (v${noc.version}) — PDF re-rendered`,
+      }).catch(() => undefined);
+      return NextResponse.json({ success: true, data: { noc: updated } });
+    }
+
     if (noc.status === 'final') {
       return NextResponse.json(
         { success: false, error: 'This NOC is finalized. Use "Edit" to create a new version instead of overwriting the issued document.' },
@@ -113,7 +213,7 @@ export async function PATCH(
       );
     }
 
-    const body = (await request.json()) as NocPatchPayload;
+    // ── DRAFT update ──
     const targetStatus = body.status === 'final' ? 'final' : 'draft';
     // When employees are omitted (e.g. status-only PATCH), keep the stored snapshot
     const employeesForUpdate: NocEmployeeRow[] = body.employees === undefined
@@ -123,7 +223,21 @@ export async function PATCH(
     const employees = employeesForUpdate;
     const clientName = (body.clientName ?? noc.clientName).trim().toUpperCase();
     const nocDate = (body.nocDate ?? noc.nocDate).trim();
-    const stampType = body.stampType ?? noc.stampType;
+
+    // stamps are opt-in; legacy stampType kept in sync for old readers
+    const legacyFromType = body.stampEnabled === undefined && body.stampType !== undefined && body.stampType !== 'none';
+    const stampEnabled = body.stampEnabled ?? legacyFromType ?? noc.stampEnabled;
+    const stampType = stampEnabled ? ((body.stampType ?? noc.stampType) === 'none' ? 'procurement' : (body.stampType ?? noc.stampType)) : 'none';
+    const companyId = body.companyId !== undefined ? (body.companyId || null) : noc.companyId;
+
+    if (companyId) {
+      const company = await db.nocCompany.findFirst({ where: { id: companyId, deletedAt: null } });
+      if (!company) return NextResponse.json({ success: false, error: 'The selected company no longer exists.' }, { status: 400 });
+    }
+    if (stampEnabled && body.stampId) {
+      const stamp = await db.stamp.findFirst({ where: { id: body.stampId, deletedAt: null } });
+      if (!stamp) return NextResponse.json({ success: false, error: 'The selected stamp no longer exists.' }, { status: 400 });
+    }
 
     const data: Record<string, unknown> = {
       clientName,
@@ -135,6 +249,9 @@ export async function PATCH(
       contactPhone: (body.contactPhone ?? noc.contactPhone).trim(),
       contactEmail: (body.contactEmail ?? noc.contactEmail).trim(),
       stampType,
+      stampEnabled,
+      stampId: stampEnabled ? (body.stampId !== undefined ? body.stampId || null : noc.stampId) : null,
+      companyId,
       employeesJson: JSON.stringify(employees),
       employeeCount: employees.length,
     };
@@ -150,27 +267,31 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: errors.join(' ') }, { status: 400 });
       }
 
-      const template = await getNocTemplate();
-      const pdfBytes = await generateNocPdf({
+      const regenerated = await regenerateFinalPdf({
+        ...noc,
         clientName,
         projectName: data.projectName as string,
         clientAddress: data.clientAddress as string,
         nocDate,
-        contactPerson: (data.contactPerson as string) || template.contactPerson,
-        contactPhone: (data.contactPhone as string) || template.contactPhone,
-        contactEmail: (data.contactEmail as string) || template.contactEmail,
+        monthKey: data.monthKey as string,
+        contactPerson: data.contactPerson as string,
+        contactPhone: data.contactPhone as string,
+        contactEmail: data.contactEmail as string,
         stampType,
-        employees,
-        bodyText: template.bodyText,
-        companyName: template.companyName,
-      });
-      const dir = ensureStorageDir('noc', slugify(clientName), data.monthKey as string);
-      const fileName = buildNocFileName({ clientName, projectName: data.projectName as string, nocDate });
-      const absPath = uniqueFilePath(dir, fileName);
-      fs.writeFileSync(absPath, pdfBytes);
+        stampEnabled,
+        stampId: data.stampId as string | null,
+        companyId,
+        employeesJson: data.employeesJson as string,
+      } as typeof noc);
+      if (noc.filePath) {
+        const oldAbs = resolveStoragePath(noc.filePath);
+        if (fs.existsSync(oldAbs) && (!regenerated.filePath || oldAbs !== resolveStoragePath(regenerated.filePath))) {
+          try { fs.unlinkSync(oldAbs); } catch { /* best effort */ }
+        }
+      }
       data.status = 'final';
-      data.fileName = path.basename(absPath);
-      data.filePath = path.relative(process.cwd(), absPath).replace(/\\/g, '/');
+      data.fileName = regenerated.fileName;
+      data.filePath = regenerated.filePath;
     } else {
       if (employeeErrors.length > 0) {
         return NextResponse.json({ success: false, error: employeeErrors.join(' ') }, { status: 400 });

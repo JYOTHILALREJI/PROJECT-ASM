@@ -928,7 +928,10 @@ model NocDocument {
   contactPerson String   @default("Ms. Mafeeda Kader")
   contactPhone  String   @default("050 797 4153")
   contactEmail  String   @default("mafeedaarabianshieldmanpower@gmail.com")
-  stampType     String   @default("procurement") // "procurement" | "signature" | "none"
+  stampType     String   @default("procurement") // legacy: "procurement" | "signature" | "none" (pre stamp-picker rows)
+  stampEnabled  Boolean  @default(false) // stamps are NOT applied automatically — toggled per NOC
+  stampId       String? // which stamp (Stamp row) is applied when stampEnabled
+  companyId     String? // which company (NocCompany row) issues this NOC (letterhead + signature)
   employeesJson String // JSON array of { name, trade, company, nationality, passport }
   employeeCount Int      @default(0)
   fileName      String // stored PDF file name, e.g. "NOC PROSCAPE ARABIAN RANCHES 02-09-2026.pdf"
@@ -938,11 +941,64 @@ model NocDocument {
   updatedAt     DateTime @updatedAt
   deletedAt     DateTime?
 
+  stamp   Stamp?      @relation(fields: [stampId], references: [id], onDelete: SetNull)
+  company NocCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
   @@unique([nocNumber, version])
   @@index([clientName])
   @@index([monthKey])
   @@index([createdAt])
   @@index([nocNumber])
+  @@index([stampId])
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// NocCompany — issuing companies for NOC letters (multiple company names)
+// ---------------------------------------------------------------------------
+// The user has more than one legal entity; each NOC picks the company it is
+// issued for. The company drives the signature block name, the {{company}}
+// token in the body and (optionally) its own letterhead image. The manager
+// contact of the company is printed in the letter footer exactly like the
+// reference NOCs (name / phone / email).
+// ---------------------------------------------------------------------------
+model NocCompany {
+  id             String   @id @default(cuid())
+  name           String   @unique // signature block + body {{company}}, e.g. "ARABIAN SHIELD A/C. UNITS FIX. CONT"
+  letterheadPath String? // optional per-company letterhead image under storage/letterheads/ (falls back to the default ASM letterhead)
+  contactPerson  String   @default("Ms. Mafeeda Kader") // manager name for the footer block
+  contactPhone   String   @default("050 797 4153") // manager number for the footer block
+  contactEmail   String   @default("mafeedaarabianshieldmanpower@gmail.com") // manager email for the footer block
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  nocs NocDocument[]
+
+  @@index([active])
+}
+
+// ---------------------------------------------------------------------------
+// Stamp — reusable stamps that can be applied to NOC letters
+// ---------------------------------------------------------------------------
+// Stamps live in the database (image stored under storage/stamps/); every NOC
+// can choose WHICH stamp to apply and whether to apply one at all. The two
+// reference stamps are seeded as built-ins after migration.
+// ---------------------------------------------------------------------------
+model Stamp {
+  id        String   @id @default(cuid())
+  name      String // display name, e.g. "Procurement", "Round signature"
+  imagePath String // "builtin:stamp-procurement.png" | relative path under storage/stamps/
+  isDefault Boolean  @default(false) // pre-selected for new NOCs
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  nocs NocDocument[]
+
+  @@index([active])
 }
 
 // ---------------------------------------------------------------------------

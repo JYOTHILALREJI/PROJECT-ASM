@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateNocPdf, type NocEmployeeRow } from '@/lib/noc-pdf';
+import { resolveNocAssets } from '@/lib/noc-pdf-server';
 
 // ---------------------------------------------------------------------------
 // POST /api/documents/noc/preview
 //   Generates a NOC PDF from the posted (unsaved) payload and returns it
 //   inline — used by the NOC builder's "Preview" button so the admin can
 //   check the letter before saving it into the archive.
-//   Body: same payload as POST /api/documents/noc.
+//   Body: same payload as POST /api/documents/noc (company/stamp included).
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -20,6 +21,11 @@ export async function POST(request: NextRequest) {
       contactPhone?: string;
       contactEmail?: string;
       stampType?: string;
+      stampEnabled?: boolean;
+      stampId?: string | null;
+      companyId?: string | null;
+      bodyText?: string;
+      companyName?: string;
       employees?: Array<Partial<NocEmployeeRow>>;
     };
 
@@ -32,16 +38,31 @@ export async function POST(request: NextRequest) {
       passport: (row?.passport || '').toString().trim().toUpperCase(),
     }));
 
+    const assets = await resolveNocAssets({
+      companyId: body.companyId || null,
+      stampId: body.stampId || null,
+      stampEnabled: body.stampEnabled,
+      stampType: body.stampType || 'procurement',
+      contactPerson: (body.contactPerson || '').trim() || null,
+      contactPhone: (body.contactPhone || '').trim() || null,
+      contactEmail: (body.contactEmail || '').trim() || null,
+    });
+
     const pdfBytes = await generateNocPdf({
       clientName,
       projectName: (body.projectName || '').trim().toUpperCase(),
       clientAddress: (body.clientAddress || '').trim(),
       nocDate: (body.nocDate || '').trim(),
-      contactPerson: (body.contactPerson || '').trim(),
-      contactPhone: (body.contactPhone || '').trim(),
-      contactEmail: (body.contactEmail || '').trim(),
+      contactPerson: assets.contactPerson,
+      contactPhone: assets.contactPhone,
+      contactEmail: assets.contactEmail,
       stampType: body.stampType || 'procurement',
+      stampEnabled: assets.stampEnabled,
+      stampImagePath: assets.stampImagePath,
+      letterheadPath: assets.letterheadPath,
       employees,
+      bodyText: body.bodyText || assets.bodyText,
+      companyName: body.companyName || assets.companyName,
     });
 
     return new NextResponse(new Uint8Array(pdfBytes), {
