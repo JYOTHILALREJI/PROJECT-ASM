@@ -213,10 +213,13 @@ function MainLayout() {
           <NocViewPage
             nocId={selectedNocId}
             onBack={() => {
+              // signal DocumentsPage to restore the tab the user came from (§39)
+              try { window.sessionStorage.setItem('documents-return', '1'); } catch { /* ignore */ }
               setSelectedNocId(null);
               setCurrentView('documents');
             }}
             onEditDraft={(id) => {
+              try { window.sessionStorage.setItem('documents-return', '1'); } catch { /* ignore */ }
               setSelectedNocId(id);
               setCurrentView('documents');
             }}

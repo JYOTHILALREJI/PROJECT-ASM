@@ -20,6 +20,7 @@ import {
   Stamp as StampIcon,
   Pencil,
   Info,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,10 +54,69 @@ interface NocDetail {
 interface StampOption {
   id: string;
   name: string;
+  imagePath?: string;
   isDefault: boolean;
 }
 
 const inputCls = 'bg-slate-900/60 border-slate-700/60 text-slate-200 focus-visible:ring-blue-500/40';
+
+/**
+ * Stamping animation (spec §10) — the stamp enters from above, rotates
+ * slightly, lands on the paper with a small impact and the ink appears.
+ * ~850ms, purely cosmetic: the actual stamping operation runs in parallel
+ * and is never delayed by the animation.
+ */
+const STAMP_ANIM_CSS = `
+@keyframes noc-stamp-drop {
+  0%   { transform: translate(-50%, -180px) rotate(-22deg) scale(1.7); opacity: 0; }
+  45%  { transform: translate(-50%, 0px)    rotate(-9deg)  scale(1);    opacity: 1; }
+  58%  { transform: translate(-50%, 0px)    rotate(-9deg)  scale(1.06); opacity: 1; }
+  72%  { transform: translate(-50%, 0px)    rotate(-9deg)  scale(0.98); opacity: 1; }
+  100% { transform: translate(-50%, 0px)    rotate(-9deg)  scale(1);    opacity: 1; }
+}
+@keyframes noc-stamp-ink {
+  0%, 50% { opacity: 0; }
+  78%     { opacity: 0.92; }
+  100%    { opacity: 0.92; }
+}
+@keyframes noc-stamp-chip {
+  0%, 60% { opacity: 0; transform: translateY(6px); }
+  100%    { opacity: 1; transform: translateY(0); }
+}
+`;
+
+function StampAnimationOverlay({ stampName, stampImageSrc }: { stampName: string; stampImageSrc?: string | null }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-xl">
+      <style>{STAMP_ANIM_CSS}</style>
+      {/* drop + impact */}
+      <div
+        className="absolute left-1/2 top-[28%]"
+        style={{ animation: 'noc-stamp-drop 850ms cubic-bezier(.22,1.2,.36,1) both' }}
+      >
+        {stampImageSrc ? (
+          <img
+            src={stampImageSrc}
+            alt={stampName}
+            className="h-36 w-36 max-w-none object-contain drop-shadow-[0_10px_14px_rgba(0,0,0,0.45)]"
+            style={{ animation: 'noc-stamp-ink 850ms ease-out both' }}
+          />
+        ) : (
+          <StampIcon className="h-32 w-32 text-red-500/90 drop-shadow-[0_10px_14px_rgba(0,0,0,0.45)]" style={{ animation: 'noc-stamp-ink 850ms ease-out both' }} />
+        )}
+      </div>
+      {/* confirmation chip */}
+      <div
+        className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-1.5 backdrop-blur-sm"
+        style={{ animation: 'noc-stamp-chip 900ms ease-out both' }}
+      >
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-200">
+          <CheckCircle2 className="h-3.5 w-3.5" /> NOC Stamped — {stampName}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 /** Print a PDF URL directly: load it into a hidden iframe and print. */
 function printPdf(url: string): void {
@@ -98,6 +158,7 @@ export function NocViewPage({
   const [stampEnabled, setStampEnabled] = React.useState(false);
   const [stampId, setStampId] = React.useState<string>('');
   const [savingStamp, setSavingStamp] = React.useState(false);
+  const [stampAnim, setStampAnim] = React.useState<{ name: string; imageSrc: string | null; nonce: number } | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -143,6 +204,18 @@ export function NocViewPage({
   const applyStampChange = async (nextEnabled: boolean, nextStampId: string) => {
     if (!noc || noc.status !== 'final') return;
     setSavingStamp(true);
+    // cosmetic animation fires immediately — the operation runs in parallel
+    if (nextEnabled) {
+      const stamp = stamps.find((s) => s.id === nextStampId);
+      setStampAnim({
+        name: stamp?.name || 'Stamp',
+        imageSrc: stamp?.imagePath && nextStampId ? `/api/documents/stamps/${nextStampId}/image` : null,
+        nonce: Date.now(),
+      });
+      window.setTimeout(() => setStampAnim(null), 1000);
+    } else {
+      setStampAnim(null);
+    }
     try {
       const res = await fetch(`/api/documents/noc/${noc.id}`, {
         method: 'PATCH',
@@ -291,7 +364,8 @@ export function NocViewPage({
 
       {/* the document itself — full page */}
       {noc.status === 'final' ? (
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
+        <div className="relative rounded-xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
+          {stampAnim && <StampAnimationOverlay key={stampAnim.nonce} stampName={stampAnim.name} stampImageSrc={stampAnim.imageSrc} />}
           <iframe
             key={pdfKey}
             src={pdfUrl}

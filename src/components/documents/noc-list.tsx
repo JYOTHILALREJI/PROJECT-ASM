@@ -164,7 +164,11 @@ export function NocList({
         setRows(data.data.nocs || []);
         setTotal(data.data.total || 0);
         setTotalPages(data.data.totalPages || 1);
-        if ((data.data.page || 1) > (data.data.totalPages || 1)) setPage(1);
+        // page-edge correction after deletes: land on the LAST valid page,
+        // never jump back to page 1 (spec §24)
+        if ((data.data.page || 1) > (data.data.totalPages || 1)) {
+          setPage(Math.max(1, data.data.totalPages || 1));
+        }
       }
     } catch {
       // silent
@@ -181,12 +185,16 @@ export function NocList({
 
   const doDelete = async () => {
     if (!deleteTarget) return;
-    setBusyId(deleteTarget.id);
+    const target = deleteTarget;
+    setBusyId(target.id);
     try {
-      const res = await fetch(`/api/documents/noc/${deleteTarget.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/documents/noc/${target.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Delete failed');
-      toast({ title: deleteTarget.status === 'draft' ? 'Draft deleted' : 'NOC deleted', description: deleteTarget.nocNumber });
+      // remove from the visible dataset IMMEDIATELY (spec §22) — no stale row
+      setRows((prev) => prev.filter((r) => r.id !== target.id));
+      setTotal((t) => Math.max(0, t - 1));
+      toast({ title: target.status === 'draft' ? 'Draft deleted' : 'NOC deleted', description: target.nocNumber });
       setDeleteTarget(null);
       onChanged();
       load();

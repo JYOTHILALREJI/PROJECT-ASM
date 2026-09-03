@@ -89,7 +89,10 @@ export function EmployeeDocsDirectory({ refreshKey = 0 }: { refreshKey?: number 
         setEmployees(data.data.employees || []);
         setTotal(data.data.total || 0);
         setTotalPages(data.data.totalPages || 1);
-        if ((data.data.page || 1) > (data.data.totalPages || 1)) setPage(1);
+        // page-edge correction: land on the last valid page, never page 1 (spec §24)
+        if ((data.data.page || 1) > (data.data.totalPages || 1)) {
+          setPage(Math.max(1, data.data.totalPages || 1));
+        }
       }
     } catch {
       // silent

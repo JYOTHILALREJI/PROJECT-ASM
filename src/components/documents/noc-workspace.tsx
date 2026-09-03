@@ -104,8 +104,44 @@ function SortHeader({
 
 const STEPS = ['Details', 'Employees', 'Review', 'Preview', 'Complete'];
 
+const LOCAL_BACKUP_KEY = 'noc-draft-local-backup';
+
+/** Shape of the offline localStorage backup (spec §29 — local resilience). */
+interface LocalBackup {
+  draftId: string | null;
+  clientName: string;
+  projectName: string;
+  address1: string;
+  address2: string;
+  city: string;
+  country: string;
+  nocDate: string;
+  contactPerson: string;
+  contactPhone: string;
+  contactEmail: string;
+  companyId: string | null;
+  stampEnabled: boolean;
+  stampId: string | null;
+  currentStep: number;
+  employees: Array<{ name: string; trade: string; company: string; nationality: string; passport: string }>;
+  savedAt: string;
+}
+
+function readLocalBackup(): LocalBackup | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalBackup;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 /** NocRecord used when editing — either a full draft detail or a list row + employees. */
 export interface NocEditSource extends Partial<NocLightRow> {
+  currentStep?: number; // exact resume point — the workspace step the draft was left at
   employees?: Array<{ name: string; trade: string; company: string; nationality: string; passport: string }>;
 }
 
@@ -168,19 +204,32 @@ export function NocWorkspace({
   const [replaceTargetUid, setReplaceTargetUid] = React.useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = React.useState<NocEmployeeRow | null>(null);
 
-  const [step, setStep] = React.useState(1);
+  // exact resume point (§28) — reopen at the step the draft was left at
+  const resumeStep = Math.min(Math.max(editNoc?.currentStep ?? 1, 1), 3);
+  const [step, setStep] = React.useState(resumeStep);
   const [draftId, setDraftId] = React.useState<string | null>(editNoc?.id || null);
   const [draftNumber, setDraftNumber] = React.useState<string>(editNoc?.nocNumber || '');
   const [draftVersion, setDraftVersion] = React.useState<number>(editNoc?.version || 1);
   const [draftSavedAt, setDraftSavedAt] = React.useState<string | null>(null);
   const [dirty, setDirty] = React.useState(false);
   const [savingDraft, setSavingDraft] = React.useState(false);
+  // offline resilience (spec §29-30)
+  const [online, setOnline] = React.useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [syncingBack, setSyncingBack] = React.useState(false);
+  const [localSavedAt, setLocalSavedAt] = React.useState<string | null>(null); // time of the latest unsynced local copy
+  const [pendingRestore, setPendingRestore] = React.useState<LocalBackup | null>(null); // unsynced copy found on open
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [previewing, setPreviewing] = React.useState(false);
   const [finalNoc, setFinalNoc] = React.useState<{ id: string; nocNumber: string; clientName: string; projectName: string; employeeCount: number; monthKey: string; fileName: string } | null>(null);
   const [generating, setGenerating] = React.useState(false);
 
   const clientAddress = [address1, address2, city, country].map((l) => l.trim()).filter(Boolean).join('\n');
+
+  // refs mirror the latest step/dirty so callbacks and event listeners never act on stale values
+  const stepRef = React.useRef(step);
+  React.useEffect(() => { stepRef.current = step; }, [step]);
+  const dirtyRef = React.useRef(dirty);
+  React.useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
 
   const buildPayload = (status: 'draft' | 'final') => ({
     clientName,
@@ -195,11 +244,14 @@ export function NocWorkspace({
     stampId: stampEnabled ? stampId || null : null,
     status,
     employees: rows.map(({ name, trade, company, nationality, passport }) => ({ name, trade, company, nationality, passport })),
+    currentStep: Math.min(stepRef.current, 3), // exact resume point (§28)
     actorUserId: user?.id,
     actorDisplayName: user?.name || user?.email,
   });
 
   const hasContent = clientName.trim() || projectName.trim() || rows.length > 0;
+  const hasContentRef = React.useRef(hasContent);
+  React.useEffect(() => { hasContentRef.current = hasContent; }, [hasContent]);
 
   const saveDraft = React.useCallback(
     async (silent = true) => {
@@ -227,6 +279,10 @@ export function NocWorkspace({
         setDraftVersion(data.data.noc.version);
         setDraftSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setDirty(false);
+        // server has everything now — the local resilience copy is no longer needed
+        try { localStorage.removeItem(LOCAL_BACKUP_KEY); } catch { /* ignore */ }
+        setLocalSavedAt(null);
+        setPendingRestore(null);
         if (!silent) toast({ title: 'Draft saved', description: `${data.data.noc.nocNumber} — continue anytime from Drafts.` });
         onSaved();
       } catch (e) {
@@ -238,23 +294,129 @@ export function NocWorkspace({
     [draftId, clientName, projectName, clientAddress, nocDate, contactPerson, contactPhone, contactEmail, companyId, stampEnabled, stampId, rows, hasContent],
   );
 
-  // auto-save (debounced) whenever the workspace is dirty
+  // auto-save (debounced server save) whenever the workspace is dirty.
+  // Every change is ALSO mirrored to localStorage immediately (§29: local
+  // draft first, API auto-save second) — a crash or drop of connectivity
+  // never loses more than the current field.
   React.useEffect(() => {
     if (!dirty) return;
+    if (hasContent) {
+      try {
+        const backup: LocalBackup = {
+          draftId,
+          clientName,
+          projectName,
+          address1, address2, city, country,
+          nocDate,
+          contactPerson, contactPhone, contactEmail,
+          companyId: companyId || null,
+          stampEnabled,
+          stampId: stampId || null,
+          currentStep: Math.min(stepRef.current, 3),
+          employees: rows.map(({ name, trade, company, nationality, passport }) => ({ name, trade, company, nationality, passport })),
+          savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        };
+        localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(backup));
+        setLocalSavedAt(backup.savedAt);
+      } catch { /* storage full/blocked — server autosave still applies */ }
+    }
     const t = setTimeout(() => { saveDraft(true); }, 1500);
     return () => clearTimeout(t);
   }, [dirty, rows, clientName, projectName, clientAddress, nocDate, companyId, stampEnabled, stampId, saveDraft]);
 
-  // warn before leaving with unsaved changes
+  // online/offline indicator + automatic re-sync when the connection returns (§30)
   React.useEffect(() => {
-    if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
     };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [dirty]);
+  }, []);
+
+  // when back online (a real offline→online transition): flush the unsynced local copy (§30)
+  const onlinePrev = React.useRef<boolean | null>(null);
+  React.useEffect(() => {
+    if (!online) {
+      onlinePrev.current = false;
+      return;
+    }
+    const wasOffline = onlinePrev.current === false;
+    onlinePrev.current = true;
+    if (!wasOffline) return; // initial mount — nothing to re-sync yet
+    const hasLocal = !!readLocalBackup();
+    if (!dirtyRef.current && !hasLocal) return;
+    let cancelled = false;
+    (async () => {
+      setSyncingBack(true);
+      try {
+        await saveDraft(true);
+        if (!cancelled) toast({ title: 'Draft synchronized', description: 'The changes saved on this device were pushed to the server.' });
+      } finally {
+        if (!cancelled) setSyncingBack(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [online]);
+
+  // on open: detect an unsynced local copy from a previous session (crash / offline close)
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      const backup = readLocalBackup();
+      if (!backup) return;
+      const sameDraft = (backup.draftId || null) === (editNoc?.id || null);
+      if (sameDraft && (backup.clientName || (backup.employees || []).length > 0)) {
+        setPendingRestore(backup);
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  const restoreLocalBackup = () => {
+    if (!pendingRestore) return;
+    const b = pendingRestore;
+    setCompanyId(b.companyId || defaultCompany?.id || '');
+    setClientName(b.clientName || '');
+    setAddress1(b.address1 || '');
+    setAddress2(b.address2 || '');
+    setCity(b.city || '');
+    setCountry(b.country || '');
+    setProjectName(b.projectName || '');
+    setNocDate(b.nocDate || todayDMY());
+    setContactPerson(b.contactPerson || '');
+    setContactPhone(b.contactPhone || '');
+    setContactEmail(b.contactEmail || '');
+    setStampEnabled(!!b.stampEnabled);
+    setStampId(b.stampId || defaultStamp?.id || '');
+    setRows((b.employees || []).map((e) => ({
+      uid: nextUid(), source: 'manual' as const,
+      name: e.name || '', trade: e.trade || '', company: e.company || '', nationality: e.nationality || '', passport: e.passport || '',
+    })));
+    const target = Math.min(Math.max(b.currentStep || 1, 1), 3);
+    setStep(target);
+    stepRef.current = target;
+    setPendingRestore(null);
+    setDirty(true);
+    toast({ title: 'Draft restored', description: `Unsaved changes from ${b.savedAt} were restored. They will sync to the server automatically.` });
+  };
+
+  const discardLocalBackup = () => {
+    try { localStorage.removeItem(LOCAL_BACKUP_KEY); } catch { /* ignore */ }
+    setPendingRestore(null);
+    setLocalSavedAt(null);
+  };
+
+  /** Step navigation — step transitions are significant actions and save immediately (§33). */
+  const goToStep = (n: number) => {
+    setStep(n);
+    stepRef.current = n;
+    if (hasContentRef.current) {
+      if (draftId) saveDraft(true); // immediate server save on step change
+      else setDirty(true); // first save happens via the debounced autosave
+    }
+  };
 
   const markDirty = () => setDirty(true);
 
@@ -502,9 +664,22 @@ export function NocWorkspace({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-white">{editNoc ? `Edit Draft ${draftNumber}` : 'Create NOC'}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
               {draftNumber ? `NOC ${draftNumber} · Version ${draftVersion} · ` : ''}
-              {draftSavedAt ? `Draft saved ${draftSavedAt}` : savingDraft ? 'Saving draft…' : dirty ? 'Unsaved changes — autosaving…' : 'Drafts save automatically while you work'}
+              {!online ? (
+                <span className="text-amber-300 font-medium">⚠ Offline — changes saved locally on this device</span>
+              ) : syncingBack ? (
+                <span className="text-blue-300 font-medium">↻ Syncing draft…</span>
+              ) : savingDraft ? (
+                <span>Saving draft…</span>
+              ) : dirty ? (
+                <span>Unsaved changes — autosaving…</span>
+              ) : draftSavedAt ? (
+                <span className="text-emerald-300">✓ Draft saved {draftSavedAt}</span>
+              ) : (
+                <span>Drafts save automatically while you work</span>
+              )}
+              {localSavedAt && !online && <span className="text-amber-400/80">(local copy {localSavedAt})</span>}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -527,7 +702,7 @@ export function NocWorkspace({
                 {i > 0 && <div className={cn('h-px flex-1 min-w-4', done ? 'bg-blue-500/60' : 'bg-slate-600/60')} />}
                 <button
                   type="button"
-                  onClick={() => i + 1 <= Math.max(step, 3) && setStep(i + 1)}
+                  onClick={() => i + 1 <= Math.max(step, 3) && goToStep(i + 1)}
                   className={cn(
                     'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors whitespace-nowrap',
                     active ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40' : done ? 'text-emerald-300' : 'text-slate-500',
@@ -543,6 +718,19 @@ export function NocWorkspace({
           })}
         </div>
       </div>
+
+      {/* unsynced local copy found on open (browser crash / offline close) — §29 */}
+      {pendingRestore && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+          <p className="text-xs text-amber-200 flex-1 min-w-48">
+            <span className="font-semibold">Unsynced changes found</span> — saved on this device at {pendingRestore.savedAt} before they could reach the server.
+            Restore them to continue exactly where you left off.
+          </p>
+          <Button size="sm" onClick={restoreLocalBackup} className="bg-amber-500 hover:bg-amber-400 text-slate-900">Restore changes</Button>
+          <Button size="sm" variant="ghost" onClick={discardLocalBackup} className="text-slate-400 hover:bg-slate-700 hover:text-white">Discard</Button>
+        </div>
+      )}
 
       {/* validation warnings */}
       {warnings.length > 0 && (
@@ -803,7 +991,7 @@ export function NocWorkspace({
           <div className="xl:col-span-3 space-y-3">
             {step === 4 && (
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="outline" onClick={() => setStep(3)} className="border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white">
+                <Button variant="outline" onClick={() => goToStep(3)} className="border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white">
                   ← Back to Employee Table
                 </Button>
                 <Button onClick={generateFinal} disabled={generating} className="bg-blue-600 hover:bg-blue-500 text-white">
@@ -831,7 +1019,7 @@ export function NocWorkspace({
                   <Button size="sm" variant="outline" className="border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white" onClick={() => downloadNocPdf(finalNoc)}>
                     <Download className="h-3.5 w-3.5 mr-1.5" /> Download PDF
                   </Button>
-                  <Button size="sm" variant="outline" className="border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white" onClick={() => { setFinalNoc(null); setPreviewUrl(null); setStep(1); setDraftId(null); setDraftNumber(''); setDraftVersion(1); setRows([]); setClientName(''); setProjectName(''); setAddress1(''); setAddress2(''); setCity(''); setCountry(''); setDirty(false); }}>
+                  <Button size="sm" variant="outline" className="border-slate-600 text-slate-200 hover:bg-slate-700 hover:text-white" onClick={() => { setFinalNoc(null); setPreviewUrl(null); setStep(1); stepRef.current = 1; setDraftId(null); setDraftNumber(''); setDraftVersion(1); setRows([]); setClientName(''); setProjectName(''); setAddress1(''); setAddress2(''); setCity(''); setCountry(''); setDirty(false); }}>
                     <Plus className="h-3.5 w-3.5 mr-1.5" /> New NOC
                   </Button>
                   <Button size="sm" variant="ghost" className="text-slate-400 hover:bg-slate-700 hover:text-white" onClick={onClose}>

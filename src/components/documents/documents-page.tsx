@@ -184,12 +184,36 @@ function DocumentsDashboard({
 
 type TabId = 'dashboard' | 'noc' | 'employee' | 'template';
 
+const TAB_STORAGE_KEY = 'documents-last-tab';
+
+function initialTab(): TabId {
+  // Returning from the dedicated NOC page (Back button) should land back on
+  // the tab the user came from (spec §39 — back returns to the originating list).
+  // The return flag is set by the NOC page's back/edit-draft handler, so a
+  // fresh navigation from the sidebar still opens the dashboard.
+  if (typeof window !== 'undefined') {
+    try {
+      if (window.sessionStorage.getItem('documents-return') === '1') {
+        window.sessionStorage.removeItem('documents-return');
+        const saved = window.sessionStorage.getItem(TAB_STORAGE_KEY);
+        if (saved === 'noc' || saved === 'employee' || saved === 'template') return saved;
+      }
+    } catch { /* ignore */ }
+  }
+  return 'dashboard';
+}
+
 export function DocumentsPage() {
   const perms = useDocumentPermissions();
   const { user } = useAuthStore();
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const setSelectedNocId = useAppStore((s) => s.setSelectedNocId);
-  const [tab, setTab] = React.useState<TabId>('dashboard');
+  const selectedNocId = useAppStore((s) => s.selectedNocId);
+  const [tab, setTabState] = React.useState<TabId>(initialTab);
+  const setTab = (t: TabId) => {
+    setTabState(t);
+    try { window.sessionStorage.setItem(TAB_STORAGE_KEY, t); } catch { /* ignore */ }
+  };
   const [nocMode, setNocMode] = React.useState<'list' | 'create'>('list');
   const [editNoc, setEditNoc] = React.useState<NocEditSource | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
@@ -260,6 +284,29 @@ export function DocumentsPage() {
   };
 
   const openCreate = () => { setEditNoc(null); setNocMode('create'); setTab('noc'); };
+
+  // "Continue editing" hand-off from the dedicated NOC page: the draft id is
+  // parked in the app store — consume it and open the workspace directly.
+  // IMPORTANT: never consume while the view is switching to the NOC page
+  // (openNocPage also sets selectedNocId) — that would clear the id and the
+  // viewer would never open.
+  const currentView = useAppStore((s) => s.currentView);
+  React.useEffect(() => {
+    if (!selectedNocId || currentView === 'noc_view') return;
+    const id = selectedNocId;
+    setSelectedNocId(null); // consume immediately
+    (async () => {
+      try {
+        const res = await fetch(`/api/documents/noc/${id}`);
+        const data = await res.json();
+        if (data.success && data.data.noc.status === 'draft') {
+          setTab('noc');
+          setEditNoc(data.data.noc);
+          setNocMode('create');
+        }
+      } catch { /* silent — the draft stays reachable from the list */ }
+    })();
+  }, [selectedNocId, currentView, setSelectedNocId]);
 
   const tabs: Array<{ id: TabId; label: string; icon: React.ElementType; locked?: boolean }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },

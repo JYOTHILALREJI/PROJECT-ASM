@@ -39,6 +39,7 @@ interface NocPayload {
   stampId?: string | null;
   companyId?: string | null;
   status?: string; // "draft" | "final"
+  currentStep?: number; // draft workspace step (exact resume point)
   employees?: Array<Partial<NocEmployeeRow>>;
   actorUserId?: string;
   actorDisplayName?: string;
@@ -342,13 +343,16 @@ export async function POST(request: NextRequest) {
       companyId,
       employeesJson: JSON.stringify(employees),
       employeeCount: employees.length,
+      currentStep: Math.min(Math.max(Math.round(body.currentStep ?? 1) || 1, 1), 3),
       fileName: '',
       filePath: null as string | null,
       createdBy: body.actorDisplayName || null,
     };
 
     if (status === 'final') {
-      const assets = await resolveNocAssets({
+      // Write the ORIGINAL as-issued PDF (always unstamped — audit copy) plus
+      // the ACTIVE rendition (stamped when a stamp is enabled) — spec §37.
+      const assetOpts = {
         companyId,
         stampId: body.stampId,
         stampEnabled,
@@ -356,29 +360,56 @@ export async function POST(request: NextRequest) {
         contactPerson: (body.contactPerson || '').trim() || null,
         contactPhone: (body.contactPhone || '').trim() || null,
         contactEmail: (body.contactEmail || '').trim() || null,
-      });
-      const pdfBytes = await generateNocPdf({
+      };
+      const dir = ensureStorageDir('noc', slugify(clientName), monthKey);
+      const plainName = buildNocFileName({ clientName, projectName: recordData.projectName as string, nocDate });
+
+      const unstampedAssets = await resolveNocAssets({ ...assetOpts, stampEnabled: false });
+      const plainBytes = await generateNocPdf({
         clientName,
         projectName: recordData.projectName as string,
         clientAddress: recordData.clientAddress as string,
         nocDate,
-        contactPerson: assets.contactPerson,
-        contactPhone: assets.contactPhone,
-        contactEmail: assets.contactEmail,
+        contactPerson: unstampedAssets.contactPerson,
+        contactPhone: unstampedAssets.contactPhone,
+        contactEmail: unstampedAssets.contactEmail,
         stampType,
-        stampEnabled: assets.stampEnabled,
-        stampImagePath: assets.stampImagePath,
-        letterheadPath: assets.letterheadPath,
+        stampEnabled: false,
+        stampImagePath: undefined,
+        letterheadPath: unstampedAssets.letterheadPath,
         employees,
-        bodyText: assets.bodyText,
-        companyName: assets.companyName,
+        bodyText: unstampedAssets.bodyText,
+        companyName: unstampedAssets.companyName,
       });
-      const dir = ensureStorageDir('noc', slugify(clientName), monthKey);
-      const fileName = buildNocFileName({ clientName, projectName: recordData.projectName as string, nocDate });
-      const absPath = uniqueFilePath(dir, fileName);
-      fs.writeFileSync(absPath, pdfBytes);
-      recordData.fileName = path.basename(absPath);
-      recordData.filePath = path.relative(process.cwd(), absPath).replace(/\\/g, '/');
+      const plainAbs = uniqueFilePath(dir, plainName);
+      fs.writeFileSync(plainAbs, plainBytes);
+      recordData.originalFilePath = path.relative(process.cwd(), plainAbs).replace(/\\/g, '/');
+
+      let activeAbs = plainAbs;
+      if (stampEnabled) {
+        const stampedAssets = await resolveNocAssets(assetOpts);
+        const stampedBytes = await generateNocPdf({
+          clientName,
+          projectName: recordData.projectName as string,
+          clientAddress: recordData.clientAddress as string,
+          nocDate,
+          contactPerson: stampedAssets.contactPerson,
+          contactPhone: stampedAssets.contactPhone,
+          contactEmail: stampedAssets.contactEmail,
+          stampType,
+          stampEnabled: true,
+          stampImagePath: stampedAssets.stampImagePath,
+          letterheadPath: stampedAssets.letterheadPath,
+          employees,
+          bodyText: stampedAssets.bodyText,
+          companyName: stampedAssets.companyName,
+        });
+        const stampedAbs = uniqueFilePath(dir, plainName.replace(/\.pdf$/i, ' (stamped).pdf'));
+        fs.writeFileSync(stampedAbs, stampedBytes);
+        activeAbs = stampedAbs;
+      }
+      recordData.fileName = path.basename(activeAbs);
+      recordData.filePath = path.relative(process.cwd(), activeAbs).replace(/\\/g, '/');
     }
 
     const noc = await db.nocDocument.create({ data: recordData as Prisma.NocDocumentUncheckedCreateInput });

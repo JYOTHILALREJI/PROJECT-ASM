@@ -132,7 +132,9 @@ def main():
     check("status final", noc20.get("status") == "final", noc20.get("status"))
     fn20 = noc20.get("fileName") or ""
     import re as _re
-    check("fileName standard format", bool(_re.match(r"^NOC - API TEST LLC - API PROJECT - 03-09-2026( \d+)?\.pdf$", fn20)), fn20)
+    # Task 10 contract (§37): the ACTIVE rendition may carry the "(stamped)"
+    # suffix while the ORIGINAL as-issued PDF keeps the standard name.
+    check("fileName standard format", bool(_re.match(r"^NOC - API TEST LLC - API PROJECT - 03-09-2026( \d+)?( \(stamped\))?\.pdf$", fn20)), fn20)
     check("monthKey derived", noc20.get("monthKey") == "2026-09", noc20.get("monthKey"))
     check("fileName drops M/S", "M/S" not in noc20.get("fileName", "") and "API TEST LLC" in noc20.get("fileName", ""), noc20.get("fileName"))
     check("employeeCount=20", noc20.get("employeeCount") == 20, noc20.get("employeeCount"))
