@@ -18,6 +18,7 @@ import {
   Replace,
   AlertTriangle,
   CheckCircle2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -134,6 +135,11 @@ export function EmployeeDocumentsPanel({
   const [deleteTarget, setDeleteTarget] = React.useState<EmployeeDocRecord | null>(null);
   const replaceInputRef = React.useRef<HTMLInputElement | null>(null);
   const [replaceTarget, setReplaceTarget] = React.useState<EmployeeDocRecord | null>(null);
+  // §MISMATCH — reassign a document to another employee (fix batch mismatches)
+  const [moveTarget, setMoveTarget] = React.useState<EmployeeDocRecord | null>(null);
+  const [moveSearch, setMoveSearch] = React.useState('');
+  const [moveOptions, setMoveOptions] = React.useState<Array<{ id: string; fullName: string; employeeId?: string; trade?: string | null }>>([]);
+  const [moving, setMoving] = React.useState(false);
   // §7 — in-app preview (PDF viewer / image with zoom)
   const [previewDoc, setPreviewDoc] = React.useState<PreviewDoc | null>(null);
   // §8 — "older documents" expanders per category
@@ -279,6 +285,55 @@ export function EmployeeDocumentsPanel({
     }
   };
 
+  // reassign search (only while the move dialog is open)
+  React.useEffect(() => {
+    if (!moveTarget || !moveSearch.trim()) {
+      const t = setTimeout(() => setMoveOptions([]), 0);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/employees?search=${encodeURIComponent(moveSearch.trim())}&status=active&limit=15`);
+        const data = await res.json();
+        if (data.success) {
+          // exclude the employee currently holding the document
+          setMoveOptions((data.data.employees || []).filter((e: { id: string }) => e.id !== moveTarget.employeeId));
+        }
+      } catch { /* silent */ }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [moveSearch, moveTarget]);
+
+  const handleMove = async (target: { id: string; fullName: string }) => {
+    if (!moveTarget || moving) return;
+    setMoving(true);
+    try {
+      const res = await fetch(`/api/documents/employee/${moveTarget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetEmployeeId: target.id,
+          actorDisplayName: user?.name || user?.email || '',
+          actorUserId: user?.id || '',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Move failed');
+      toast({
+        title: 'Document moved',
+        description: `"${moveTarget.docName}" now belongs to ${target.fullName}.`,
+      });
+      setMoveTarget(null);
+      setMoveSearch('');
+      setMoveOptions([]);
+      if (effectiveEmployeeId) loadDocs(effectiveEmployeeId);
+    } catch (e) {
+      toast({ title: 'Move failed', description: e instanceof Error ? e.message : 'Unknown error', variant: 'destructive' });
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const renderDocActions = (doc: EmployeeDocRecord) => (
     <div className="flex items-center gap-0.5 shrink-0">
       <button type="button" title="Rename / edit expiry" onClick={() => { setRenameTarget(doc); setRenameValue(doc.docName); setRenameExpiry(doc.expiryDate || ''); }} className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700/60 transition-colors">
@@ -286,6 +341,14 @@ export function EmployeeDocumentsPanel({
       </button>
       <button type="button" title="Replace file" onClick={() => { setReplaceTarget(doc); setTimeout(() => replaceInputRef.current?.click(), 50); }} className="rounded p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors">
         <Replace className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        title="Move to another employee (fix a mismatched upload)"
+        onClick={() => { setMoveTarget(doc); setMoveSearch(''); setMoveOptions([]); }}
+        className="rounded p-1.5 text-slate-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
+      >
+        <ArrowRightLeft className="h-3.5 w-3.5" />
       </button>
       {canDelete && (
         <button type="button" title="Delete" onClick={() => setDeleteTarget(doc)} className="rounded p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors">
@@ -554,6 +617,54 @@ export function EmployeeDocumentsPanel({
             <AlertDialogAction onClick={submitUpload} disabled={uploading} className="bg-blue-600 hover:bg-blue-500 text-white border-0">
               <Upload className="h-4 w-4 mr-2" /> {uploading ? 'Uploading…' : 'Upload'}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* reassign (move) modal — fix batch-upload mismatches */}
+      <AlertDialog open={!!moveTarget} onOpenChange={(open) => !open && setMoveTarget(null)}>
+        <AlertDialogContent className="bg-slate-800 border-slate-700 max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4 text-amber-300" />
+              Move document to another employee
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              "{moveTarget?.docName}" is currently attached to <span className="text-slate-200">{employeeName || selectedEmployee?.fullName || 'this employee'}</span>.
+              Search for the correct employee — the file moves with the record and the audit log notes the transfer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <Input
+              autoFocus
+              value={moveSearch}
+              onChange={(e) => setMoveSearch(e.target.value)}
+              placeholder="Search by name or employee ID…"
+              className={inputCls}
+            />
+            <div className="max-h-52 overflow-y-auto space-y-1">
+              {moveSearch.trim() && moveOptions.length === 0 ? (
+                <p className="text-[11px] text-slate-500 text-center py-3">No matching employees</p>
+              ) : (
+                moveOptions.map((emp) => (
+                  <button
+                    key={emp.id}
+                    type="button"
+                    disabled={moving}
+                    className="w-full text-left rounded-md px-2.5 py-2 hover:bg-slate-700/50 transition-colors disabled:opacity-50"
+                    onClick={() => handleMove({ id: emp.id, fullName: emp.fullName })}
+                  >
+                    <span className="text-xs text-slate-200">{emp.fullName}</span>
+                    <span className="text-[10px] text-slate-500 font-mono ml-2">{emp.employeeId}</span>
+                    {emp.trade && <span className="text-[10px] text-slate-500 ml-2">· {emp.trade}</span>}
+                  </button>
+                ))
+              )}
+              {moving && <p className="text-[11px] text-blue-300 text-center py-1">Moving…</p>}
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-slate-600 text-slate-300 hover:bg-slate-700">Cancel</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

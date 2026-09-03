@@ -22,6 +22,7 @@ import {
   IdCard,
   Plane,
   FolderOpen,
+  UploadCloud,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +37,8 @@ import {
 import { cn } from '@/lib/utils';
 import { inputCls } from '@/components/documents/shared';
 import { EmployeeDocumentsPanel } from '@/components/documents/employee-documents-panel';
+import { BatchDocUploadDialog } from '@/components/documents/batch-doc-upload';
+import { useToast } from '@/hooks/use-toast';
 
 interface DirectoryEmployee {
   id: string;
@@ -67,6 +70,7 @@ function CountPill({ icon: Icon, count, label }: { icon: React.ElementType; coun
 }
 
 export function EmployeeDocsDirectory({ refreshKey = 0 }: { refreshKey?: number }) {
+  const { toast } = useToast();
   const [search, setSearch] = React.useState('');
   const [filter, setFilter] = React.useState<'all' | 'with_docs'>('all');
   const [page, setPage] = React.useState(1);
@@ -77,6 +81,17 @@ export function EmployeeDocsDirectory({ refreshKey = 0 }: { refreshKey?: number 
   const [loading, setLoading] = React.useState(true);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [expandedNonce, setExpandedNonce] = React.useState(0);
+  const [batchOpen, setBatchOpen] = React.useState(false);
+  const [dirNonce, setDirNonce] = React.useState(0); // bumped after a batch upload
+
+  // fire the parent refresh by touching refreshKey-dependent state is not
+  // possible from here — instead a local reload is triggered via dirNonce.
+  React.useEffect(() => {
+    if (dirNonce > 0) {
+      setPage(1);
+      setExpandedId(null);
+    }
+  }, [dirNonce]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -105,7 +120,7 @@ export function EmployeeDocsDirectory({ refreshKey = 0 }: { refreshKey?: number 
   React.useEffect(() => {
     const t = setTimeout(load, search.trim() ? 300 : 0);
     return () => clearTimeout(t);
-  }, [load, search, refreshKey]);
+  }, [load, search, refreshKey, dirNonce]);
 
   const changePage = (p: number) => { setPage(p); setExpandedId(null); };
   const changePageSize = (s: number) => { setPageSize(s); setPage(1); setExpandedId(null); };
@@ -124,6 +139,15 @@ export function EmployeeDocsDirectory({ refreshKey = 0 }: { refreshKey?: number 
           <h3 className="text-sm font-semibold text-white">Employees</h3>
           <Badge variant="secondary" className="bg-slate-700 text-slate-300">{total}</Badge>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setBatchOpen(true)}
+              className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs"
+              title="Drag & drop documents for many employees at once"
+            >
+              <UploadCloud className="h-3.5 w-3.5 mr-1.5" />
+              Batch Upload
+            </Button>
             <div className="relative">
               <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
               <Input
@@ -210,6 +234,16 @@ export function EmployeeDocsDirectory({ refreshKey = 0 }: { refreshKey?: number 
           })}
         </div>
       )}
+
+      {/* batch drag & drop upload */}
+      <BatchDocUploadDialog
+        open={batchOpen}
+        onClose={() => setBatchOpen(false)}
+        onCompleted={() => {
+          setDirNonce((n) => n + 1);
+          toast({ title: 'Documents uploaded', description: 'The employee list now reflects the new documents.' });
+        }}
+      />
 
       {/* pagination */}
       <div className="flex flex-wrap items-center gap-2 px-1">

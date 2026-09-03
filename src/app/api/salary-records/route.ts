@@ -37,25 +37,35 @@ export async function GET(request: NextRequest) {
       where.siteId = siteId;
     }
 
+    // Payload tuning: the salary-record row already carries every display
+    // field denormalized (empName, employeeCode, trade, nationality, siteName),
+    // so the heavy per-record `employee` include is OFF by default — it blew
+    // the list payload up ~8x (300KB+ for a month). Pass ?withEmployee=1 to
+    // opt in when a caller really needs the live employee join.
+    const withEmployee = request.nextUrl.searchParams.get('withEmployee') === '1';
     const records = await db.salaryRecord.findMany({
       where,
       orderBy: [{ slNo: 'asc' }, { empName: 'asc' }],
-      include: {
-        employee: {
-          select: {
-            id: true,
-            fullName: true,
-            employeeId: true,
-            currentSite: true,
-            trade: true,
-            nationality: true,
-            customHourlyRate: true,
-            isTeamLeader: true,
-            isSupervisor: true,
-            role: true,
-          },
-        },
-      },
+      ...(withEmployee
+        ? {
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  employeeId: true,
+                  currentSite: true,
+                  trade: true,
+                  nationality: true,
+                  customHourlyRate: true,
+                  isTeamLeader: true,
+                  isSupervisor: true,
+                  role: true,
+                },
+              },
+            },
+          }
+        : {}),
     });
 
     // ── Merge pending advances into the records ──

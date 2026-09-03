@@ -84,6 +84,20 @@ export async function PATCH(
 
     if (typeof body.amount === 'number' && body.amount > 0) {
       updateData.amount = body.amount;
+      // Recurring advances track a remaining balance — when the total amount
+      // changes, the balance must shift by the same delta, otherwise the
+      // advance can never complete (or completes early). Repayments already
+      // made are preserved: only the difference is applied.
+      if (existing.deductionType === 'recurring' && existing.remainingBalance !== null && body.deductionType !== 'one_time') {
+        const delta = body.amount - existing.amount;
+        const nextBalance = Math.max(0, (existing.remainingBalance ?? 0) + delta);
+        updateData.remainingBalance = nextBalance;
+        if (nextBalance === 0 && existing.status === 'active') {
+          updateData.status = 'completed';
+        } else if (nextBalance > 0 && existing.status === 'completed') {
+          updateData.status = 'active';
+        }
+      }
     }
     if (typeof body.reason === 'string') {
       updateData.reason = body.reason;

@@ -16,14 +16,14 @@ export async function GET(request: NextRequest) {
     }
 
     const permissions = await db.adminMenuPermission.findMany({
-      where: { userId },
-      select: { id: true, menuId: true },
+      where: { userId, allowed: true },
+      select: { id: true, menuKey: true },
     });
 
     return NextResponse.json({
       success: true,
       data: {
-        permissions: permissions.map((p) => p.menuId),
+        permissions: permissions.map((p) => p.menuKey),
       },
     });
   } catch (error) {
@@ -123,9 +123,10 @@ export async function PUT(request: NextRequest) {
         // Create new permissions
         if (menuIds.length > 0) {
           await tx.adminMenuPermission.createMany({
-            data: menuIds.map((menuId: string) => ({
+            data: menuIds.map((menuKey: string) => ({
               userId,
-              menuId,
+              menuKey,
+              allowed: true,
             })),
           });
         }
@@ -138,9 +139,10 @@ export async function PUT(request: NextRequest) {
         await db.adminMenuPermission.deleteMany({ where: { userId } });
         if (menuIds.length > 0) {
           await db.adminMenuPermission.createMany({
-            data: menuIds.map((menuId: string) => ({
+            data: menuIds.map((menuKey: string) => ({
               userId,
-              menuId,
+              menuKey,
+              allowed: true,
             })),
           });
         }

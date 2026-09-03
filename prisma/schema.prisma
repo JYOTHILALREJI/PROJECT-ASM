@@ -126,6 +126,7 @@ model Employee {
   documents            EmployeeDocument[]
 
   @@index([trade])
+  @@index([status])
   @@index([isTeamLeader])
   @@index([isSupervisor])
   @@index([currentSite])
