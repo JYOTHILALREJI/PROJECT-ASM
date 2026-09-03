@@ -12,6 +12,7 @@ const PERMISSION_SEEDS = [
   { name: 'Consolidated Salary', slug: 'consolidated_salary', group: 'finance' },
   { name: 'Employee Hours', slug: 'employee_hours', group: 'finance' },
   { name: 'Materials Registry', slug: 'uniform_registry', group: 'workforce' },
+  { name: 'Documents', slug: 'documents', group: 'workforce' },
   { name: 'Leave Requests', slug: 'leave_requests', group: 'workforce' },
   { name: 'Cancellations', slug: 'cancellation_requests', group: 'workforce' },
   { name: 'Notifications', slug: 'notifications', group: 'general' },

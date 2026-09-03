@@ -32,6 +32,7 @@ import {
   History,
   Tent,
   User,
+  FolderOpen,
   PanelLeft,
   Loader2,
 } from 'lucide-react';
@@ -75,6 +76,7 @@ const PAGE_ITEMS: { view: AppView; label: string; icon: React.ElementType; keywo
   { view: 'accounts', label: 'Accounts', icon: DollarSign, keywords: 'salary payroll finance' },
   { view: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, keywords: 'payroll report excel' },
   { view: 'uniform_registry', label: 'Materials Registry', icon: Shirt, keywords: 'uniform stock inventory' },
+  { view: 'documents', label: 'Documents', icon: FolderOpen, keywords: 'noc no objection certificate documents passport id visa scan' },
   { view: 'leave_requests', label: 'Leave Requests', icon: FileText, keywords: 'vacation time off' },
   { view: 'cancellation_requests', label: 'Cancellation Requests', icon: Ban, keywords: 'cancel exit' },
   { view: 'notifications', label: 'Notifications', icon: Bell, keywords: 'alerts unread' },

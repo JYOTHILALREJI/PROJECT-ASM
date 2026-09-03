@@ -61,3 +61,6 @@ dev-server.log
 .zscripts/
 tests/
 skills/
+
+# Documents module binary storage (NOC PDFs, employee scans)
+/storage/

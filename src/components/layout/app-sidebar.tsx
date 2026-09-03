@@ -22,6 +22,7 @@ import {
   Link2,
   History,
   Tent,
+  FolderOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -65,6 +66,7 @@ const navItems: NavItem[] = [
   { id: 'camps', label: 'Camps', icon: Tent, permissionSlug: 'camps', roles: ['super_admin'] },
   { id: 'attendance', label: 'Attendance', icon: Calendar, permissionSlug: 'attendance', roles: ['super_admin'] },
   { id: 'attendance_copy', label: 'Attendance Copy', icon: Link2, permissionSlug: 'attendance_copy', roles: ['super_admin'] },
+  { id: 'documents', label: 'Documents', icon: FolderOpen, permissionSlug: 'documents' },
   { id: 'accounts', label: 'Accounts', icon: DollarSign, permissionSlug: 'accounts', roles: ['super_admin'] },
   { id: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, permissionSlug: 'consolidated_salary', roles: ['super_admin'] },
   { id: 'uniform_registry', label: 'Materials Registry', icon: Shirt, permissionSlug: 'uniform_registry' },

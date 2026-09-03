@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AppView = 'dashboard' | 'employees' | 'employee_add' | 'employee_batch_add' | 'sites' | 'attendance' | 'attendance_copy' | 'all_logs' | 'notifications' | 'admins' | 'leave_requests' | 'cancellation_requests' | 'uniform_registry' | 'accounts' | 'advance' | 'consolidated_salary' | 'employee_hours_ledger' | 'employee_detail' | 'camps' | 'camp_detail' | 'profile';
+export type AppView = 'documents' | 'dashboard' | 'employees' | 'employee_add' | 'employee_batch_add' | 'sites' | 'attendance' | 'attendance_copy' | 'all_logs' | 'notifications' | 'admins' | 'leave_requests' | 'cancellation_requests' | 'uniform_registry' | 'accounts' | 'advance' | 'consolidated_salary' | 'employee_hours_ledger' | 'employee_detail' | 'camps' | 'camp_detail' | 'profile';
 
 interface AppState {
   currentView: AppView;

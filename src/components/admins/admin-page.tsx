@@ -33,6 +33,7 @@ import {
   Clock,
   History,
   Link2,
+  FolderOpen,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -173,6 +174,7 @@ const SIDEBAR_MENUS = [
   { slug: 'consolidated_salary', label: 'Consolidated Salary', icon: Calculator, group: 'finance', alwaysVisible: false },
   { slug: 'employee_hours', label: 'Employee Hours', icon: Clock, group: 'finance', alwaysVisible: false },
   { slug: 'uniform_registry', label: 'Materials Registry', icon: Shirt, group: 'workforce', alwaysVisible: false },
+  { slug: 'documents', label: 'Documents', icon: FolderOpen, group: 'workforce', alwaysVisible: false },
   { slug: 'leave_requests', label: 'Leave Requests', icon: FileText, group: 'workforce', alwaysVisible: false },
   { slug: 'cancellation_requests', label: 'Cancellations', icon: Ban, group: 'workforce', alwaysVisible: false },
   { slug: 'notifications', label: 'Notifications', icon: Bell, group: 'general', alwaysVisible: false },
