@@ -47,6 +47,7 @@ model User {
   adminPermissions             AdminPermission[]
   attendanceVersions           AttendanceVersion[]
   activityLogs                 ActivityLog[]
+  aiChatSessions               AiChatSession[]
 }
 
 model AdminMenuPermission {
@@ -1123,4 +1124,35 @@ model NocTemplate {
   contactPhone  String   @default("050 797 4153")
   contactEmail  String   @default("mafeedaarabianshieldmanpower@gmail.com")
   updatedAt     DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// AI Assistant chat persistence — one fresh session is auto-created per user
+// per calendar day (Asia/Dubai). Previous days remain accessible from the
+// assistant's session rail (ChatGPT-style history).
+// ---------------------------------------------------------------------------
+model AiChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day       String // "YYYY-MM-DD" (Asia/Dubai) — unique per user, drives the daily fresh chat
+  title     String   @default("New chat") // derived from the first question of the session
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages AiChatMessage[]
+
+  @@unique([userId, day])
+  @@index([userId, updatedAt])
+}
+
+model AiChatMessage {
+  id        String        @id @default(cuid())
+  sessionId String
+  session   AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String // "user" | "assistant"
+  content   String
+  createdAt DateTime      @default(now())
+
+  @@index([sessionId, createdAt])
 }

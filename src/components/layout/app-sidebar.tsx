@@ -47,10 +47,10 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuthStore, type UserRole } from '@/store/auth-store';
 import { useAppStore, type AppView } from '@/store/app-store';
-import { useSettingsStore } from '@/store/settings-store';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { StaggerContainer, StaggerItem, PulseDot } from '@/components/motion';
+import { BrandMark } from '@/components/layout/brand-mark';
 
 interface NavItem {
   id: AppView;
@@ -91,8 +91,8 @@ interface SidebarContentProps {
 function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) {
   const { currentView, setCurrentView } = useAppStore();
   const { user, logout } = useAuthStore();
-  // Company name is app-wide and editable from the Settings page (super admin).
-  const companyName = useSettingsStore((s) => s.settings.companyName);
+  // Branding (logo / glowing text / company name) is app-wide and editable
+  // from the Settings page (super admin) — rendered via BrandMark below.
   // Badge counts: unread notifications + pending leave/cancellation requests.
   // Each sidebar item shows its own count badge when something comes in.
   const [unreadCount, setUnreadCount] = React.useState(0);
@@ -222,23 +222,15 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
 
   return (
     <div className="flex h-full flex-col bg-slate-900 border-r border-slate-700/50">
-      {/* Logo Section */}
-      <div className="flex shrink-0 items-center gap-3 px-4 py-5">
-        <motion.img
-          src="/logo_asm.png"
-          alt="ASM"
-          className="h-10 w-10 rounded-lg object-contain shrink-0"
-          whileHover={{ rotate: 8, scale: 1.1 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+      {/* Logo Section — branding editable from Settings (logo + glowing text + company name) */}
+      <div className="flex shrink-0 items-center px-4 py-5">
+        <BrandMark
+          logoClassName="h-10 w-10"
+          textClassName="text-lg"
+          showCompany={!collapsed}
+          showText={!collapsed}
+          className="min-w-0"
         />
-        {!collapsed && (
-          <div className="flex flex-col min-w-0">
-            <span className="asm-gradient-text font-bold text-lg leading-tight">ASM</span>
-            <span className="text-xs text-slate-400 truncate">
-              {companyName || 'Arabian Shield Manpower'}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Online presence — always directly below the company logo.

@@ -38,17 +38,26 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { usePresenceHeartbeat } from '@/hooks/use-presence-heartbeat';
 import { PageTransition } from '@/components/motion';
 import { CommandPalette } from '@/components/layout/command-palette';
+import { RoboAssistant } from '@/components/ai/robo-assistant';
 
 type AppState = 'checking' | 'needs_setup' | 'unauthenticated' | 'authenticated';
 
 function LoadingScreen() {
+  // Branding comes from the public /api/settings — also pre-login.
+  React.useEffect(() => {
+    useSettingsStore.getState().fetchSettings();
+  }, []);
+
+  const brandName = useSettingsStore((s) => s.settings.brandName);
+  const brandLogo = useSettingsStore((s) => s.settings.brandLogo);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-6 w-full max-w-sm px-4">
         <div className="flex flex-col items-center gap-3">
           <motion.img
-            src="/logo_asm.png"
-            alt="ASM"
+            src={brandLogo || '/logo_asm.png'}
+            alt={brandName || 'ASM'}
             className="h-14 w-14 rounded-2xl object-contain shadow-lg"
             initial={{ scale: 0.6, opacity: 0, rotate: -8 }}
             animate={{ scale: 1, opacity: 1, rotate: 0 }}
@@ -60,7 +69,7 @@ function LoadingScreen() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
           >
-            <span className="asm-gradient-text text-2xl font-bold">ASM</span>
+            <span className="asm-gradient-text text-2xl font-bold">{brandName || 'ASM'}</span>
             <span className="text-xs text-slate-500">Loading your workspace…</span>
           </motion.div>
         </div>
@@ -286,6 +295,7 @@ function MainLayout() {
       </div>
       <CommandPalette />
       <ScrollToTopButton />
+      <RoboAssistant />
     </div>
   );
 }

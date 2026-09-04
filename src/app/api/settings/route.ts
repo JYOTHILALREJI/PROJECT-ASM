@@ -8,6 +8,8 @@ import { db } from '@/lib/db';
 export const SETTING_DEFAULTS: Record<string, string> = {
   currency: 'AED', // dirhams by default — used by every money display
   companyName: 'Arabian Shield Manpower',
+  brandName: 'ASM', // short glowing brand text shown in the sidebar / login
+  brandLogo: '', // data-URL image; empty → falls back to the bundled /logo_asm.png
 };
 
 // Whitelist: only these keys can ever be written via the API.
@@ -19,12 +21,26 @@ const VALID_CURRENCIES = new Set([
 ]);
 
 function validateValue(key: string, value: string): string | null {
+  if (key === 'brandLogo') {
+    // Logo is a base64 data-URL produced (and resized) client-side. Allow up to
+    // ~500 KB of base64 (~375 KB binary) — plenty for a 256px logo.
+    if (value.length === 0) return null; // empty = use the default bundled logo
+    if (value.length > 500_000) return 'Logo image is too large (keep it under ~350 KB)';
+    if (!/^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,/.test(value)) {
+      return 'Logo must be an image (PNG, JPG, GIF, WEBP or SVG)';
+    }
+    return null;
+  }
   if (value.length > 200) return `${key} is too long (max 200 characters)`;
   if (key === 'currency' && !VALID_CURRENCIES.has(value)) {
     return `Invalid currency: ${value}`;
   }
   if (key === 'companyName' && value.trim().length === 0) {
     return 'Company name cannot be empty';
+  }
+  if (key === 'brandName') {
+    if (value.trim().length === 0) return 'Brand text cannot be empty';
+    if (value.length > 24) return 'Brand text is too long (max 24 characters)';
   }
   return null;
 }
@@ -100,7 +116,11 @@ export async function PUT(request: NextRequest) {
           { status: 400 }
         );
       }
-      const value = String(settings[key] ?? '').trim();
+      // brandLogo is a data-URL — never trim it (whitespace is significant in
+      // base64). Everything else is trimmed like before.
+      const value = key === 'brandLogo'
+        ? String(settings[key] ?? '')
+        : String(settings[key] ?? '').trim();
       const validationError = validateValue(key, value);
       if (validationError) {
         return NextResponse.json({ success: false, error: validationError }, { status: 400 });

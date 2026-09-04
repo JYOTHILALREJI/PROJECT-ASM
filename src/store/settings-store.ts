@@ -8,11 +8,17 @@ export interface AppSettings {
   currency: string;
   /** Company name shown in the sidebar / branding. */
   companyName: string;
+  /** Short glowing brand text (e.g. "ASM") shown beside the logo. */
+  brandName: string;
+  /** Logo as a data-URL; empty string → falls back to the bundled /logo_asm.png. */
+  brandLogo: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   currency: DEFAULT_CURRENCY, // AED — dirhams by default
   companyName: 'Arabian Shield Manpower',
+  brandName: 'ASM',
+  brandLogo: '',
 };
 
 interface SettingsState {

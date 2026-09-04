@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
+import { BrandMark } from '@/components/layout/brand-mark';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -75,26 +76,26 @@ export function LoginPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       >
-        {/* Branding */}
+        {/* Branding — logo / glowing text / company name are editable from Settings */}
         <motion.div
           className="flex flex-col items-center mb-8"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.45 }}
         >
-          <motion.img
-            src="/logo_asm.png"
-            alt="ASM"
-            className="h-14 w-14 rounded-2xl object-contain shadow-lg shadow-blue-500/20 mb-4"
+          <motion.div
             initial={{ scale: 0.5, rotate: -10, opacity: 0 }}
             animate={{ scale: 1, rotate: 0, opacity: 1 }}
             transition={{ type: 'spring', stiffness: 220, damping: 16, delay: 0.15 }}
             whileHover={{ rotate: 6, scale: 1.08 }}
-          />
-          <h1 className="asm-gradient-text text-2xl font-bold">ASM</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Arabian Shield Manpower
-          </p>
+          >
+            <BrandMark
+              logoClassName="h-14 w-14 rounded-2xl shadow-lg shadow-blue-500/20"
+              textClassName="text-2xl"
+              showCompany
+              vertical
+            />
+          </motion.div>
         </motion.div>
 
         {/* Login Card */}
