@@ -1447,7 +1447,7 @@ export function AccountsPage() {
             </CardHeader>
             <CardContent className="px-4 pt-0">
               <p className="text-xl font-bold text-white">{formatNumber(grandTotals.totalSalary)}</p>
-              <p className="text-xs text-slate-500 mt-0.5">DHS</p>
+              <p className="text-xs text-slate-500 mt-0.5">{currency}</p>
             </CardContent>
           </Card>
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
@@ -1459,7 +1459,7 @@ export function AccountsPage() {
             </CardHeader>
             <CardContent className="px-4 pt-0">
               <p className="text-xl font-bold text-white">{formatNumber(grandTotals.balanceDue)}</p>
-              <p className="text-xs text-slate-500 mt-0.5">DHS (unpaid only)</p>
+              <p className="text-xs text-slate-500 mt-0.5">{currency} (unpaid only)</p>
             </CardContent>
           </Card>
           <Card className="bg-slate-800/50 border-slate-700/50 py-3">
@@ -1615,7 +1615,7 @@ export function AccountsPage() {
                     </div>
                     <p className="text-[11px] text-slate-500">
                       {branchSites.length} site{branchSites.length !== 1 ? 's' : ''} · {branchTotalEmployees} employee{branchTotalEmployees !== 1 ? 's' : ''}
-                      {' · '}<span className="text-slate-200 font-medium">{formatNumber(branchTotalSalary)} DHS</span>
+                      {' · '}<span className="text-slate-200 font-medium">{formatNumber(branchTotalSalary)} {currency}</span>
                     </p>
                   </div>
                 </div>
@@ -1673,7 +1673,7 @@ export function AccountsPage() {
                       Hrs: <span className="text-white font-semibold">{formatNumber(siteTotalHours)}</span>
                     </span>
                     <span className={cn('font-semibold', colorScheme.accent)}>
-                      {formatNumber(siteTotalSalary)} DHS
+                      {formatNumber(siteTotalSalary)} {currency}
                     </span>
                   </div>
                 </button>
@@ -1692,7 +1692,7 @@ export function AccountsPage() {
                           <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[80px]">Total Hrs</th>
                           <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[85px] bg-slate-800/60">{lowRateHeader}</th>
                           <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[85px] bg-slate-800/60">{highRateHeader}</th>
-                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-slate-800/60">Salary (DHS)</th>
+                          <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-slate-800/60">Salary ({currency})</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[90px]">Advance</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[90px]">Deduction</th>
                           <th className="text-slate-300 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap min-w-[110px] bg-slate-800/60">Total Salary</th>
@@ -1878,7 +1878,7 @@ export function AccountsPage() {
                                   )}
                                 </td>
 
-                                {/* Salary (DHS) - hours × rate = salary format */}
+                                {/* Salary ({currency}) - hours × rate = salary format */}
                                 <td className="py-1.5 px-2 text-right bg-slate-800/20">
                                   <div className="flex flex-col items-end gap-0.5">
                                     <span className="text-[9px] text-slate-500 font-mono">

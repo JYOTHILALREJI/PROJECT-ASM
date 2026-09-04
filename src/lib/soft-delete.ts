@@ -85,12 +85,40 @@ export async function cascadeSoftDeleteEmployee(employeeId: string): Promise<voi
       data: { deletedAt: stamp },
     });
 
-    // 11. Finally, the employee itself
+    // 11. Finally, the employee itself (isDeleted = explicit recycle-bin flag)
     await tx.employee.update({
       where: { id: employeeId },
-      data: { deletedAt: stamp, status: 'deleted' },
+      data: { deletedAt: stamp, status: 'deleted', isDeleted: true },
     });
   });
+}
+
+/**
+ * Permanently (irreversibly) delete an Employee and every related record.
+ *
+ * All Employee child relations are `onDelete: Cascade` in the schema EXCEPT
+ * LeaveRequest and CancellationRequest (Prisma default = Restrict), so those
+ * two are explicitly removed first; the employee row delete then lets the
+ * database cascade remove attendance, warnings, fines, uniform registry,
+ * salary records, working hours, site history, work logs, advances (+
+ * repayments), trades, rate changelogs and employee documents.
+ *
+ * Returns the list of relative file paths belonging to the deleted employee's
+ * documents so callers can clean physical files off disk after commit.
+ */
+export async function permanentlyDeleteEmployee(employeeId: string): Promise<{ filePaths: string[] }> {
+  const docs = await db.employeeDocument.findMany({
+    where: { employeeId },
+    select: { filePath: true },
+  });
+
+  await db.$transaction(async (tx) => {
+    await tx.leaveRequest.deleteMany({ where: { employeeId } });
+    await tx.cancellationRequest.deleteMany({ where: { employeeId } });
+    await tx.employee.delete({ where: { id: employeeId } });
+  });
+
+  return { filePaths: docs.map((d) => d.filePath) };
 }
 
 /**
@@ -141,7 +169,7 @@ export async function restoreSoftDeletedEmployee(employeeId: string): Promise<vo
     });
     await tx.employee.update({
       where: { id: employeeId },
-      data: { deletedAt: null, status: 'active' },
+      data: { deletedAt: null, status: 'active', isDeleted: false },
     });
   });
 }

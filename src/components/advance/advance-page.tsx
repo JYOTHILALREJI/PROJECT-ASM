@@ -707,7 +707,7 @@ export function AdvancePage() {
                 <>
                   {/* Common amount input */}
                   <div className="space-y-2 pb-3 border-b border-slate-700/50">
-                    <Label className="text-xs text-slate-400">Common amount (DHS)</Label>
+                    <Label className="text-xs text-slate-400">Common amount ({currency})</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         type="number"
@@ -763,7 +763,7 @@ export function AdvancePage() {
                     </div>
                     {deductionType === 'recurring' && (
                       <div className="space-y-1.5 mt-2">
-                        <Label className="text-xs text-violet-400">Monthly deduction amount (DHS/month)</Label>
+                        <Label className="text-xs text-violet-400">Monthly deduction amount ({currency}/month)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -919,7 +919,7 @@ export function AdvancePage() {
                         <div className="text-[10px] text-slate-500 text-right">
                           Amount: <span className="text-amber-300 font-medium">
                             {formatNumber(item.useCustom ? item.amount : commonAmount)}
-                          </span> DHS
+                          </span> {currency}
                         </div>
                       </div>
                     ))}
@@ -929,7 +929,7 @@ export function AdvancePage() {
                   <div className="pt-3 border-t border-slate-700/50 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate-400">Total advances:</span>
-                      <span className="text-lg font-bold text-amber-300">{formatNumber(totalBucketAmount)} DHS</span>
+                      <span className="text-lg font-bold text-amber-300">{formatNumber(totalBucketAmount)} {currency}</span>
                     </div>
                     <Button
                       onClick={handleSave}
@@ -963,7 +963,7 @@ export function AdvancePage() {
                 <span className="text-sm text-slate-400 font-normal">
                   Total: <span className="text-amber-300 font-bold">
                     {formatNumber(pendingAdvances.reduce((s, a) => s + a.amount, 0))}
-                  </span> DHS
+                  </span> {currency}
                 </span>
               )}
             </CardTitle>
@@ -1011,14 +1011,14 @@ export function AdvancePage() {
                         )}
                         {adv.deductionType === 'recurring' && (
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/25 font-medium">
-                            Recurring · {formatNumber(adv.monthlyDeductionAmount ?? 0)} DHS/mo
+                            Recurring · {formatNumber(adv.monthlyDeductionAmount ?? 0)} {currency}/mo
                             {adv.recurringUntil ? ` · until ${formatMonthKey(adv.recurringUntil)}` : ' · until repaid'}
                           </span>
                         )}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-amber-300">{formatNumber(adv.amount)} DHS</p>
+                      <p className="text-sm font-bold text-amber-300">{formatNumber(adv.amount)} {currency}</p>
                       <p className="text-[10px] text-slate-500">
                         {new Date(adv.createdAt).toLocaleDateString()}
                       </p>
@@ -1058,13 +1058,13 @@ export function AdvancePage() {
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="text-[10px] text-slate-500 font-mono">{adv.employeeCode}</span>
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/25 font-medium">
-                              {formatNumber(adv.monthlyDeductionAmount ?? 0)} DHS/mo
+                              {formatNumber(adv.monthlyDeductionAmount ?? 0)} {currency}/mo
                             </span>
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 border border-slate-600 font-medium">
                               until {adv.recurringUntil ? formatMonthKey(adv.recurringUntil) : 'fully repaid'}
                             </span>
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 font-medium">
-                              remaining {formatNumber(adv.remainingBalance ?? adv.amount)} DHS
+                              remaining {formatNumber(adv.remainingBalance ?? adv.amount)} {currency}
                             </span>
                             {adv.reason && (
                               <span className="text-[10px] text-slate-400 italic truncate">— {adv.reason}</span>
@@ -1072,7 +1072,7 @@ export function AdvancePage() {
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-sm font-bold text-amber-300">{formatNumber(adv.amount)} DHS</p>
+                          <p className="text-sm font-bold text-amber-300">{formatNumber(adv.amount)} {currency}</p>
                           <p className="text-[10px] text-slate-500">
                             {new Date(adv.createdAt).toLocaleDateString()}
                           </p>

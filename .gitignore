@@ -64,3 +64,5 @@ skills/
 
 # Documents module binary storage (NOC PDFs, employee scans)
 /storage/
+db/custom.db-shm
+db/custom.db-wal

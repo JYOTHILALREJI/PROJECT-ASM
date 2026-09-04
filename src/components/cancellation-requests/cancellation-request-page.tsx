@@ -14,6 +14,10 @@ import {
   AlertCircle,
   User,
   RotateCcw,
+  Archive,
+  ArchiveRestore,
+  Trash2,
+  ShieldAlert,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,6 +49,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { cn } from '@/lib/utils';
@@ -85,6 +99,31 @@ const EMPLOYEE_STATUS_CONFIG: Record<string, { label: string; color: string }> =
   pending_deletion: { label: 'Pending Deletion', color: 'bg-amber-500/15 text-amber-400 border-amber-500/25' },
   deleted: { label: 'Deleted', color: 'bg-red-500/15 text-red-400 border-red-500/25' },
 };
+
+/* ───────── Recycle Bin types ───────── */
+interface RecycleBinEmployee {
+  id: string;
+  employeeId: string;
+  fullName: string;
+  position: string | null;
+  trade: string | null;
+  nationality: string | null;
+  currentSite: string | null;
+  status: string;
+  isDeleted: boolean;
+  deletedAt: string | null;
+  createdAt: string;
+  cancellationReason: string | null;
+  relatedCounts: {
+    attendance: number;
+    salaryRecords: number;
+    documents: number;
+    uniforms: number;
+    warnings: number;
+    fines: number;
+    advances: number;
+  };
+}
 
 /* ───────── Searchable Employee Dropdown ───────── */
 interface SearchableEmployeeSelectProps {
@@ -261,8 +300,23 @@ export function CancellationRequestPage() {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [reviewingRequest, setReviewingRequest] = useState<CancellationRequest | null>(null);
   const [reviewAction, setReviewAction] = useState<'approved' | 'rejected'>('approved');
+  // On approval: "soft" moves the employee to the Recycle Bin (restorable),
+  // "permanent" deletes the record and everything related to it forever.
+  const [deletionMode, setDeletionMode] = useState<'soft' | 'permanent'>('soft');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+
+  // Tabs: requests | recycle_bin
+  const [activeTab, setActiveTab] = useState<'requests' | 'recycle_bin'>('requests');
+
+  // Recycle Bin state
+  const [binEmployees, setBinEmployees] = useState<RecycleBinEmployee[]>([]);
+  const [binLoading, setBinLoading] = useState(false);
+  const [binLoaded, setBinLoaded] = useState(false);
+  const [restoringTarget, setRestoringTarget] = useState<RecycleBinEmployee | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RecycleBinEmployee | null>(null);
+  const [emptyBinOpen, setEmptyBinOpen] = useState(false);
+  const [isBinActioning, setIsBinActioning] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -390,6 +444,7 @@ export function CancellationRequestPage() {
           status: reviewAction,
           reviewedBy: user.id,
           actorDisplayName: user.name || user.email,
+          deletionMode,
         }),
       });
       const json = await res.json();
@@ -397,13 +452,16 @@ export function CancellationRequestPage() {
         toast({
           title: reviewAction === 'approved' ? 'Cancellation Approved' : 'Cancellation Rejected',
           description: reviewAction === 'approved'
-            ? 'The employee has been marked as deleted.'
+            ? deletionMode === 'permanent'
+              ? 'The employee record has been permanently deleted.'
+              : 'The employee has been moved to the Recycle Bin and can be restored later.'
             : 'The employee status has been restored to active.',
         });
         setReviewDialogOpen(false);
         setReviewingRequest(null);
         fetchCancellationRequests();
         fetchEmployees();
+        setBinLoaded(false); // recycle bin contents changed — refetch when opened
         window.dispatchEvent(new Event('asm:refresh-badge-counts'));
       } else {
         toast({ title: 'Error', description: json.error || 'Failed to review request', variant: 'destructive' });
@@ -427,7 +485,122 @@ export function CancellationRequestPage() {
   const openReviewDialog = (request: CancellationRequest, action: 'approved' | 'rejected') => {
     setReviewingRequest(request);
     setReviewAction(action);
+    setDeletionMode('soft'); // default to the safe (restorable) option
     setReviewDialogOpen(true);
+  };
+
+  /* ── Recycle Bin ── */
+  const fetchRecycleBin = useCallback(async () => {
+    setBinLoading(true);
+    try {
+      const res = await fetch('/api/recycle-bin');
+      const json = await res.json();
+      if (json.success) {
+        setBinEmployees(json.data.employees || []);
+        setBinLoaded(true);
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load the Recycle Bin', variant: 'destructive' });
+    } finally {
+      setBinLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (activeTab === 'recycle_bin' && !binLoaded && !binLoading) {
+      fetchRecycleBin();
+    }
+  }, [activeTab, binLoaded, binLoading, fetchRecycleBin]);
+
+  const handleRestore = async () => {
+    if (!restoringTarget || !user) return;
+    setIsBinActioning(true);
+    try {
+      const res = await fetch(`/api/recycle-bin/${restoringTarget.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, actorDisplayName: user.name || user.email }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: 'Employee Restored',
+          description: `${restoringTarget.fullName} has been restored to active status.`,
+        });
+        setRestoringTarget(null);
+        fetchRecycleBin();
+        fetchCancellationRequests();
+        fetchEmployees();
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to restore employee', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Something went wrong', variant: 'destructive' });
+    } finally {
+      setIsBinActioning(false);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!deleteTarget || !user) return;
+    setIsBinActioning(true);
+    try {
+      const res = await fetch(`/api/recycle-bin/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, actorDisplayName: user.name || user.email }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: 'Employee Permanently Deleted',
+          description: `${deleteTarget.fullName} and all related records have been permanently deleted.`,
+        });
+        setDeleteTarget(null);
+        fetchRecycleBin();
+        fetchCancellationRequests();
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to delete employee', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Something went wrong', variant: 'destructive' });
+    } finally {
+      setIsBinActioning(false);
+    }
+  };
+
+  const handleEmptyBin = async () => {
+    if (!user) return;
+    setIsBinActioning(true);
+    try {
+      const res = await fetch('/api/recycle-bin', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, actorDisplayName: user.name || user.email }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        const count = json.data?.deletedCount ?? 0;
+        toast({
+          title: 'Recycle Bin Emptied',
+          description: count === 0
+            ? 'The Recycle Bin is already empty.'
+            : `${count} employee record(s) permanently deleted.`,
+        });
+        setEmptyBinOpen(false);
+        fetchRecycleBin();
+        fetchCancellationRequests();
+        window.dispatchEvent(new Event('asm:refresh-badge-counts'));
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to empty the Recycle Bin', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Something went wrong', variant: 'destructive' });
+    } finally {
+      setIsBinActioning(false);
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -445,18 +618,80 @@ export function CancellationRequestPage() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Cancellation Requests</h2>
-          <p className="text-slate-400 mt-1">Manage employee cancellation and deletion requests.</p>
+          <h2 className="text-2xl font-bold text-white">
+            {activeTab === 'requests' ? 'Cancellation Requests' : 'Recycle Bin'}
+          </h2>
+          <p className="text-slate-400 mt-1">
+            {activeTab === 'requests'
+              ? 'Manage employee cancellation and deletion requests.'
+              : 'Soft-deleted employees restorable at any time — or remove them forever.'}
+          </p>
         </div>
-        <Button
-          onClick={openCreateDialog}
-          className="bg-blue-500 hover:bg-blue-600 text-white gap-2 self-start"
-        >
-          <Plus className="h-4 w-4" />
-          New Cancellation Request
-        </Button>
+        {activeTab === 'requests' ? (
+          <Button
+            onClick={openCreateDialog}
+            className="bg-blue-500 hover:bg-blue-600 text-white gap-2 self-start"
+          >
+            <Plus className="h-4 w-4" />
+            New Cancellation Request
+          </Button>
+        ) : (
+          <Button
+            onClick={() => setEmptyBinOpen(true)}
+            disabled={binEmployees.length === 0 || isBinActioning}
+            className="bg-red-500/90 hover:bg-red-600 text-white gap-2 self-start"
+          >
+            <Trash2 className="h-4 w-4" />
+            Empty Recycle Bin
+            {binEmployees.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-black/25 text-[11px] font-semibold">
+                {binEmployees.length}
+              </span>
+            )}
+          </Button>
+        )}
       </div>
 
+      {/* Tabs: Requests | Recycle Bin */}
+      <div className="flex items-center gap-1 bg-slate-800/60 border border-slate-700/60 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('requests')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            activeTab === 'requests'
+              ? 'bg-slate-700 text-white shadow'
+              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          )}
+        >
+          <Ban className="h-4 w-4" />
+          Requests
+          {stats.pending > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-semibold">
+              {stats.pending}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('recycle_bin')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            activeTab === 'recycle_bin'
+              ? 'bg-slate-700 text-white shadow'
+              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          )}
+        >
+          <Archive className="h-4 w-4" />
+          Recycle Bin
+          {binEmployees.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-300 text-[10px] font-semibold">
+              {binEmployees.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'requests' && (
+      <>
       {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
@@ -604,6 +839,19 @@ export function CancellationRequestPage() {
           </div>
         )}
       </Card>
+      </>
+      )}
+
+      {activeTab === 'recycle_bin' && (
+        <RecycleBinTab
+          employees={binEmployees}
+          loading={binLoading}
+          isSuperAdmin={isSuperAdmin}
+          isActioning={isBinActioning}
+          onRestore={(emp) => setRestoringTarget(emp)}
+          onDelete={(emp) => setDeleteTarget(emp)}
+        />
+      )}
 
       {/* Create Cancellation Request Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
@@ -681,11 +929,6 @@ export function CancellationRequestPage() {
                   You are about to {reviewAction === 'approved' ? 'approve' : 'reject'} the cancellation request
                   for <span className="text-white font-medium">{reviewingRequest.employee.fullName}</span>{' '}
                   ({reviewingRequest.employee.employeeId}).
-                  {reviewAction === 'approved' && (
-                    <span className="block mt-2 text-red-400">
-                      This will permanently delete the employee record.
-                    </span>
-                  )}
                   {reviewAction === 'rejected' && (
                     <span className="block mt-2 text-green-400">
                       The employee will be restored to active status.
@@ -695,6 +938,75 @@ export function CancellationRequestPage() {
               )}
             </DialogDescription>
           </DialogHeader>
+
+          {reviewAction === 'approved' && reviewingRequest && (
+            <div className="space-y-2 py-1">
+              <Label className="text-slate-300 text-sm">On approval, what should happen to the employee?</Label>
+
+              {/* Option 1 — Recycle Bin (soft delete) */}
+              <button
+                type="button"
+                onClick={() => setDeletionMode('soft')}
+                className={cn(
+                  'w-full text-left p-3 rounded-lg border transition-colors',
+                  deletionMode === 'soft'
+                    ? 'border-amber-500/60 bg-amber-500/10'
+                    : 'border-slate-600 bg-slate-900/60 hover:border-slate-500'
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <ArchiveRestore className={cn('h-5 w-5 mt-0.5 shrink-0', deletionMode === 'soft' ? 'text-amber-400' : 'text-slate-500')} />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className={cn('text-sm font-medium', deletionMode === 'soft' ? 'text-amber-200' : 'text-slate-300')}>
+                        Move to Recycle Bin
+                      </p>
+                      <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/25 text-[10px] px-1.5 py-0">
+                        Restorable
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      The record is soft-deleted (is_deleted flag) with all its history — attendance, salaries,
+                      documents — and can be restored any time from the Recycle Bin.
+                    </p>
+                  </div>
+                  <span className={cn('h-4 w-4 rounded-full border-2 mt-0.5 shrink-0', deletionMode === 'soft' ? 'border-amber-400 bg-amber-400' : 'border-slate-500')} />
+                </div>
+              </button>
+
+              {/* Option 2 — Permanent delete */}
+              <button
+                type="button"
+                onClick={() => setDeletionMode('permanent')}
+                className={cn(
+                  'w-full text-left p-3 rounded-lg border transition-colors',
+                  deletionMode === 'permanent'
+                    ? 'border-red-500/60 bg-red-500/10'
+                    : 'border-slate-600 bg-slate-900/60 hover:border-slate-500'
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className={cn('h-5 w-5 mt-0.5 shrink-0', deletionMode === 'permanent' ? 'text-red-400' : 'text-slate-500')} />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className={cn('text-sm font-medium', deletionMode === 'permanent' ? 'text-red-300' : 'text-slate-300')}>
+                        Delete Permanently
+                      </p>
+                      <Badge className="bg-red-500/15 text-red-400 border-red-500/25 text-[10px] px-1.5 py-0">
+                        Irreversible
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      The employee record and ALL related data (attendance, salaries, advances, documents,
+                      warnings, fines…) are removed from the database forever. This cannot be undone.
+                    </p>
+                  </div>
+                  <span className={cn('h-4 w-4 rounded-full border-2 mt-0.5 shrink-0', deletionMode === 'permanent' ? 'border-red-400 bg-red-400' : 'border-slate-500')} />
+                </div>
+              </button>
+            </div>
+          )}
+
           <DialogFooter className="gap-2">
             <Button
               variant="ghost"
@@ -709,16 +1021,248 @@ export function CancellationRequestPage() {
               className={cn(
                 'gap-2 text-white',
                 reviewAction === 'approved'
-                  ? 'bg-red-500 hover:bg-red-600'
+                  ? deletionMode === 'permanent'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-amber-500 hover:bg-amber-600 text-slate-900'
                   : 'bg-green-500 hover:bg-green-600'
               )}
             >
               {isReviewing && <Loader2 className="h-4 w-4 animate-spin" />}
-              {reviewAction === 'approved' ? 'Approve & Delete' : 'Reject & Restore'}
+              {reviewAction === 'approved'
+                ? deletionMode === 'permanent'
+                  ? 'Approve & Delete Permanently'
+                  : 'Approve & Move to Recycle Bin'
+                : 'Reject & Restore'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Restore confirmation */}
+      <AlertDialog open={!!restoringTarget} onOpenChange={(open) => !open && setRestoringTarget(null)}>
+        <AlertDialogContent className="bg-slate-800 border-slate-700 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Restore employee?</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {restoringTarget && (
+                <>
+                  <span className="text-white font-medium">{restoringTarget.fullName}</span> ({restoringTarget.employeeId})
+                  will be restored to active status together with all related records — attendance, salaries,
+                  documents and history. You can cancel the employee again later if needed.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-700 text-white border-slate-600 hover:bg-slate-600">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRestore}
+              disabled={isBinActioning}
+              className="bg-green-500 hover:bg-green-600 text-white font-medium"
+            >
+              {isBinActioning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Restore
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Permanent delete confirmation (single) */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="bg-slate-800 border-slate-700 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Delete permanently?</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {deleteTarget && (
+                <>
+                  <span className="text-white font-medium">{deleteTarget.fullName}</span> ({deleteTarget.employeeId})
+                  and every related record — attendance, salary records, advances, documents, warnings, fines —
+                  will be <span className="text-red-400 font-medium">permanently deleted</span>. This action
+                  cannot be undone.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-700 text-white border-slate-600 hover:bg-slate-600">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handlePermanentDelete}
+              disabled={isBinActioning}
+              className="bg-red-500 hover:bg-red-600 text-white font-medium"
+            >
+              {isBinActioning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Delete Forever
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Empty recycle bin confirmation */}
+      <AlertDialog open={emptyBinOpen} onOpenChange={setEmptyBinOpen}>
+        <AlertDialogContent className="bg-slate-800 border-slate-700 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Empty the Recycle Bin?</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              All {binEmployees.length} employee record{binEmployees.length === 1 ? '' : 's'} in the Recycle Bin —
+              together with every related record — will be{' '}
+              <span className="text-red-400 font-medium">permanently deleted</span>. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-700 text-white border-slate-600 hover:bg-slate-600">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleEmptyBin}
+              disabled={isBinActioning}
+              className="bg-red-500 hover:bg-red-600 text-white font-medium"
+            >
+              {isBinActioning && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Empty Bin
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+/* ───────── Recycle Bin Tab ───────── */
+
+function RecycleBinTab({
+  employees,
+  loading,
+  isSuperAdmin,
+  isActioning,
+  onRestore,
+  onDelete,
+}: {
+  employees: RecycleBinEmployee[];
+  loading: boolean;
+  isSuperAdmin: boolean;
+  isActioning: boolean;
+  onRestore: (emp: RecycleBinEmployee) => void;
+  onDelete: (emp: RecycleBinEmployee) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-16 w-full bg-slate-700/50" />
+        ))}
+      </div>
+    );
+  }
+
+  if (employees.length === 0) {
+    return (
+      <Card className="bg-slate-800 border-slate-700 rounded-xl">
+        <CardContent className="py-16 flex flex-col items-center justify-center text-center gap-3">
+          <div className="h-14 w-14 rounded-full bg-slate-700/50 flex items-center justify-center">
+            <Archive className="h-7 w-7 text-slate-500" />
+          </div>
+          <p className="text-lg font-medium text-white">The Recycle Bin is empty</p>
+          <p className="text-sm text-slate-400 max-w-md">
+            When a cancellation is approved with the &quot;Move to Recycle Bin&quot; option (or an employee is
+            deleted elsewhere in the app), the record lands here — restorable any time.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="bg-slate-800 border-slate-700 rounded-xl overflow-hidden">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-slate-700/50 hover:bg-transparent">
+              <TableHead className="text-slate-400 font-medium">Employee</TableHead>
+              <TableHead className="text-slate-400 font-medium">Last Site</TableHead>
+              <TableHead className="text-slate-400 font-medium">Related Records</TableHead>
+              <TableHead className="text-slate-400 font-medium">Reason</TableHead>
+              <TableHead className="text-slate-400 font-medium">Deleted</TableHead>
+              {isSuperAdmin && (
+                <TableHead className="text-slate-400 font-medium text-right">Actions</TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {employees.map((emp) => {
+              const c = emp.relatedCounts;
+              const totalRelated = c.attendance + c.salaryRecords + c.documents + c.uniforms + c.warnings + c.fines + c.advances;
+              return (
+                <TableRow key={emp.id} className="border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                  <TableCell>
+                    <div>
+                      <p className="text-sm font-medium text-white">{emp.fullName}</p>
+                      <p className="text-xs text-slate-500">{emp.employeeId}</p>
+                      {(emp.position || emp.trade) && (
+                        <p className="text-xs text-slate-600">{emp.trade || emp.position}</p>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <p className="text-sm text-slate-300">{emp.currentSite || <span className="text-slate-600">—</span>}</p>
+                    {emp.nationality && <p className="text-xs text-slate-600">{emp.nationality}</p>}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1 max-w-[220px]">
+                      <Badge className="bg-slate-700/60 text-slate-300 border-slate-600 text-[10px] px-1.5 py-0">
+                        {totalRelated} total
+                      </Badge>
+                      {c.attendance > 0 && <Badge className="bg-blue-500/10 text-blue-300 border-blue-500/20 text-[10px] px-1.5 py-0">{c.attendance} att.</Badge>}
+                      {c.salaryRecords > 0 && <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px] px-1.5 py-0">{c.salaryRecords} salary</Badge>}
+                      {c.documents > 0 && <Badge className="bg-violet-500/10 text-violet-300 border-violet-500/20 text-[10px] px-1.5 py-0">{c.documents} docs</Badge>}
+                      {(c.warnings > 0 || c.fines > 0) && <Badge className="bg-amber-500/10 text-amber-300 border-amber-500/20 text-[10px] px-1.5 py-0">{c.warnings + c.fines} warn/fine</Badge>}
+                      {c.advances > 0 && <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-500/20 text-[10px] px-1.5 py-0">{c.advances} adv.</Badge>}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <p className="text-sm text-slate-300 max-w-[180px] truncate" title={emp.cancellationReason || ''}>
+                      {emp.cancellationReason || <span className="text-slate-600 italic">—</span>}
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    <p className="text-xs text-slate-500">
+                      {emp.deletedAt ? new Date(emp.deletedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
+                    </p>
+                    {emp.deletedAt && (
+                      <p className="text-[10px] text-slate-600">
+                        {new Date(emp.deletedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
+                  </TableCell>
+                  {isSuperAdmin && (
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isActioning}
+                          className="h-7 text-green-400 hover:text-green-300 hover:bg-green-500/10 gap-1"
+                          onClick={() => onRestore(emp)}
+                        >
+                          <ArchiveRestore className="h-3.5 w-3.5" />
+                          Restore
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isActioning}
+                          className="h-7 text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1"
+                          onClick={() => onDelete(emp)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete Forever
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
   );
 }

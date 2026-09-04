@@ -105,6 +105,9 @@ model Employee {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
   deletedAt                DateTime?
+  // Explicit recycle-bin flag (mirrors deletedAt): true = sitting in the Recycle Bin,
+  // false = live. Kept in sync by cascadeSoftDeleteEmployee / restoreSoftDeletedEmployee.
+  isDeleted                Boolean  @default(false)
 
   // Relations
   currentSiteRef  Site?  @relation("EmployeeCurrentSite", fields: [currentSiteId], references: [id])

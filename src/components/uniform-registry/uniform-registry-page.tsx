@@ -289,7 +289,9 @@ function EmployeeCombobox({
   }, [employees, filter]);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    // modal: keeps the list wheel-scrollable while nested inside the Dialog's
+    // scroll-lock (same pattern Radix Select uses inside dialogs)
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -383,7 +385,7 @@ function SiteCombobox({
   }, [sites, filter]);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -503,7 +505,7 @@ function TeamLeaderCombobox({
   // If team leader exists and we're NOT in change mode, show leader + "Change" option
   if (currentTeamLeader && !isChangingTeamLeader) {
     return (
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={setOpen} modal>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
@@ -563,7 +565,7 @@ function TeamLeaderCombobox({
 
   // No team leader OR in change mode → show all site employees
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -960,22 +962,31 @@ export function UniformRegistryPage() {
   const handleEmployeeSelect = useCallback((emp: Employee) => {
     setSelectedEmployee(emp);
 
-    // Auto-fill document info
+    // Auto-fill document info from the employee's saved record.
+    // If a document type is already chosen and the employee has a saved number
+    // for it, keep that choice and fill its number; otherwise pick the best
+    // available (ID first, matching legacy behaviour).
+    if (documentType === 'passport' && emp.passportNumber) {
+      setDocumentNumber(emp.passportNumber);
+      return;
+    }
+    if (documentType === 'id' && emp.idNumber) {
+      setDocumentNumber(emp.idNumber);
+      return;
+    }
     if (emp.passportNumber && !emp.idNumber) {
       setDocumentType('passport');
       setDocumentNumber(emp.passportNumber);
-    } else if (emp.idNumber && !emp.passportNumber) {
-      setDocumentType('id');
-      setDocumentNumber(emp.idNumber);
     } else if (emp.idNumber) {
-      // Default to ID if both exist
+      // covers id-only AND both-saved (defaults to ID)
       setDocumentType('id');
       setDocumentNumber(emp.idNumber);
     } else {
-      setDocumentType('');
+      // Nothing saved on the record — keep the chosen type (if any) but empty
+      // the number so a stale value never gets submitted.
       setDocumentNumber('');
     }
-  }, []);
+  }, [documentType]);
 
   /* ── Handle Site Selection ── */
   const handleSiteSelect = useCallback(async (site: Site) => {
@@ -1716,14 +1727,20 @@ export function UniformRegistryPage() {
                 </Label>
                 <Select value={documentType} onValueChange={(val) => {
                   setDocumentType(val);
-                  // Auto-fill document number based on the selected type
+                  // Auto-fill the saved document number for the selected type
                   if (selectedEmployee) {
                     if (val === 'id' && selectedEmployee.idNumber) {
                       setDocumentNumber(selectedEmployee.idNumber);
                     } else if (val === 'passport' && selectedEmployee.passportNumber) {
                       setDocumentNumber(selectedEmployee.passportNumber);
-                    } else {
-                      // Keep current value if no matching document number
+                    } else if (
+                      documentNumber &&
+                      ((val === 'id' && documentNumber === selectedEmployee.passportNumber) ||
+                       (val === 'passport' && documentNumber === selectedEmployee.idNumber))
+                    ) {
+                      // The current number is the saved value of the OTHER type —
+                      // clear it instead of submitting a type/number mismatch.
+                      setDocumentNumber('');
                     }
                   }
                 }}>
@@ -1757,6 +1774,44 @@ export function UniformRegistryPage() {
                   className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500"
                 />
               </div>
+              {/* Saved document numbers on the selected employee's record —
+                  one click applies them to the type + number fields */}
+              {selectedEmployee && (
+                <div className="col-span-2 flex flex-wrap items-center gap-2 -mt-1">
+                  <span className="text-[11px] text-slate-500">Saved on employee record:</span>
+                  {selectedEmployee.passportNumber && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocumentType('passport');
+                        setDocumentNumber(selectedEmployee.passportNumber || '');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-600 bg-slate-900 text-[11px] text-slate-300 hover:border-blue-500/50 hover:text-white transition-colors"
+                    >
+                      <FileText className="h-3 w-3 text-blue-400" />
+                      Passport: <span className="font-mono">{selectedEmployee.passportNumber}</span>
+                    </button>
+                  )}
+                  {selectedEmployee.idNumber && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocumentType('id');
+                        setDocumentNumber(selectedEmployee.idNumber || '');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-600 bg-slate-900 text-[11px] text-slate-300 hover:border-blue-500/50 hover:text-white transition-colors"
+                    >
+                      <FileText className="h-3 w-3 text-emerald-400" />
+                      ID: <span className="font-mono">{selectedEmployee.idNumber}</span>
+                    </button>
+                  )}
+                  {!selectedEmployee.passportNumber && !selectedEmployee.idNumber && (
+                    <span className="text-[11px] text-slate-600 italic">
+                      No document number saved for this employee — enter it manually
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Items Checkboxes + Size Selectors */}

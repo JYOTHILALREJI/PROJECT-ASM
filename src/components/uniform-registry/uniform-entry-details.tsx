@@ -202,7 +202,9 @@ function SiteCombobox({
   }, [sites, filter]);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    // modal: keeps the list wheel-scrollable while nested inside the Dialog's
+    // scroll-lock (same pattern Radix Select uses inside dialogs)
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           variant="outline"

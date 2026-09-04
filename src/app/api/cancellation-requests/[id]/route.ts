@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
 import { db } from '@/lib/db';
-import { cascadeSoftDeleteEmployee } from '@/lib/soft-delete';
+import { cascadeSoftDeleteEmployee, permanentlyDeleteEmployee } from '@/lib/soft-delete';
+import { resolveStoragePath } from '@/lib/document-storage';
 import { logActivity } from '@/lib/activity-logger';
 
 export async function PUT(
@@ -11,6 +13,11 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
     const { status, reviewedBy, actorDisplayName } = body;
+
+    // deletionMode decides what happens to the employee on approval:
+    //   "soft"      (default) → recycle bin (soft delete, restorable)
+    //   "permanent" → hard delete (employee + every related record, irreversible)
+    const deletionMode = body.deletionMode === 'permanent' ? 'permanent' : 'soft';
 
     if (!status || !reviewedBy) {
       return NextResponse.json(
@@ -114,20 +121,37 @@ export async function PUT(
         data: {
           userId: updatedRequest.requestedById,
           title: `Cancellation Request ${status === 'approved' ? 'Approved' : 'Rejected'}`,
-          message: `The cancellation request for employee ${updatedRequest.employee.fullName} (${updatedRequest.employee.employeeId}) has been ${status}.`,
+          message:
+            status === 'rejected'
+              ? `The cancellation request for employee ${updatedRequest.employee.fullName} (${updatedRequest.employee.employeeId}) has been rejected — the employee stays active.`
+              : deletionMode === 'permanent'
+                ? `The cancellation request for employee ${updatedRequest.employee.fullName} (${updatedRequest.employee.employeeId}) has been approved — the employee record has been PERMANENTLY deleted.`
+                : `The cancellation request for employee ${updatedRequest.employee.fullName} (${updatedRequest.employee.employeeId}) has been approved — the employee has been moved to the Recycle Bin and can be restored.`,
           type: 'request',
+          actorId: finalReviewedById,
         },
       });
 
       return updatedRequest;
     });
 
-    // After the request transaction commits, perform the cascading soft-delete
-    // of the employee and every related child record (attendance, warnings,
-    // fines, salary records, working hours, etc.). This keeps the cascade
-    // atomic in its own transaction while leaving the audit trail intact.
+    // After the request transaction commits, perform the actual deletion of the
+    // employee. "soft" cascades a restorable soft-delete (recycle bin);
+    // "permanent" irreversibly removes the employee and every related record.
     if (status === 'approved') {
-      await cascadeSoftDeleteEmployee(existing.employeeId);
+      if (deletionMode === 'permanent') {
+        const { filePaths } = await permanentlyDeleteEmployee(existing.employeeId);
+        for (const rel of filePaths) {
+          try {
+            const abs = resolveStoragePath(rel);
+            if (fs.existsSync(abs)) fs.unlinkSync(abs);
+          } catch {
+            // best effort file cleanup
+          }
+        }
+      } else {
+        await cascadeSoftDeleteEmployee(existing.employeeId);
+      }
     }
 
     // Log the activity
@@ -138,8 +162,8 @@ export async function PUT(
       entityType: 'cancellation_request',
       entityId: id,
       entityName: result.employee.fullName,
-      description: `${status === 'approved' ? 'Approved' : 'Rejected'} cancellation request for ${result.employee.fullName} (${result.employee.employeeId})${status === 'approved' ? ' — employee soft-deleted with cascade' : ' — employee restored to active'}`,
-      details: { status, employeeId: existing.employeeId, reason: existing.reason },
+      description: `${status === 'approved' ? 'Approved' : 'Rejected'} cancellation request for ${result.employee.fullName} (${result.employee.employeeId})${status === 'approved' ? (deletionMode === 'permanent' ? ' — employee PERMANENTLY deleted with all related records' : ' — employee moved to the Recycle Bin (soft delete with cascade)') : ' — employee restored to active'}`,
+      details: { status, deletionMode: status === 'approved' ? deletionMode : undefined, employeeId: existing.employeeId, reason: existing.reason },
       request,
     });
 
@@ -152,6 +176,7 @@ export async function PUT(
           employee: result.employee,
           reason: result.reason || '',
           status: result.status,
+          deletionMode,
           requestedBy: result.requestedBy,
           reviewedBy: result.reviewedBy?.name || null,
           reviewedAt: result.reviewedAt?.toISOString() || null,

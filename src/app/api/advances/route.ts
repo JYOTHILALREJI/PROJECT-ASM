@@ -307,6 +307,9 @@ export async function POST(request: NextRequest) {
 
       // Log the bulk advance creation
       const totalAmount = items.reduce((s, it) => s + it.amount, 0);
+      // Display currency comes from the global app settings (default AED)
+      const currencySetting = await db.appSetting.findUnique({ where: { key: 'currency' } });
+      const currencyCode = currencySetting?.value || 'AED';
       await logActivity({
         userId: resolvedCreatedById,
         displayName: creator?.name || creator?.email || 'Admin',
@@ -314,7 +317,7 @@ export async function POST(request: NextRequest) {
         entityType: 'advance',
         entityId: null,
         entityName: `${created.length} advance(s)`,
-        description: `Created ${created.length} advance(s) totaling ${totalAmount.toFixed(2)} DHS for ${items[0]?.effectiveMonth || 'N/A'}`,
+        description: `Created ${created.length} advance(s) totaling ${totalAmount.toFixed(2)} ${currencyCode} for ${items[0]?.effectiveMonth || 'N/A'}`,
         details: {
           count: created.length,
           totalAmount,

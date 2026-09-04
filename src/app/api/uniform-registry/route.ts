@@ -16,9 +16,11 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = { isDeleted: false };
 
     if (search) {
+      // NOTE: `mode: 'insensitive'` is PostgreSQL-only and throws on SQLite.
+      // SQLite's `contains` compiles to LIKE, which is already ASCII case-insensitive.
       const orConditions: Record<string, unknown>[] = [
-        { employeeName: { contains: search, mode: 'insensitive' } },
-        { documentNumber: { contains: search, mode: 'insensitive' } },
+        { employeeName: { contains: search } },
+        { documentNumber: { contains: search } },
       ];
       const tokenNum = parseInt(search, 10);
       if (!isNaN(tokenNum)) {

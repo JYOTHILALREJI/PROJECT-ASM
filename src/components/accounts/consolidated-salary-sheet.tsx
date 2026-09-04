@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
+import { useSettingsStore } from '@/store/settings-store';
 import {
   Select,
   SelectContent,
@@ -321,6 +322,7 @@ function mergeApiEntries(
 /* ───────── Main Component ───────── */
 
 export function ConsolidatedSalarySheet() {
+  const currency = useSettingsStore((s) => s.settings.currency);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [sites, setSites] = useState<SiteData[]>([]);
@@ -745,7 +747,7 @@ export function ConsolidatedSalarySheet() {
           <div className="flex items-center gap-3 flex-wrap">
             {/* Grand Total Badge */}
             <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-sm px-3 py-1.5 font-semibold">
-              Grand Total: {formatNumber(grandTotals.totalSalary)} DHS
+              Grand Total: {formatNumber(grandTotals.totalSalary)} {currency}
             </Badge>
             {editMode && (
               <Button
@@ -878,7 +880,7 @@ export function ConsolidatedSalarySheet() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-slate-500">Salary:</span>
-                  <span className="text-emerald-400 font-semibold">{formatNumber(grandTotals.totalSalary)} DHS</span>
+                  <span className="text-emerald-400 font-semibold">{formatNumber(grandTotals.totalSalary)} {currency}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-slate-500">Deduction:</span>
@@ -894,7 +896,7 @@ export function ConsolidatedSalarySheet() {
                     'font-bold',
                     grandTotals.totalBalance >= 0 ? 'text-emerald-400' : 'text-red-400'
                   )}>
-                    {formatNumber(grandTotals.totalBalance)} DHS
+                    {formatNumber(grandTotals.totalBalance)} {currency}
                   </span>
                 </div>
                 <Separator orientation="vertical" className="hidden sm:block h-4 bg-slate-700/50" />
@@ -966,7 +968,7 @@ export function ConsolidatedSalarySheet() {
                         Paid: <span className="text-emerald-400 font-semibold">{sitePaidCount}/{employees.length}</span>
                       </span>
                       <span className="text-emerald-400 font-semibold">
-                        {formatNumber(siteTotalSalary)} DHS
+                        {formatNumber(siteTotalSalary)} {currency}
                       </span>
                     </div>
                   </div>
@@ -988,7 +990,7 @@ export function ConsolidatedSalarySheet() {
                             RATE 5/5.5 HRS
                           </th>
                           <th className="text-emerald-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap bg-emerald-900/10" style={{minWidth: '100px'}}>
-                            SALARY (DHS)
+                            SALARY ({currency})
                           </th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap" style={{minWidth: '90px'}}>ADVANCE</th>
                           <th className="text-slate-400 font-semibold text-[11px] py-2.5 px-2 text-right whitespace-nowrap" style={{minWidth: '90px'}}>DEDUCTION</th>
@@ -1133,7 +1135,7 @@ export function ConsolidatedSalarySheet() {
                                   )}
                                 </td>
 
-                                {/* SALARY (DHS) - Divisor-based gross salary */}
+                                {/* SALARY ({currency}) - Divisor-based gross salary */}
                                 <td className="py-1.5 px-2 text-right bg-emerald-900/5">
                                   <span className="text-[11px] text-emerald-400 font-semibold">
                                     {formatNumber(emp.salary)}
