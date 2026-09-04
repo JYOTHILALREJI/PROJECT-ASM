@@ -10,6 +10,7 @@ import {
   Crown,
   Info,
   Palette,
+  Sparkles,
   Upload,
   Trash2,
   ImageIcon,
@@ -24,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
 import { useSettingsStore } from '@/store/settings-store';
 import { CURRENCIES, formatMoney, getCurrencyDef } from '@/lib/currency';
+import { RoboFace } from '@/components/ai/robo-face';
 
 const MAX_LOGO_DIMENSION = 256; // px — logos are resized client-side before upload
 const MAX_LOGO_BASE64 = 500_000; // mirrors the API-side limit (~375 KB binary)
@@ -72,6 +74,7 @@ export function SettingsPage() {
     brandName: string;
     brandLogo: string;
     currency: string;
+    aiName: string;
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -85,12 +88,14 @@ export function SettingsPage() {
   const brandName = draft?.brandName ?? settings.brandName;
   const brandLogo = draft?.brandLogo ?? settings.brandLogo;
   const currency = draft?.currency ?? settings.currency;
-  const patchDraft = (patch: Partial<{ companyName: string; brandName: string; brandLogo: string; currency: string }>) =>
+  const aiName = draft?.aiName ?? settings.aiName;
+  const patchDraft = (patch: Partial<{ companyName: string; brandName: string; brandLogo: string; currency: string; aiName: string }>) =>
     setDraft({
       companyName: patch.companyName ?? companyName,
       brandName: patch.brandName ?? brandName,
       brandLogo: patch.brandLogo ?? brandLogo,
       currency: patch.currency ?? currency,
+      aiName: patch.aiName ?? aiName,
     });
 
   const dirty =
@@ -98,7 +103,8 @@ export function SettingsPage() {
     (companyName !== settings.companyName ||
       brandName !== settings.brandName ||
       brandLogo !== settings.brandLogo ||
-      currency !== settings.currency);
+      currency !== settings.currency ||
+      aiName !== settings.aiName);
 
   const handleLogoFile = async (file: File | undefined | null) => {
     if (!file) return;
@@ -132,9 +138,13 @@ export function SettingsPage() {
       toast({ title: 'Validation Error', description: 'Brand text cannot be empty.', variant: 'destructive' });
       return;
     }
+    if (!aiName.trim()) {
+      toast({ title: 'Validation Error', description: 'Assistant name cannot be empty.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     const result = await updateSettings(
-      { companyName: companyName.trim(), brandName: brandName.trim(), brandLogo, currency },
+      { companyName: companyName.trim(), brandName: brandName.trim(), brandLogo, currency, aiName: aiName.trim() },
       user.id
     );
     setSaving(false);
@@ -153,6 +163,7 @@ export function SettingsPage() {
   const previewLogo = brandLogo || '/logo_asm.png';
   const previewBrand = brandName || 'ASM';
   const previewCompany = companyName || 'Arabian Shield Manpower';
+  const previewAiName = aiName || 'Nova';
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
@@ -303,6 +314,60 @@ export function SettingsPage() {
                 <div className="flex flex-col min-w-0">
                   <span className="asm-gradient-text font-bold text-lg leading-tight truncate">{previewBrand}</span>
                   <span className="text-xs text-slate-400 truncate">{previewCompany}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* AI Assistant */}
+          <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="h-4 w-4 text-cyan-400" />
+              <h3 className="text-base font-semibold text-white">AI Assistant</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Give your floating robot companion a name — it appears in the chat header, greetings and every reply.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-5">
+              {/* Live robo preview */}
+              <div className="flex flex-col items-center gap-2 shrink-0 sm:w-24">
+                <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60">
+                  <RoboFace size={64} status="idle" />
+                </div>
+                <p className="text-[10px] text-slate-500">Live preview</p>
+              </div>
+
+              <div className="flex flex-1 flex-col gap-4 min-w-0">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="aiName" className="text-slate-300">
+                    Assistant name
+                  </Label>
+                  <Input
+                    id="aiName"
+                    value={aiName}
+                    onChange={(e) => patchDraft({ aiName: e.target.value })}
+                    maxLength={24}
+                    placeholder="Nova"
+                    className="bg-slate-900 border-slate-700 text-white text-sm"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Something cute and personal, e.g. “Nova”, “Robi” or “Zippy”. Max 24 characters.
+                  </p>
+                </div>
+
+                {/* Chat preview */}
+                <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Chat preview</p>
+                  <div className="flex items-start gap-2">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/15">
+                      <RoboFace size={22} status="idle" />
+                    </div>
+                    <div className="rounded-2xl rounded-bl-md border border-slate-600/60 bg-slate-700/50 px-3 py-1.5 text-xs text-slate-100">
+                      Hi, I&apos;m <span className="font-semibold text-white">{previewAiName}</span> 👋 — we have
+                      everything about the workforce covered. Ask me anything!
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

@@ -103,6 +103,7 @@ const SUGGESTIONS = [
 export function RoboAssistant() {
   const { user } = useAuthStore();
   const brandName = useSettingsStore((s) => s.settings.brandName);
+  const aiName = useSettingsStore((s) => s.settings.aiName);
   const brandLogo = useSettingsStore((s) => s.settings.brandLogo);
 
   // ── Positioning / drag state ──
@@ -500,9 +501,9 @@ export function RoboAssistant() {
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-white">{brandName || 'ASM'} Insight</p>
+                  <p className="truncate text-sm font-semibold text-white">{aiName || 'Nova'}</p>
                   <p className="text-[10px] leading-tight text-slate-400">
-                    {sending ? 'Thinking…' : 'Your data assistant — online'}
+                    {sending ? 'Thinking…' : `Your ${brandName || 'ASM'} companion — online`}
                   </p>
                 </div>
                 <button
@@ -532,10 +533,10 @@ export function RoboAssistant() {
                   <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
                     <RoboFace size={64} status="idle" />
                     <div>
-                      <p className="text-sm font-semibold text-white">Hi, I&apos;m {brandName || 'ASM'} Insight 👋</p>
+                      <p className="text-sm font-semibold text-white">Hi, I&apos;m {aiName || 'Nova'} 👋</p>
                       <p className="mx-auto mt-1 max-w-[260px] text-xs text-slate-400">
-                        Ask me anything about your workforce — employees, attendance, salaries, fines, camps and more.
-                        I read the live database to answer.
+                        I know our workforce inside out — employees, attendance, salaries, fines, camps and more.
+                        Ask me anything and I&apos;ll pull the numbers straight from our database.
                       </p>
                     </div>
                     <div className="flex flex-wrap justify-center gap-1.5">

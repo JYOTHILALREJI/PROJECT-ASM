@@ -69,11 +69,18 @@ function safeJson(value: unknown): string {
   );
 }
 
-function plannerSystemPrompt(schemaDoc: string, currency: string, today: string): string {
+function plannerSystemPrompt(
+  schemaDoc: string,
+  currency: string,
+  today: string,
+  assistantName: string,
+  companyName: string
+): string {
   return [
-    'You are "ASM Insight", the AI assistant inside ASM — a workforce-management web app',
+    `You are "${assistantName}", the AI companion inside ${companyName} — a workforce-management web app`,
     'for a manpower company (employees, sites, camps, attendance, salaries, fines, warnings,',
     'advances, leave, cancellations, uniform/materials registry, NOC documents).',
+    `You and the user work for the SAME company — this data is "ours": always think "we/our".`,
     `Today's date is ${today} (Asia/Dubai). Money is displayed in ${currency}.`,
     '',
     'You can query the app database with READ-ONLY SQLite SQL.',
@@ -91,26 +98,51 @@ function plannerSystemPrompt(schemaDoc: string, currency: string, today: string)
     '    - COUNT(*) after a JOIN counts matched pairs, not entities: for two unrelated totals',
     '      (e.g. sites AND fines) use SEPARATE queries in the sql array, or COUNT(DISTINCT …).',
     '    - Aggregates (COUNT/SUM) need no LIMIT; row lists must have one.',
-    '  • If NO data is needed (greetings, how-do-I questions, general chat): {"answer":"…"}',
+    '  • MAKE ANSWERS INSIGHTFUL — plan what data makes an answer genuinely useful:',
+    '    - When the user asks for a count or total of real things (sites, employees, camps, fines, warnings, advances…),',
+    '      do NOT stop at the bare number. ALSO fetch a named breakdown so the answer can list each item with its',
+    '      count/value (e.g. total sites + per-site name and employee count, total fines + per-type or per-month sums).',
+    '      Prefer 2 queries in the sql array: one aggregate + one grouped breakdown (GROUP BY, ORDER BY the measure DESC).',
+    '    - Include human-readable names/labels in breakdown queries — never bare IDs alone.',
+    '  • PLAN THE PRESENTATION: always include a "display" key — a short string describing the clearest way to show',
+    '    the answer, e.g. {"display":"markdown table: Site | Employees"}, {"display":"one bold figure + grouped table"},',
+    '    {"display":"bullet list of names"}, {"display":"short paragraph"}.',
+    '  • If NO data is needed (greetings, how-do-I questions, general chat): {"answer":"…"} — reply warmly, first person,',
+    '    as the company\'s own companion ("we/our"), 1-3 sentences.',
     '',
     'Database schema (table (columns) — hints):',
     schemaDoc,
   ].join('\n');
 }
 
-function responderSystemPrompt(currency: string, today: string): string {
+function responderSystemPrompt(
+  currency: string,
+  today: string,
+  assistantName: string,
+  companyName: string
+): string {
   return [
-    'You are "ASM Insight", the AI assistant inside ASM — a workforce-management app.',
+    `You are "${assistantName}", the friendly AI companion inside ${companyName} — a workforce-management app.`,
+    `You know everything about the company and you and the user are on the SAME team: always speak as "we/our".`,
+    `Say "We have 6 sites", NEVER "You have 6 sites". Warm, confident, human — a colleague who knows the numbers by heart.`,
     `Today is ${today} (Asia/Dubai). Money is displayed in ${currency} (e.g. ${currency} 1,250.00).`,
     '',
     'Answer the user using ONLY the QUERY RESULTS observation provided (never invent data).',
-    'Rules:',
+    'Structure every data answer in two parts:',
+    '  1. DIRECT ANSWER — one sentence leading with the key figure in bold, phrased as "we"',
+    '     (e.g. "**We have 6 active sites** at the moment.").',
+    '  2. SUPPORTING DETAIL — follow the PRESENTATION PLAN if one is provided:',
+    '     - a small markdown table for row data — ALWAYS include names/labels, not just numbers',
+    '       (e.g. | Site | Employees | with one row per site),',
+    '     - bullets for short lists, or a single bold figure when there is nothing to break down.',
+    '  • Add ONE short insight line when the data clearly supports it (largest site, most fined month, top employee,',
+    '    a notable gap) — still strictly derived from the data, never speculation.',
+    '  • Be detailed but tidy: every table cell meaningful, no filler sentences; let the table carry the detail.',
     '  • If the observation is empty or contains an error, say clearly that no matching data was found',
     '    (or that the lookup failed) — never fabricate numbers.',
-    '  • Be concise and business-friendly. Use short markdown: bold key figures, bullet lists,',
-    '    and a small markdown table when comparing several rows.',
     '  • Round money to 2 decimals with the currency code; big counts may be rounded sensibly.',
     '  • If the observation was truncated, mention that more rows exist.',
+    '  • Greetings/small-talk (no observation): reply warmly in first person as the company\'s companion, 1-3 sentences.',
   ].join('\n');
 }
 
@@ -158,14 +190,21 @@ export async function POST(request: NextRequest) {
 
     const [schemaDoc, settingsRows] = await Promise.all([
       getDbSchemaDoc(),
-      db.appSetting.findMany({ where: { key: 'currency' }, select: { value: true } }),
+      db.appSetting.findMany({
+        where: { key: { in: ['currency', 'aiName', 'companyName', 'brandName'] } },
+        select: { key: true, value: true },
+      }),
     ]);
-    const currency = settingsRows[0]?.value || 'AED';
+    const settingsMap: Record<string, string> = {};
+    for (const row of settingsRows) settingsMap[row.key] = row.value;
+    const currency = settingsMap.currency || 'AED';
+    const assistantName = settingsMap.aiName || 'Nova';
+    const companyName = settingsMap.companyName || 'Arabian Shield Manpower';
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date());
 
     // ── Pass 1: planner ────────────────────────────────────────────────
     const plannerMessages: LlmMessage[] = [
-      { role: 'system', content: plannerSystemPrompt(schemaDoc, currency, today) },
+      { role: 'system', content: plannerSystemPrompt(schemaDoc, currency, today, assistantName, companyName) },
       ...history,
       { role: 'user', content },
     ];
@@ -174,6 +213,8 @@ export async function POST(request: NextRequest) {
     const planJson = extractJsonObject(planRaw);
     let sql: string | null = null;
     let directAnswer: string | null = null;
+    // The planner's presentation hint for pass 2 (how to show the data).
+    let displayPlan: string | null = null;
     // null observation → the answer is already final (no pass 2 needed)
     let observation: string | null = null;
     let rowCount = 0;
@@ -183,6 +224,9 @@ export async function POST(request: NextRequest) {
       // Planner replied in prose (no JSON object at all) — use it as the answer.
       directAnswer = planRaw.trim().slice(0, MAX_CONTENT);
     } else {
+      if (typeof planJson.display === 'string' && planJson.display.trim()) {
+        displayPlan = planJson.display.trim().slice(0, 300);
+      }
       // Normalize the planner's SQL field: string or array (max 3 queries).
       const rawSql = planJson.sql;
       const candidates: string[] = Array.isArray(rawSql)
@@ -217,7 +261,7 @@ export async function POST(request: NextRequest) {
               try {
                 const retryRaw = await callLLM(
                   [
-                    { role: 'system', content: plannerSystemPrompt(schemaDoc, currency, today) },
+                    { role: 'system', content: plannerSystemPrompt(schemaDoc, currency, today, assistantName, companyName) },
                     ...history,
                     { role: 'user', content },
                     {
@@ -266,12 +310,14 @@ export async function POST(request: NextRequest) {
       answerText = directAnswer;
     } else {
       const responderMessages: LlmMessage[] = [
-        { role: 'system', content: responderSystemPrompt(currency, today) },
+        { role: 'system', content: responderSystemPrompt(currency, today, assistantName, companyName) },
         ...history,
         { role: 'user', content },
         {
           role: 'user',
-          content: `QUERY RESULTS (observation):\n${observation ?? 'No query results.'}\n\nAnswer the user's question now.`,
+          content: `QUERY RESULTS (observation):\n${observation ?? 'No query results.'}\n\n${
+            displayPlan ? `PRESENTATION PLAN: ${displayPlan}\n\n` : ''
+          }Answer the user's question now.`,
         },
       ];
       answerText = await callLLM(responderMessages, { temperature: 0.3 });

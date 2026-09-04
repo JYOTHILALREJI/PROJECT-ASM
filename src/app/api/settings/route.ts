@@ -10,6 +10,7 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   companyName: 'Arabian Shield Manpower',
   brandName: 'ASM', // short glowing brand text shown in the sidebar / login
   brandLogo: '', // data-URL image; empty → falls back to the bundled /logo_asm.png
+  aiName: 'Nova', // cute name of the AI assistant (chat header, greetings, replies)
 };
 
 // Whitelist: only these keys can ever be written via the API.
@@ -41,6 +42,10 @@ function validateValue(key: string, value: string): string | null {
   if (key === 'brandName') {
     if (value.trim().length === 0) return 'Brand text cannot be empty';
     if (value.length > 24) return 'Brand text is too long (max 24 characters)';
+  }
+  if (key === 'aiName') {
+    if (value.trim().length === 0) return 'Assistant name cannot be empty';
+    if (value.length > 24) return 'Assistant name is too long (max 24 characters)';
   }
   return null;
 }

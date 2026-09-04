@@ -12,6 +12,8 @@ export interface AppSettings {
   brandName: string;
   /** Logo as a data-URL; empty string → falls back to the bundled /logo_asm.png. */
   brandLogo: string;
+  /** Cute name of the AI assistant (chat header, greetings and replies). */
+  aiName: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -19,6 +21,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   companyName: 'Arabian Shield Manpower',
   brandName: 'ASM',
   brandLogo: '',
+  aiName: 'Nova',
 };
 
 interface SettingsState {
