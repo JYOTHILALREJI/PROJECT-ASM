@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/store/settings-store';
 import { useAppStore } from '@/store/app-store';
 import { useSearchNavigation } from '@/lib/use-search-navigation';
 import { resolveClientRate } from '@/lib/client-rate-resolver';
@@ -435,6 +436,7 @@ const EditableCell = React.memo(function EditableCell({
 
 export function AccountsPage() {
   const { setCurrentView } = useAppStore();
+  const currency = useSettingsStore((s) => s.settings.currency);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [sites, setSites] = useState<SiteData[]>([]);
@@ -1058,7 +1060,7 @@ export function AccountsPage() {
       });
       const json = await res.json();
       if (json.success) {
-        toast({ title: 'Trade Rate Saved', description: `${trade}: ${rate} AED/hr` });
+        toast({ title: 'Trade Rate Saved', description: `${trade}: ${rate} ${currency}/hr` });
         setNewTradeName('');
         setNewTradeRate('');
         fetchTradeRates();
@@ -1812,7 +1814,7 @@ export function AccountsPage() {
                                       <option value="">— Select Trade —</option>
                                       {tradeRates.map((tr) => (
                                         <option key={tr.id} value={tr.trade}>
-                                          {tr.trade} ({tr.hourlyRate} AED/hr)
+                                          {tr.trade} ({tr.hourlyRate} {currency}/hr)
                                         </option>
                                       ))}
                                       {/* Include the current trade if it's not in the tradeRates list */}
@@ -2195,7 +2197,7 @@ export function AccountsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge className="bg-violet-500/15 text-violet-300 border-violet-500/30 text-xs font-mono">
-                      {tr.hourlyRate} AED/hr
+                      {tr.hourlyRate} {currency}/hr
                     </Badge>
                     <button
                       onClick={() => handleDeleteTradeRate(tr.trade)}

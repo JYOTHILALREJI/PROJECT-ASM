@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/select';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
+import { useSettingsStore } from '@/store/settings-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -99,6 +100,7 @@ function formatHours(hours: number): string {
 export function EmployeeHoursDirectory() {
   const { setSelectedEmployeeId, setCurrentView } = useAppStore();
   const { toast } = useToast();
+  const currency = useSettingsStore((s) => s.settings.currency);
 
   // ── State ──
   const [employees, setEmployees] = useState<EmployeeHoursSummary[]>([]);
@@ -768,7 +770,7 @@ export function EmployeeHoursDirectory() {
                               className="h-7 text-xs font-mono bg-slate-900 border-slate-600 focus:border-emerald-500 focus:ring-emerald-500/20 w-20"
                               placeholder="—"
                             />
-                            <span className="text-[10px] text-slate-500">AED/hr</span>
+                            <span className="text-[10px] text-slate-500">{currency}/hr</span>
                           </div>
                         </TableCell>
                         {/* Cumulative Hours */}

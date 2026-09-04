@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/accordion';
 import { format } from 'date-fns';
 import { useAppStore } from '@/store/app-store';
+import { useSettingsStore } from '@/store/settings-store';
 import { motion } from 'framer-motion';
 import { UserPlus, CalendarPlus, LayoutDashboard as LayoutIcon, ChevronRight } from 'lucide-react';
 import { AnimatedNumber, StaggerContainer, StaggerItem, spring } from '@/components/motion';
@@ -294,6 +295,7 @@ function getRateStructure(emp: MergedEmployeeRow): string {
 }
 
 export function DashboardPage() {
+  const currency = useSettingsStore((s) => s.settings.currency);
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [year, setYear] = useState(String(now.getFullYear()));
@@ -691,7 +693,7 @@ export function DashboardPage() {
                 Hours: <span className="text-white font-semibold">{formatHours(grandTotals.totalHrs)}</span>
               </span>
               <span className="text-emerald-400 font-semibold">
-                {formatCurrency(grandTotals.totalSal)} AED
+                {formatCurrency(grandTotals.totalSal)} {currency}
               </span>
             </div>
           )}

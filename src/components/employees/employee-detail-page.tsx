@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/select';
 import { useAppStore } from '@/store/app-store';
 import { useToast } from '@/hooks/use-toast';
+import { useSettingsStore } from '@/store/settings-store';
 import { SearchableCompanySelect, SearchableTradeSelect } from '@/components/employees/searchable-selects';
 import { EmployeeDocumentsPanel } from '@/components/documents/employee-documents-panel';
 import jsPDF from 'jspdf';
@@ -296,7 +297,7 @@ function SectionCard({
 
 // ─── PDF CV Generation ───────────────────────────────────────────────────
 
-function generateEmployeeCV(employee: Employee, sites: Site[]): void {
+function generateEmployeeCV(employee: Employee, sites: Site[], currency = 'AED'): void {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -455,7 +456,7 @@ function generateEmployeeCV(employee: Employee, sites: Site[]): void {
   // ── Work Configuration Section ──
   if (y > pageHeight - 60) { doc.addPage(); y = margin + 5; }
   y = drawSectionHeader('Work Configuration', y);
-  drawField('Custom Hourly Rate', employee.customHourlyRate != null ? `${employee.customHourlyRate} AED/hr` : '—', y, 'left');
+  drawField('Custom Hourly Rate', employee.customHourlyRate != null ? `${employee.customHourlyRate} ${currency}/hr` : '—', y, 'left');
   drawField('Hours Threshold', employee.hoursThreshold ? `${employee.hoursThreshold} hrs` : '—', y, 'right');
   y += rowSpacing;
   drawField(
@@ -507,6 +508,7 @@ function generateEmployeeCV(employee: Employee, sites: Site[]): void {
 export function EmployeeDetailPage() {
   const { selectedEmployeeId, setCurrentView, setSelectedEmployeeId } = useAppStore();
   const { toast } = useToast();
+  const currency = useSettingsStore((s) => s.settings.currency);
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
@@ -630,7 +632,7 @@ export function EmployeeDetailPage() {
     if (!employee) return;
     setGeneratingPDF(true);
     try {
-      generateEmployeeCV(employee, sites);
+      generateEmployeeCV(employee, sites, currency);
       toast({ title: 'CV Downloaded', description: `PDF CV for ${employee.fullName} has been generated.` });
     } catch {
       toast({ title: 'Error', description: 'Failed to generate PDF', variant: 'destructive' });
@@ -992,7 +994,7 @@ export function EmployeeDetailPage() {
               {employee.customHourlyRate != null && (
                 <div className="text-right">
                   <p className="text-[10px] uppercase tracking-wider text-slate-500">Rate</p>
-                  <p className="text-lg font-bold text-emerald-400">{employee.customHourlyRate} <span className="text-xs text-slate-400">AED/hr</span></p>
+                  <p className="text-lg font-bold text-emerald-400">{employee.customHourlyRate} <span className="text-xs text-slate-400">{currency}/hr</span></p>
                 </div>
               )}
               {employee.currentTotalWorkingHours != null && (
@@ -1126,7 +1128,7 @@ export function EmployeeDetailPage() {
           <div className="space-y-3">
             {isEditMode ? (
               <>
-                <EditableField icon={CreditCard} label="Custom Hourly Rate (AED)" field="customHourlyRate" type="number" value={editForm.customHourlyRate} onChange={handleEditFieldChange} placeholder="e.g. 6.5" />
+                <EditableField icon={CreditCard} label={`Custom Hourly Rate (${currency})`} field="customHourlyRate" type="number" value={editForm.customHourlyRate} onChange={handleEditFieldChange} placeholder="e.g. 6.5" />
                 <EditableField icon={Clock} label="Current Total Hours" field="currentTotalWorkingHours" type="number" value={editForm.currentTotalWorkingHours} onChange={handleEditFieldChange} placeholder="e.g. 850" />
               </>
             ) : (
@@ -1134,7 +1136,7 @@ export function EmployeeDetailPage() {
                 <InfoRow
                   icon={CreditCard}
                   label="Custom Hourly Rate"
-                  value={employee.customHourlyRate != null ? `${employee.customHourlyRate} AED/hr` : '—'}
+                  value={employee.customHourlyRate != null ? `${employee.customHourlyRate} ${currency}/hr` : '—'}
                 />
                 <InfoRow
                   icon={Clock}

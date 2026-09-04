@@ -23,6 +23,7 @@ import {
   History,
   Tent,
   FolderOpen,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +47,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuthStore, type UserRole } from '@/store/auth-store';
 import { useAppStore, type AppView } from '@/store/app-store';
+import { useSettingsStore } from '@/store/settings-store';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { StaggerContainer, StaggerItem, PulseDot } from '@/components/motion';
@@ -75,6 +77,7 @@ const navItems: NavItem[] = [
   { id: 'notifications', label: 'Notifications', icon: Bell, permissionSlug: 'notifications', roles: ['super_admin'] },
   { id: 'admins', label: 'Admin Management', icon: Shield, permissionSlug: 'admins', roles: ['super_admin'] },
   { id: 'all_logs', label: 'All Logs', icon: History, permissionSlug: 'admins', roles: ['super_admin'] },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon, permissionSlug: 'settings', roles: ['super_admin'] },
 ];
 
 // Menus always visible to all users (including admin)
@@ -88,6 +91,8 @@ interface SidebarContentProps {
 function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) {
   const { currentView, setCurrentView } = useAppStore();
   const { user, logout } = useAuthStore();
+  // Company name is app-wide and editable from the Settings page (super admin).
+  const companyName = useSettingsStore((s) => s.settings.companyName);
   // Badge counts: unread notifications + pending leave/cancellation requests.
   // Each sidebar item shows its own count badge when something comes in.
   const [unreadCount, setUnreadCount] = React.useState(0);
@@ -230,7 +235,7 @@ function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) 
           <div className="flex flex-col min-w-0">
             <span className="asm-gradient-text font-bold text-lg leading-tight">ASM</span>
             <span className="text-xs text-slate-400 truncate">
-              Arabian Shield Manpower
+              {companyName || 'Arabian Shield Manpower'}
             </span>
           </div>
         )}

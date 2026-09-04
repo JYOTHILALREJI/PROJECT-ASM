@@ -4,12 +4,15 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Bell,
   AlertTriangle,
-  DollarSign,
+  Banknote,
+  FileText,
   CheckCheck,
+  Check,
   Clock,
   Plus,
   Search as SearchIcon,
   Loader2,
+  UserCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +45,8 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
+import { useSettingsStore } from '@/store/settings-store';
+import { formatMoney, getCurrencyDef } from '@/lib/currency';
 
 /* ───────── types ───────── */
 
@@ -58,7 +63,7 @@ interface EmployeeOption {
   currentSite: string | null;
 }
 
-// Notification types (warnings/fines)
+// Feed notification (from the Notification table)
 interface Notification {
   id: string;
   userId: string;
@@ -68,6 +73,7 @@ interface Notification {
   read: boolean;
   createdAt: string;
   updatedAt: string;
+  actor?: { id: string; name: string; email: string; role: string } | null;
 }
 
 interface Warning {
@@ -104,13 +110,30 @@ function formatDate(dateStr: string): string {
   }
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-SA', {
-    style: 'currency',
-    currency: 'SAR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
+function formatDateTime(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatRelative(dateStr: string): string {
+  try {
+    const then = new Date(dateStr).getTime();
+    const diff = Date.now() - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return formatDate(dateStr);
+  } catch {
+    return dateStr;
+  }
 }
 
 /* ───────── Skeleton Cards ───────── */
@@ -135,6 +158,28 @@ function EmptyState({ icon: Icon, message }: { icon: React.ElementType; message:
     </div>
   );
 }
+
+/* ───────── Feed notification type visuals ───────── */
+const NOTIF_TYPE_META: Record<string, { icon: React.ElementType; avatarClass: string; badgeClass: string; label: string }> = {
+  warning: {
+    icon: AlertTriangle,
+    avatarClass: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    label: 'Warning',
+  },
+  fine: {
+    icon: Banknote,
+    avatarClass: 'bg-red-500/15 text-red-400 border-red-500/30',
+    badgeClass: 'bg-red-500/15 text-red-300 border-red-500/30',
+    label: 'Fine',
+  },
+  request: {
+    icon: FileText,
+    avatarClass: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    badgeClass: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+    label: 'Request',
+  },
+};
 
 /* ───────── Employee Search Combobox (reused) ───────── */
 function EmployeeSearchCombobox({
@@ -197,6 +242,117 @@ function EmployeeSearchCombobox({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/* ───────── Alerts Tab (the notification feed) ───────── */
+function AlertsTab({
+  notifications,
+  loading,
+  onMarkRead,
+  markingId,
+}: {
+  notifications: Notification[];
+  loading: boolean;
+  onMarkRead: (id: string) => void;
+  markingId: string | null;
+}) {
+  if (loading) return <SkeletonCards />;
+  if (notifications.length === 0) return <EmptyState icon={Bell} message="No notifications yet" />;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {notifications.map((n) => {
+        const meta = NOTIF_TYPE_META[n.type] || NOTIF_TYPE_META.request;
+        const TypeIcon = meta.icon;
+        const issuerLabel =
+          n.actor?.name
+            ? n.actor.name
+            : n.type === 'request'
+            ? null
+            : 'System';
+
+        return (
+          <div
+            key={n.id}
+            className={cn(
+              'rounded-xl border p-4 transition-colors',
+              n.read
+                ? 'bg-slate-800/60 border-slate-700/60'
+                : 'bg-slate-800 border-blue-500/40 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]'
+            )}
+          >
+            <div className="flex items-start gap-3.5">
+              {/* Type avatar */}
+              <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border', meta.avatarClass)}>
+                <TypeIcon className="h-5 w-5" />
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    {!n.read && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-400 animate-pulse" aria-label="Unread" />}
+                    <h3 className={cn('text-base leading-snug truncate', n.read ? 'text-slate-200 font-semibold' : 'text-white font-semibold')}>
+                      {n.title}
+                    </h3>
+                    <Badge variant="outline" className={cn('text-[11px] px-2 py-0 h-5 shrink-0', meta.badgeClass)}>
+                      {meta.label}
+                    </Badge>
+                  </div>
+                  <span className="text-xs text-slate-500 shrink-0 whitespace-nowrap" title={formatDateTime(n.createdAt)}>
+                    {formatRelative(n.createdAt)}
+                  </span>
+                </div>
+
+                <p className={cn('mt-1.5 text-sm leading-relaxed', n.read ? 'text-slate-400' : 'text-slate-200')}>
+                  {n.message}
+                </p>
+
+                <div className="mt-2.5 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-4 flex-wrap text-xs text-slate-400">
+                    {issuerLabel && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <UserCircle2 className="h-3.5 w-3.5 text-slate-500" />
+                        <span className="text-slate-500">Issued by</span>
+                        <span className="font-medium text-slate-300">{issuerLabel}</span>
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1.5 text-slate-500">
+                      <Clock className="h-3.5 w-3.5" />
+                      {formatDateTime(n.createdAt)}
+                    </span>
+                  </div>
+
+                  {/* Per-item action */}
+                  {n.read ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 pr-1">
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                      Read
+                    </span>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onMarkRead(n.id)}
+                      disabled={markingId === n.id}
+                      className="h-8 border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 text-xs gap-1.5"
+                    >
+                      {markingId === n.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CheckCheck className="h-3.5 w-3.5" />
+                      )}
+                      Mark as read
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -276,29 +432,48 @@ function WarningsTab({ userId }: { userId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <Button size="sm" onClick={openCreateDialog} className="h-8 bg-orange-600 hover:bg-orange-700 text-white text-xs gap-1.5">
-          <Plus className="h-3.5 w-3.5" /> Add New Warning
+        <Button size="sm" onClick={openCreateDialog} className="h-9 bg-orange-600 hover:bg-orange-700 text-white text-sm gap-1.5">
+          <Plus className="h-4 w-4" /> Add New Warning
         </Button>
       </div>
       {loading ? <SkeletonCards /> : warnings.length === 0 ? <EmptyState icon={AlertTriangle} message="No warnings found" /> : (
         warnings.map(w => (
           <div key={w.id} className="bg-slate-800 rounded-xl border border-slate-700 p-4 hover:bg-slate-700/50 transition-colors">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div className="flex items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-orange-500/15 border-orange-500/30 text-orange-400">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <span className="text-sm font-semibold text-white truncate">{w.employee.fullName}</span>
-                  <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 border-slate-600 text-slate-400">{w.employee.employeeId}</Badge>
-                  {w.isAutoGenerated && <Badge className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30">Auto</Badge>}
-                  <Badge className="text-xs px-2 py-0.5 bg-orange-500/20 text-orange-400 border border-orange-500/30"><AlertTriangle className="h-3 w-3 mr-1" />Warning</Badge>
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span className="text-base font-semibold text-white truncate">{w.employee.fullName}</span>
+                  <Badge variant="outline" className="text-[11px] font-mono px-2 py-0 border-slate-600 text-slate-400">{w.employee.employeeId}</Badge>
+                  {w.isAutoGenerated && <Badge className="text-[11px] px-2 py-0 h-5 bg-amber-500/20 text-amber-300 border border-amber-500/30">Auto</Badge>}
                 </div>
-                <div className="text-xs text-slate-300 space-y-1">
-                  <div><span className="text-slate-500">Reason:</span> {w.reason}</div>
-                  {w.absentDates && <div><span className="text-slate-500">Absent dates:</span> {w.absentDates}</div>}
-                  <div><span className="text-slate-500">Issued by:</span> {w.createdBy.name}</div>
-                </div>
-                <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {formatDate(w.createdAt)}
+                <p className="text-sm text-slate-300 leading-relaxed">{w.reason}</p>
+                {w.absentDates && (
+                  <p className="mt-1 text-sm text-slate-400"><span className="text-slate-500">Absent dates:</span> {w.absentDates}</p>
+                )}
+                <div className="mt-2.5 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-4 flex-wrap text-xs text-slate-400">
+                    {/* Auto warnings are generated by the system — never credit a person */}
+                    {w.isAutoGenerated ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <UserCircle2 className="h-3.5 w-3.5 text-slate-500" />
+                        <span className="text-slate-500">Issued by</span>
+                        <span className="font-medium text-slate-300">System (auto)</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <UserCircle2 className="h-3.5 w-3.5 text-slate-500" />
+                        <span className="text-slate-500">Issued by</span>
+                        <span className="font-medium text-slate-300">{w.createdBy?.name || 'Unknown'}</span>
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1.5 text-slate-500">
+                      <Clock className="h-3.5 w-3.5" />
+                      {formatDateTime(w.createdAt)}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -339,6 +514,10 @@ function WarningsTab({ userId }: { userId: string }) {
 
 /* ───────── Fines Tab ───────── */
 function FinesTab({ userId }: { userId: string }) {
+  const { settings } = useSettingsStore();
+  const currency = settings.currency;
+  const currencyDef = getCurrencyDef(currency);
+
   const [fines, setFines] = useState<Fine[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -404,7 +583,7 @@ function FinesTab({ userId }: { userId: string }) {
       });
       const data = await res.json();
       if (data.success) {
-        toast({ title: 'Fine Issued', description: `Fine of ${formatCurrency(numAmount)} has been issued for ${selectedEmployee.fullName}.` });
+        toast({ title: 'Fine Issued', description: `Fine of ${formatMoney(numAmount, currency)} has been issued for ${selectedEmployee.fullName}.` });
         setCreateDialogOpen(false);
         fetchFines();
       } else {
@@ -420,27 +599,36 @@ function FinesTab({ userId }: { userId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <Button size="sm" onClick={openCreateDialog} className="h-8 bg-red-600 hover:bg-red-700 text-white text-xs gap-1.5">
-          <Plus className="h-3.5 w-3.5" /> Add New Fine
+        <Button size="sm" onClick={openCreateDialog} className="h-9 bg-red-600 hover:bg-red-700 text-white text-sm gap-1.5">
+          <Plus className="h-4 w-4" /> Add New Fine
         </Button>
       </div>
-      {loading ? <SkeletonCards /> : fines.length === 0 ? <EmptyState icon={DollarSign} message="No fines found" /> : (
+      {loading ? <SkeletonCards /> : fines.length === 0 ? <EmptyState icon={Banknote} message="No fines found" /> : (
         fines.map(f => (
           <div key={f.id} className="bg-slate-800 rounded-xl border border-slate-700 p-4 hover:bg-slate-700/50 transition-colors">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div className="flex items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-red-500/15 border-red-500/30 text-red-400">
+                <Banknote className="h-5 w-5" />
+              </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <span className="text-sm font-semibold text-white truncate">{f.employee.fullName}</span>
-                  <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 border-slate-600 text-slate-400">{f.employee.employeeId}</Badge>
-                  <Badge className="text-xs px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30"><DollarSign className="h-3 w-3 mr-1" />{formatCurrency(f.amount)}</Badge>
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span className="text-base font-semibold text-white truncate">{f.employee.fullName}</span>
+                  <Badge variant="outline" className="text-[11px] font-mono px-2 py-0 border-slate-600 text-slate-400">{f.employee.employeeId}</Badge>
+                  <Badge className="text-[11px] px-2 py-0 h-5 font-semibold bg-red-500/20 text-red-300 border border-red-500/30">{formatMoney(f.amount, currency)}</Badge>
                 </div>
-                <div className="text-xs text-slate-300 space-y-1">
-                  <div><span className="text-slate-500">Reason:</span> {f.reason}</div>
-                  <div><span className="text-slate-500">Issued by:</span> {f.createdBy.name}</div>
-                </div>
-                <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {formatDate(f.createdAt)}
+                <p className="text-sm text-slate-300 leading-relaxed">{f.reason}</p>
+                <div className="mt-2.5 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-4 flex-wrap text-xs text-slate-400">
+                    <span className="inline-flex items-center gap-1.5">
+                      <UserCircle2 className="h-3.5 w-3.5 text-slate-500" />
+                      <span className="text-slate-500">Issued by</span>
+                      <span className="font-medium text-slate-300">{f.createdBy?.name || 'Unknown'}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-slate-500">
+                      <Clock className="h-3.5 w-3.5" />
+                      {formatDateTime(f.createdAt)}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -463,7 +651,8 @@ function FinesTab({ userId }: { userId: string }) {
               )}
             </div>
             <div>
-              <Label>Amount (SAR)</Label>
+              {/* Currency label follows the global app setting (dirhams by default) */}
+              <Label>Amount ({currencyDef.code} — {currencyDef.name})</Label>
               <Input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" className="bg-slate-900 border-slate-700 text-white" />
             </div>
             <div>
@@ -489,6 +678,7 @@ export function NotificationPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [markingId, setMarkingId] = useState<string | null>(null);
   const userId = user?.id || '';
 
   const fetchNotifications = useCallback(async () => {
@@ -505,12 +695,44 @@ export function NotificationPage() {
 
   useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
+  const notifySidebarRefresh = () => {
+    // Sidebar badge listens for this — unread count updates instantly.
+    window.dispatchEvent(new Event('asm:refresh-badge-counts'));
+  };
+
+  const handleMarkRead = async (id: string) => {
+    setMarkingId(id);
+    // Optimistic: flip the item immediately, reconcile on failure.
+    const prev = notifications;
+    const wasUnread = prev.some((n) => n.id === id && !n.read);
+    setNotifications((list) => list.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    if (wasUnread) setUnreadCount((c) => Math.max(0, c - 1));
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      toast({ title: 'Notification marked as read' });
+      notifySidebarRefresh();
+    } catch {
+      setNotifications(prev); // revert on failure
+      setUnreadCount(prev.filter((n) => !n.read).length);
+      toast({ title: 'Error', description: 'Failed to mark notification as read', variant: 'destructive' });
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
   const handleMarkAllRead = async () => {
     try {
       await fetch('/api/notifications', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markAll: true }) });
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       setUnreadCount(0);
       toast({ title: 'All notifications marked as read' });
+      notifySidebarRefresh();
     } catch { toast({ title: 'Error', description: 'Failed to mark all as read', variant: 'destructive' }); }
   };
 
@@ -519,17 +741,21 @@ export function NotificationPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10"><Bell className="h-5 w-5 text-blue-400" /></div>
-          <div><h2 className="text-2xl font-bold text-white flex items-center gap-2">Notifications{!loading && unreadCount > 0 && <Badge className="bg-blue-500 text-white">{unreadCount}</Badge>}</h2><p className="text-slate-400 text-sm">Stay updated with warnings and fines</p></div>
+          <div><h2 className="text-2xl font-bold text-white flex items-center gap-2">Notifications{!loading && unreadCount > 0 && <Badge className="bg-blue-500 text-white">{unreadCount}</Badge>}</h2><p className="text-slate-400 text-sm">Stay updated with warnings, fines and requests</p></div>
         </div>
         {unreadCount > 0 && <Button variant="outline" size="sm" onClick={handleMarkAllRead} className="h-8 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 text-xs"><CheckCheck className="h-3.5 w-3.5 mr-1.5" />Mark All Read</Button>}
       </div>
 
-      <Tabs defaultValue="warnings" className="w-full">
+      <Tabs defaultValue="alerts" className="w-full">
         <TabsList className="bg-slate-800 border border-slate-700/50">
+          <TabsTrigger value="alerts" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400 gap-1.5 px-4"><Bell className="h-4 w-4" />Alerts{unreadCount > 0 && <Badge className="bg-blue-500 text-white ml-1 text-[10px] px-1.5 py-0 h-4">{unreadCount}</Badge>}</TabsTrigger>
           <TabsTrigger value="warnings" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400 gap-1.5 px-4"><AlertTriangle className="h-4 w-4" />Warnings</TabsTrigger>
-          <TabsTrigger value="fines" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400 gap-1.5 px-4"><DollarSign className="h-4 w-4" />Fines</TabsTrigger>
+          <TabsTrigger value="fines" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-400 gap-1.5 px-4"><Banknote className="h-4 w-4" />Fines</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="alerts" className="mt-4">
+          <AlertsTab notifications={notifications} loading={loading} onMarkRead={handleMarkRead} markingId={markingId} />
+        </TabsContent>
         <TabsContent value="warnings" className="mt-4"><WarningsTab userId={userId} /></TabsContent>
         <TabsContent value="fines" className="mt-4"><FinesTab userId={userId} /></TabsContent>
       </Tabs>

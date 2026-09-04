@@ -87,6 +87,7 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore } from '@/store/app-store';
+import { useSettingsStore } from '@/store/settings-store';
 import { cn } from '@/lib/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -772,6 +773,7 @@ export function EmployeePage() {
   const { user } = useAuthStore();
   const { toast } = useToast();
   const { currentView, setCurrentView } = useAppStore();
+  const currency = useSettingsStore((s) => s.settings.currency);
 
   // ── Full-page view mode: 'list' (normal), 'add' (form), 'batch' (batch add) ──
   const pageMode: 'list' | 'add' | 'batch' =
@@ -1998,7 +2000,7 @@ export function EmployeePage() {
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label className="text-slate-300 text-sm">Custom Rate (AED/hr)</Label>
+                      <Label className="text-slate-300 text-sm">Custom Rate ({currency}/hr)</Label>
                       <Input
                         type="number"
                         step="0.5"
@@ -3230,7 +3232,7 @@ export function EmployeePage() {
                     Custom Hourly Rate
                   </h4>
                   <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
-                    <Label className="text-slate-300 text-sm">Custom Rate Override (AED/hr)</Label>
+                    <Label className="text-slate-300 text-sm">Custom Rate Override ({currency}/hr)</Label>
                     <p className="text-xs text-slate-500 mb-2">
                       If set, this overrides ALL rates for this employee (3.5 base rate and the 6/7 rates after the 1000h threshold) across all calculations.
                     </p>

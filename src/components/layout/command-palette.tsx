@@ -35,6 +35,7 @@ import {
   FolderOpen,
   PanelLeft,
   Loader2,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import {
   Command,
@@ -82,6 +83,7 @@ const PAGE_ITEMS: { view: AppView; label: string; icon: React.ElementType; keywo
   { view: 'notifications', label: 'Notifications', icon: Bell, keywords: 'alerts unread' },
   { view: 'admins', label: 'Admin Management', icon: Shield, keywords: 'users permissions roles' },
   { view: 'all_logs', label: 'All Logs', icon: History, keywords: 'audit activity history' },
+  { view: 'settings', label: 'Settings', icon: SettingsIcon, keywords: 'currency company preferences configuration dirhams aed' },
 ];
 
 export function CommandPalette() {
@@ -207,7 +209,7 @@ export function CommandPalette() {
               heading="Pages"
               className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-slate-500"
             >
-              {PAGE_ITEMS.map((p) => {
+              {PAGE_ITEMS.filter((p) => isSuperAdmin || p.view !== 'settings').map((p) => {
                 const Icon = p.icon;
                 return (
                   <CommandItem

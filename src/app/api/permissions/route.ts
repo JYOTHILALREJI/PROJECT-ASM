@@ -6,6 +6,7 @@ const PERMISSION_SEEDS = [
   { name: 'Dashboard', slug: 'dashboard', group: 'general' },
   { name: 'Employees', slug: 'employees', group: 'workforce' },
   { name: 'Sites', slug: 'sites', group: 'workforce' },
+  { name: 'Camps', slug: 'camps', group: 'workforce' },
   { name: 'Attendance', slug: 'attendance', group: 'workforce' },
   { name: 'Attendance Copy', slug: 'attendance_copy', group: 'workforce' },
   { name: 'Accounts', slug: 'accounts', group: 'finance' },
@@ -20,6 +21,7 @@ const PERMISSION_SEEDS = [
   { name: 'Cancellations', slug: 'cancellation_requests', group: 'workforce' },
   { name: 'Notifications', slug: 'notifications', group: 'general' },
   { name: 'Admin Management', slug: 'admins', group: 'admin' },
+  { name: 'Settings (Super Admin only)', slug: 'settings', group: 'admin' },
 ];
 
 // Menus always visible to all users (including admin)

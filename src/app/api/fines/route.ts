@@ -118,7 +118,15 @@ export async function POST(request: NextRequest) {
         data: { rating: newRating },
       });
 
-      // Create notification for super admins
+      // Use the app-configured display currency (dirhams/AED by default)
+      const currencySetting = await tx.appSetting.findUnique({
+        where: { key: 'currency' },
+        select: { value: true },
+      });
+      const currencyCode = currencySetting?.value || 'AED';
+
+      // Create notification for super admins — actorId records WHO issued it
+      // so the notifications feed can show the correct "Issued by" name.
       const superAdmins = await tx.user.findMany({
         where: { role: 'super_admin' },
         select: { id: true },
@@ -129,8 +137,9 @@ export async function POST(request: NextRequest) {
           data: {
             userId: admin.id,
             title: 'New Fine Issued',
-            message: `A fine of ${amount} SAR has been issued for employee ${newFine.employee.fullName} (${newFine.employee.employeeId}). Reason: ${reason}`,
+            message: `A fine of ${amount} ${currencyCode} has been issued for employee ${newFine.employee.fullName} (${newFine.employee.employeeId}). Reason: ${reason}`,
             type: 'fine',
+            actorId: finalCreatedById,
           },
         });
       }

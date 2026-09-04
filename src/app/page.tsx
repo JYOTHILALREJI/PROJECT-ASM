@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowUp } from 'lucide-react';
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore, type AppView } from '@/store/app-store';
+import { useSettingsStore } from '@/store/settings-store';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppHeader } from '@/components/layout/app-header';
 import { LoginPage } from '@/components/auth/login-page';
@@ -31,6 +32,7 @@ import { DocumentsPage } from '@/components/documents/documents-page';
 import { NocViewPage } from '@/components/documents/noc-view-page';
 import { EmployeeHoursLedger } from '@/components/employees/employee-hours-ledger';
 import { EmployeeHoursDirectory } from '@/components/employees/employee-hours-directory';
+import { SettingsPage } from '@/components/settings/settings-page';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { usePresenceHeartbeat } from '@/hooks/use-presence-heartbeat';
@@ -87,7 +89,7 @@ function LoadingScreen() {
 const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
 
 // Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs', 'documents', 'noc_view'];
+const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs', 'documents', 'noc_view', 'settings'];
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId, selectedNocId, setSelectedNocId, sidebarOpen, setSidebarOpen } = useAppStore();
@@ -157,6 +159,14 @@ function MainLayout() {
     all_logs: 'admins', // All Logs is a sub-feature of Admin Management
     noc_view: 'documents', // NOC viewer rides on the Documents permission
   };
+
+  // Load global app settings (currency, company name) once per session —
+  // every page reads them through useSettingsStore.
+  React.useEffect(() => {
+    if (user) {
+      useSettingsStore.getState().fetchSettings();
+    }
+  }, [user]);
 
   // Dynamic view permission check
   const isViewAllowed = useCallback((view: AppView): boolean => {
@@ -254,6 +264,8 @@ function MainLayout() {
         return selectedEmployeeId ? <CampDetailPage /> : <CampPage />;
       case 'profile':
         return <ProfilePage />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <DashboardPage />;
     }

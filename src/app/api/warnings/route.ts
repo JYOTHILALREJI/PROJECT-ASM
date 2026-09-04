@@ -112,7 +112,8 @@ export async function POST(request: NextRequest) {
         data: { rating: newRating },
       });
 
-      // Create notification for super admins
+      // Create notification for super admins — actorId records WHO issued it
+      // so the notifications feed can show the correct "Issued by" name.
       const superAdmins = await tx.user.findMany({
         where: { role: 'super_admin' },
         select: { id: true },
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
             title: 'New Warning Issued',
             message: `A warning has been issued for employee ${newWarning.employee.fullName} (${newWarning.employee.employeeId}). Reason: ${reason}`,
             type: 'warning',
+            actorId: finalCreatedById,
           },
         });
       }

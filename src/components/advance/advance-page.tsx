@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/store/auth-store';
+import { useSettingsStore } from '@/store/settings-store';
 import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 
@@ -129,6 +130,7 @@ function formatMonthKey(key: string): string {
 export function AdvancePage() {
   const { user } = useAuthStore();
   const { setCurrentView } = useAppStore();
+  const currency = useSettingsStore((s) => s.settings.currency);
 
   // Default effective month = current month (so advances show immediately in
   // the Accounts page for the current month). The user can still change it
@@ -392,7 +394,7 @@ export function AdvancePage() {
         toast({
           title: 'Advances saved',
           description: isRecurring
-            ? `${data.data.count} recurring advance(s) saved. ${monthlyDeductionAmount} AED/month will be deducted from ${MONTH_FULL[selectedMonth]} ${selectedYear} salary ${recurringUntilKey ? `until ${formatMonthKey(recurringUntilKey)}` : 'until fully repaid'}.`
+            ? `${data.data.count} recurring advance(s) saved. ${monthlyDeductionAmount} ${currency}/month will be deducted from ${MONTH_FULL[selectedMonth]} ${selectedYear} salary ${recurringUntilKey ? `until ${formatMonthKey(recurringUntilKey)}` : 'until fully repaid'}.`
             : `${data.data.count} advance(s) saved for ${MONTH_FULL[selectedMonth]} ${selectedYear}. They will be deducted from the ${MONTH_FULL[selectedMonth]} ${selectedYear} salary.`,
         });
         setBucket(new Map());

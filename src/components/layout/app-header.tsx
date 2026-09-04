@@ -35,6 +35,7 @@ const viewTitles: Record<string, string> = {
   camps: 'Camps',
   camp_detail: 'Camp Detail',
   profile: 'Profile',
+  settings: 'Settings',
 };
 
 function useClock() {

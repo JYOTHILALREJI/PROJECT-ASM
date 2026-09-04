@@ -97,6 +97,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/store/settings-store';
 import { AttendanceSheet } from '@/components/attendance/attendance-sheet';
 
 /* ───────── types ───────── */
@@ -210,6 +211,7 @@ function SiteCardsGrid({
   onToggleActive: (site: Site) => void;
   onAttendanceSheet: (site: Site) => void;
 }) {
+  const currency = useSettingsStore((s) => s.settings.currency);
   const filteredSites = sites.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     (s.clientName && s.clientName.toLowerCase().includes(search.toLowerCase())) ||
@@ -504,6 +506,7 @@ function AddEmployeeCombobox({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [tradeRates, setTradeRates] = useState<Array<{ id: string; trade: string; hourlyRate: number }>>([]);
   const [selectedTradeRateId, setSelectedTradeRateId] = useState<string>('');
+  const currency = useSettingsStore((s) => s.settings.currency);
 
   const filtered = useMemo(() => {
     const available = allEmployees.filter((e) => !currentSiteEmployeeIds.has(e.id));
@@ -689,7 +692,7 @@ function AddEmployeeCombobox({
               <option value="">— No trade change —</option>
               {tradeRates.map((tr) => (
                 <option key={tr.id} value={tr.id}>
-                  {tr.trade} ({tr.hourlyRate} AED/hr)
+                  {tr.trade} ({tr.hourlyRate} {currency}/hr)
                 </option>
               ))}
             </select>

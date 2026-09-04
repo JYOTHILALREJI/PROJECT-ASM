@@ -41,6 +41,8 @@ model User {
   cancellationRequestsReviewed CancellationRequest[] @relation("ReviewedBy")
   warnings                     Warning[]
   fines                        Fine[]
+  actedNotifications           Notification[]        @relation("NotificationActor")
+  appSettingsUpdated           AppSetting[]
   menuPermissions              AdminMenuPermission[]
   adminPermissions             AdminPermission[]
   attendanceVersions           AttendanceVersion[]
@@ -281,16 +283,39 @@ model Notification {
   message   String
   type      String // "request", "warning", "fine"
   read      Boolean  @default(false)
+  // The user who CAUSED this notification (e.g. the admin who issued a
+  // warning/fine or submitted a request). Null for system-generated events.
+  // Lets the UI show a correct "Issued by <name>" on every card.
+  actorId   String?
   isHidden  Boolean  @default(false) // Legacy soft-hide
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   deletedAt DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([read])
+  @@index([createdAt])
   @@index([isHidden])
   @@index([deletedAt])
+}
+
+// Global app settings (key → value) managed from the Settings page by the
+// super admin. Applied across ALL pages via the client settings store —
+// e.g. the display currency used by every money amount in the app.
+model AppSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique // "currency", "companyName", ...
+  value       String
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
 }
 
 model Warning {

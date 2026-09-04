@@ -21,6 +21,9 @@ export async function GET(request: NextRequest) {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: {
+          actor: { select: { id: true, name: true, email: true, role: true } },
+        },
       }),
       db.notification.count({ where }),
       db.notification.count({ where: { read: false } }),

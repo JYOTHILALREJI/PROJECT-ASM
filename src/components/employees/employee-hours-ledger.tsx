@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/store/settings-store';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -148,8 +149,8 @@ function formatMonthShort(monthStr: string): string {
   return `${MONTH_NAMES[monthIndex].slice(0, 3)} ${year}`;
 }
 
-function formatCurrency(amount: number): string {
-  return `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} AED`;
+function formatCurrency(amount: number, code = 'AED'): string {
+  return `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${code}`;
 }
 
 // ─── Rate color helper (direct rates — NO divisors) ─────────────────────
@@ -233,6 +234,7 @@ interface EditableRow {
 
 export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerProps) {
   const { toast } = useToast();
+  const currency = useSettingsStore((s) => s.settings.currency);
 
   // ── State ──
   const [employeeDetails, setEmployeeDetails] = useState<EmployeeDetails | null>(null);
@@ -597,7 +599,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
         toast({
           title: numericRate ? 'Custom Rate Set' : 'Custom Rate Cleared',
           description: numericRate
-            ? `Custom rate set to ${numericRate} AED/hr from ${currentMonth} onward. Past months keep their previous rate.`
+            ? `Custom rate set to ${numericRate} ${currency}/hr from ${currentMonth} onward. Past months keep their previous rate.`
             : 'Custom rate removed. Base rate will apply again (6/7 after the 1000h threshold).',
         });
         setIsEditingRate(false);
@@ -818,8 +820,8 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                 <DollarSign className="h-3.5 w-3.5" />
                 <span>
                   {employeeInfo.isCustom && employeeInfo.customHourlyRate != null
-                    ? `${employeeInfo.customHourlyRate} AED/hr (Custom)`
-                    : `${employeeInfo.lowRate} / ${employeeInfo.highRate} AED/hr`}
+                    ? `${employeeInfo.customHourlyRate} ${currency}/hr (Custom)`
+                    : `${employeeInfo.lowRate} / ${employeeInfo.highRate} ${currency}/hr`}
                 </span>
               </span>
             )}
@@ -931,7 +933,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                 {employeeInfo?.customHourlyRate != null && !isEditingRate && (
                   <>
                     <Badge className="bg-violet-500/15 text-violet-400 border-violet-500/25">
-                      {employeeInfo.customHourlyRate} AED/hr
+                      {employeeInfo.customHourlyRate} {currency}/hr
                     </Badge>
                     <Button
                       variant="ghost"
@@ -972,7 +974,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                           }
                         }}
                       />
-                      <span className="text-xs text-slate-500">AED/hr</span>
+                      <span className="text-xs text-slate-500">{currency}/hr</span>
                     </div>
                     <Button
                       size="sm"
@@ -1347,7 +1349,7 @@ export function EmployeeHoursLedger({ employeeId, onBack }: EmployeeHoursLedgerP
                   : `${employeeInfo.lowRate} / ${employeeInfo.highRate}`}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Rate (AED/hr)
+                Rate ({currency}/hr)
                 {employeeInfo.isCustom && (
                   <span className="text-violet-400 ml-1">Custom</span>
                 )}

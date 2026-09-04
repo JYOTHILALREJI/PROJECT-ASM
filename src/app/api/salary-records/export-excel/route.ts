@@ -316,6 +316,12 @@ export async function GET(request: NextRequest) {
     // 0:#  1:EmpCode  2:Name  3:Nationality  4:Trade  5:Role
     // 6:BelowHrs  7:AboveHrs  8:TotalHrs  9:GrossSalary
     // 10:Advance  11:Deduction  12:BalanceSalary  13:Status
+    // Header labels use the app-configured display currency (super-admin setting).
+    const currencySetting = await db.appSetting.findUnique({
+      where: { key: 'currency' },
+      select: { value: true },
+    });
+    const currencyCode = currencySetting?.value || 'AED';
     const NUM_COLS = 14;
     const aoa: (string | number)[][] = [];
     const merges: XLSX.Range[] = [];
@@ -374,7 +380,7 @@ export async function GET(request: NextRequest) {
         'Below Threshold Hrs',
         'Above Threshold Hrs',
         'Total Hrs',
-        'Gross Salary (SAR)',
+        `Gross Salary (${currencyCode})`,
         'Advance',
         'Deduction',
         'Balance Salary',

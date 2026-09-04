@@ -46,6 +46,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/store/settings-store';
 import { useSearchNavigation } from '@/lib/use-search-navigation';
 import { resolveClientRate } from '@/lib/client-rate-resolver';
 import { computeSalary, computeBalance, roundMoney } from '@/lib/payroll-math';
@@ -570,17 +571,18 @@ interface MetricCardProps {
 }
 
 function MetricCard({ title, value, icon: Icon, color, bgColor, format = 'number', loading, subtitle }: MetricCardProps) {
+  const currency = useSettingsStore((s) => s.settings.currency);
   const displayValue = useMemo(() => {
     if (value === null) return null;
     switch (format) {
       case 'currency':
-        return `SAR ${formatCurrency(value)}`;
+        return `${currency} ${formatCurrency(value)}`;
       case 'hours':
         return formatHours(value);
       default:
         return value.toLocaleString();
     }
-  }, [value, format]);
+  }, [value, format, currency]);
 
   return (
     <Card className="bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 transition-colors py-4">
