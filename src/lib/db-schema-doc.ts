@@ -20,7 +20,7 @@ interface TableInfo {
 /** Semantic hints for the tables the assistant is most likely to be asked about. */
 const TABLE_HINTS: Record<string, string> = {
   User: 'Admin/system login accounts (role: super_admin|admin). Not workers.',
-  Employee: 'Workers/staff. employeeId is the human-facing code. deletedAt IS NOT NULL or status=deleted → soft-deleted (excluded from reports). currentSiteId → Site the worker is currently at. currentTotalWorkingHours is the manual lifetime-hours override. bedSpaceNumber = bed slot in the camp.',
+  Employee: 'Workers/staff. employeeId is the human-facing code; fullName is the person name. Soft-deleted: deletedAt IS NOT NULL or status=deleted. Boolean flags: isSupervisor (+ supervisorSiteId → Site), isTeamLeader (+ teamLeaderSiteId → Site) — filter supervisors/leaders with isSupervisor = 1 / isTeamLeader = 1, NOT by position text. position is a free-text legacy field; trade via EmployeeTrade junction (assignedTrade). currentSite (name text) + currentSiteId → Site the worker is currently at. currentTotalWorkingHours is the manual lifetime-hours override. bedSpaceNumber = bed slot in the camp (campId → Camp).',
   Site: 'Work sites/projects (name, location, status active|inactive). deletedAt IS NOT NULL → deleted.',
   Camp: 'Worker accommodation camps. Related bed/occupancy lives on Employee.campId + Employee.bedSpaceNumber.',
   Attendance: 'Daily attendance rows: employeeId, date (YYYY-MM-DD), status (P=present 10h, A=absent, camp_sitting=8h), hours, overtimeHours.',

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -16,8 +16,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
+import { useAppStore } from '@/store/app-store';
 import { useSettingsStore } from '@/store/settings-store';
 import { RoboFace, type RoboStatus } from '@/components/ai/robo-face';
+import { subscribeAgentLoop, getAgentJob, getJobVersion, isJobRunning, startAgentJob } from '@/components/ai/agent-loop';
+import { toast } from '@/hooks/use-toast';
 
 // ─── Layout constants ────────────────────────────────────────────────────────
 const FACE = 76; // face hit-box (px)
@@ -66,31 +69,31 @@ function dayLabel(day: string): string {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// Markdown component styling for assistant bubbles.
+// Markdown component styling for assistant bubbles. Everything is built to
+// survive wide/long content: tables scroll inside the bubble, words wrap,
+// nothing overflows the chat panel.
 const mdComponents: Components = {
-  p: ({ children }) => <p className="mb-1.5 leading-relaxed last:mb-0">{children}</p>,
+  p: ({ children }) => <p className="mb-1.5 break-words leading-relaxed last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="mb-1.5 list-disc space-y-0.5 pl-4 last:mb-0">{children}</ul>,
   ol: ({ children }) => <ol className="mb-1.5 list-decimal space-y-0.5 pl-4 last:mb-0">{children}</ol>,
-  li: ({ children }) => <li className="pl-0.5">{children}</li>,
+  li: ({ children }) => <li className="min-w-0 break-words pl-0.5">{children}</li>,
   strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   code: ({ children }) => (
-    <code className="rounded bg-slate-900 px-1 py-0.5 font-mono text-[11px] text-cyan-300">{children}</code>
+    <code className="break-words rounded bg-slate-900 px-1 py-0.5 font-mono text-[11px] text-cyan-300">{children}</code>
   ),
   pre: ({ children }) => <pre className="mb-1.5 overflow-x-auto rounded-lg bg-slate-900 p-2 text-[11px] last:mb-0">{children}</pre>,
   table: ({ children }) => (
-    <div className="mb-1.5 overflow-x-auto rounded-lg border border-slate-600/60 last:mb-0">
-      <table className="w-full border-collapse text-xs">{children}</table>
+    <div className="mb-1.5 max-w-full overflow-x-auto rounded-lg border border-slate-600/60 last:mb-0">
+      <table className="w-full min-w-[280px] max-w-full border-collapse text-xs">{children}</table>
     </div>
   ),
   th: ({ children }) => (
-    <th className="border-b border-slate-600/60 bg-slate-700/50 px-2 py-1.5 text-left font-semibold text-white">{children}</th>
+    <th className="whitespace-nowrap border-b border-slate-600/60 bg-slate-700/50 px-2 py-1.5 text-left font-semibold text-white">{children}</th>
   ),
-  td: ({ children }) => <td className="border-b border-slate-700/50 px-2 py-1.5 align-top">{children}</td>,
+  td: ({ children }) => <td className="border-b border-slate-700/50 px-2 py-1.5 align-top break-words">{children}</td>,
   a: ({ children, href }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-blue-400 underline">
-      {children}
-    </a>
+    <a href={href} target="_blank" rel="noreferrer" className="text-blue-400 underline">{children}</a>
   ),
 };
 
@@ -119,7 +122,6 @@ export function RoboAssistant() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [status, setStatus] = useState<RoboStatus>('idle');
@@ -128,6 +130,12 @@ export function RoboAssistant() {
   const speakingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const notifiedJobRef = useRef<string | null>(null);
+
+  // Agent loop lives OUTSIDE React (module singleton) so remounts / Fast
+  // Refresh can't kill an in-flight task. Subscribe + force re-render.
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => subscribeAgentLoop(forceUpdate), [forceUpdate]);
 
   const panelW = Math.min(400, Math.max(300, viewport.w - 24));
   const panelH = Math.min(560, Math.max(340, viewport.h - 90));
@@ -214,10 +222,11 @@ export function RoboAssistant() {
   }, [pos, viewport, panelW, panelH]);
 
   // ── Auto-scroll messages ──
+  const jobVersion = getJobVersion();
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-  }, [messages, sending, open]);
+  }, [messages, open, jobVersion]);
 
   // ── Escape folds the panel ──
   useEffect(() => {
@@ -312,88 +321,54 @@ export function RoboAssistant() {
   };
 
   // ── Send ──
-  const send = async (raw?: string) => {
+  // Thin: starts the module-level agent job (survives remounts) and returns.
+  // All rendering/notify side effects flow through the subscription above and
+  // the completion effect below.
+  const send = (raw?: string) => {
     const content = (raw ?? input).trim();
-    if (!content || !currentSessionId || !user?.id || sending) return;
+    if (!content || !currentSessionId || !user?.id) return;
+    if (isJobRunning(currentSessionId)) return;
     if (inputRef.current) inputRef.current.style.height = 'auto';
     setInput('');
-
-    const optimistic: ChatMessage = {
-      id: `tmp-${Date.now()}`,
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((m) => [...m, optimistic]);
-    setSending(true);
-    setStatus('thinking');
-
-    try {
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, sessionId: currentSessionId, content }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setMessages((m) => [
-          ...m.filter((x) => x.id !== optimistic.id),
-          { id: data.data.userMessage.id, role: 'user', content, createdAt: data.data.userMessage.createdAt },
-          {
-            id: data.data.assistantMessage.id,
-            role: 'assistant',
-            content: data.data.assistantMessage.content,
-            createdAt: data.data.assistantMessage.createdAt,
-            metaRows: data.data.meta?.rowsFetched || 0,
-          },
-        ]);
-        // Refresh session list (title / order) without a refetch.
-        setSessions((ss) => {
-          const target = ss.find((s) => s.id === currentSessionId);
-          const updated: SessionInfo = target
-            ? { ...target, title: data.data.session.title || target.title, updatedAt: data.data.session.updatedAt || target.updatedAt }
-            : {
-                id: currentSessionId,
-                day: data.data.session.day || todayKey(),
-                title: data.data.session.title || content.slice(0, 48),
-                updatedAt: data.data.session.updatedAt || new Date().toISOString(),
-                messageCount: 2,
-              };
-          return [updated, ...ss.filter((s) => s.id !== currentSessionId)];
-        });
-        // Face speaks briefly after answering.
-        setStatus('speaking');
-        if (speakingTimer.current) clearTimeout(speakingTimer.current);
-        speakingTimer.current = setTimeout(() => setStatus('idle'), 2200);
-      } else {
-        setMessages((m) => [
-          ...m,
-          {
-            id: `err-${Date.now()}`,
-            role: 'assistant',
-            content: data.error || 'The AI provider could not be reached. Check the AI_API_TOKEN env settings.',
-            createdAt: new Date().toISOString(),
-            error: true,
-          },
-        ]);
-        setStatus('idle');
-      }
-    } catch {
-      setMessages((m) => [
-        ...m,
-        {
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: 'Network error — the assistant could not be reached. Please try again.',
-          createdAt: new Date().toISOString(),
-          error: true,
-        },
-      ]);
-      setStatus('idle');
-    } finally {
-      setSending(false);
-    }
+    startAgentJob(user.id, currentSessionId, content, useAppStore.getState().currentView);
   };
+
+  // ── Agent job completion: fold messages into the transcript, update the
+  //    session rail, notify the user, make the face speak.
+  useEffect(() => {
+    const j = getAgentJob();
+    if (!j || j.status === 'running' || notifiedJobRef.current === j.id) return;
+    notifiedJobRef.current = j.id;
+    if (j.sessionId !== currentSessionId) return;
+
+    const ids = new Set(j.messages.map((m) => m.id));
+    setMessages((m) => [...m.filter((x) => !ids.has(x.id)), ...j.messages]);
+    if (j.sessionPatch) {
+      setSessions((ss) => {
+        const target = ss.find((s) => s.id === j.sessionId);
+        const updated: SessionInfo = target
+          ? { ...target, title: j.sessionPatch?.title || target.title, updatedAt: j.sessionPatch?.updatedAt || target.updatedAt }
+          : {
+              id: j.sessionId,
+              day: j.sessionPatch?.day || todayKey(),
+              title: (j.sessionPatch?.title || 'New chat').slice(0, 48),
+              updatedAt: j.sessionPatch?.updatedAt || new Date().toISOString(),
+              messageCount: 2,
+            };
+        return [updated, ...ss.filter((s) => s.id !== j.sessionId)];
+      });
+    }
+    if (!open || j.agentSteps > 0) {
+      const last = [...j.messages].reverse().find((m) => m.role === 'assistant' && !m.error);
+      toast({
+        title: j.agentSteps > 0 ? `${aiName || 'Nova'} finished your task` : `${aiName || 'Nova'} replied`,
+        description: (last?.content || '').replace(/[#*`>|]/g, '').trim().slice(0, 90) || 'Open the chat to read it.',
+      });
+    }
+    setStatus('speaking');
+    if (speakingTimer.current) clearTimeout(speakingTimer.current);
+    speakingTimer.current = setTimeout(() => setStatus('idle'), 2200);
+  }, [jobVersion, currentSessionId, open, aiName]);
 
   const onInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -421,6 +396,19 @@ export function RoboAssistant() {
     return groups;
   }, [sessions]);
 
+  // Merge persisted history with live agent-job messages (deduped by id —
+  // a mid-job remount reloads persisted copies of the same step messages).
+  const activeJob = getAgentJob();
+  const jobForSession = activeJob && activeJob.sessionId === currentSessionId ? activeJob : null;
+  const sending = !!jobForSession && jobForSession.status === 'running';
+  const faceStatus: RoboStatus = sending ? 'thinking' : status;
+  const visible = useMemo(() => {
+    if (!jobForSession) return messages;
+    const ids = new Set(jobForSession.messages.map((m) => m.id));
+    return [...messages.filter((m) => !ids.has(m.id)), ...jobForSession.messages];
+    // jobVersion bumps whenever the job mutates — recompute then.
+  }, [messages, currentSessionId, jobVersion]);
+
   if (!user || !pos) return null;
 
   const transformOrigin = `${placement?.side === 'right' ? 'left' : 'right'} ${placement?.below ? 'top' : 'bottom'}`;
@@ -432,6 +420,7 @@ export function RoboAssistant() {
         {open && placement && (
           <motion.div
             key="asm-ai-chat"
+            data-asm-assistant
             className="fixed z-[60] flex overflow-hidden rounded-2xl border border-slate-600/70 bg-slate-800/95 shadow-2xl shadow-black/50 backdrop-blur-md"
             style={{ left: placement.left, top: placement.top, width: panelW, height: panelH, transformOrigin }}
             initial={{ opacity: 0, scale: 0.55, x: placement.side === 'right' ? -26 : 26, y: placement.below ? -20 : 20 }}
@@ -529,7 +518,7 @@ export function RoboAssistant() {
 
               {/* Messages */}
               <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-                {messages.length === 0 && !sending && (
+                {visible.length === 0 && !sending && (
                   <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
                     <RoboFace size={64} status="idle" />
                     <div>
@@ -553,7 +542,7 @@ export function RoboAssistant() {
                   </div>
                 )}
 
-                {messages.map((m) =>
+                {visible.map((m) =>
                   m.role === 'user' ? (
                     <div key={m.id} className="flex justify-end">
                       <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-blue-600 px-3.5 py-2 text-sm text-white shadow-sm">
@@ -564,7 +553,7 @@ export function RoboAssistant() {
                     <div key={m.id} className="flex justify-start">
                       <div
                         className={cn(
-                          'max-w-[88%] rounded-2xl rounded-bl-md px-3.5 py-2 text-sm shadow-sm',
+                          'max-w-[88%] overflow-hidden rounded-2xl rounded-bl-md px-3.5 py-2 text-sm shadow-sm',
                           m.error
                             ? 'border border-red-500/30 bg-red-500/10 text-red-300'
                             : 'border border-slate-600/60 bg-slate-700/50 text-slate-100'
@@ -644,6 +633,7 @@ export function RoboAssistant() {
 
       {/* ── Draggable robo face ── */}
       <div
+        data-asm-assistant
         role="button"
         tabIndex={0}
         aria-label="AI assistant — click to open chat, drag to move"
@@ -667,7 +657,7 @@ export function RoboAssistant() {
           )}
           style={{ boxShadow: '0 0 26px 4px rgba(34,211,238,0.35)' }}
         />
-        <RoboFace size={FACE} status={status} className="pointer-events-none" />
+        <RoboFace size={FACE} status={faceStatus} className="pointer-events-none" />
       </div>
     </>
   );

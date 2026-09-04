@@ -100,17 +100,25 @@ async function callZai(
   messages: LlmMessage[],
   _opts?: { temperature?: number; maxTokens?: number }
 ): Promise<string> {
-  // Lazy import so the SDK is only loaded when actually used (server-side only).
-  const { default: ZAI } = await import('z-ai-web-dev-sdk');
-  const zai = await ZAI.create();
-  const completion = await zai.chat.completions.create({
-     
-    messages: messages as any,
-    thinking: { type: 'disabled' },
-  });
-  const content = completion.choices?.[0]?.message?.content;
-  if (!content || !content.trim()) throw new Error('Built-in AI returned an empty response');
-  return content.trim();
+  // The built-in SDK has no built-in abort — race it against a hard timeout so
+  // a stalled model can never wedge the agent loop.
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Built-in AI timed out after 120s')), 120_000)
+  );
+  const run = async (): Promise<string> => {
+    // Lazy import so the SDK is only loaded when actually used (server-side only).
+    const { default: ZAI } = await import('z-ai-web-dev-sdk');
+    const zai = await ZAI.create();
+    const completion = await zai.chat.completions.create({
+
+      messages: messages as any,
+      thinking: { type: 'disabled' },
+    });
+    const content = completion.choices?.[0]?.message?.content;
+    if (!content || !content.trim()) throw new Error('Built-in AI returned an empty response');
+    return content.trim();
+  };
+  return Promise.race([run(), timeout]);
 }
 
 /**
