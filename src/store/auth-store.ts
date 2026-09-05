@@ -12,7 +12,12 @@ export interface UserSession {
 interface AuthState {
   user: UserSession | null;
   isLoading: boolean;
+  // Granted permission slugs for normal admins (mirrored from page.tsx's 15s
+  // poll). Super admins keep this empty — every view is allowed for them.
+  // The AI agent reads this to enforce the SAME access rules as the human UI.
+  permissions: string[];
   setUser: (user: UserSession | null) => void;
+  setPermissions: (slugs: string[]) => void;
   setLoading: (loading: boolean) => void;
   logout: () => void;
   updateUser: (updates: Partial<UserSession>) => void;
@@ -21,6 +26,8 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
+  permissions: [],
+  setPermissions: (permissions) => set({ permissions }),
   setUser: (user) => {
     if (typeof window !== 'undefined') {
       if (user) {
@@ -29,14 +36,16 @@ export const useAuthStore = create<AuthState>((set) => ({
         localStorage.removeItem('asm_user');
       }
     }
-    set({ user, isLoading: false });
+    // A different account means a different permission set — never leak the
+    // previous account's grants into the new session.
+    set({ user, permissions: [], isLoading: false });
   },
   setLoading: (isLoading) => set({ isLoading }),
   logout: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('asm_user');
     }
-    set({ user: null, isLoading: false });
+    set({ user: null, permissions: [], isLoading: false });
   },
   updateUser: (updates) => {
     set((state) => {

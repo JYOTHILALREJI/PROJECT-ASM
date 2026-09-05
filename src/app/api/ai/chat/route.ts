@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { callLLM, extractJsonObject, credentialsFromMap, type LlmMessage } from '@/lib/ai-client';
 import { getDbSchemaDoc } from '@/lib/db-schema-doc';
 import { APP_UI_MAP, AGENT_VIEWS, VIEW_LABELS, VIEW_HINTS } from '@/lib/app-ui-map';
-import { isAiAllowed, AI_ACCESS_DENIED } from '@/lib/ai-access';
+import { isAiAllowed, AI_ACCESS_DENIED, getUserAccess } from '@/lib/ai-access';
 
 // AI Assistant chat endpoint — two-pass "grounded SQL" flow + in-app agent.
 //
@@ -244,7 +244,8 @@ function truncate(text: string, cap: number): string {
 /**
  * callLLM with automatic retry on provider rate-limits (HTTP 429). The agent
  * loop makes many calls in bursts — a hard-fail on the first 429 kills a
- * half-done task, so back off briefly and try again (3 attempts total).
+ * half-done task, so back off and try again (4 attempts, ~30s total window —
+ * provider cooldowns are short but longer than the old 2s/5s ladder).
  */
 async function callLLMR(
   messages: LlmMessage[],
@@ -252,14 +253,14 @@ async function callLLMR(
   creds: Parameters<typeof callLLM>[2]
 ): Promise<string> {
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     try {
       return await callLLM(messages, opts, creds);
     } catch (err) {
       lastError = err;
       const msg = err instanceof Error ? err.message : '';
-      if (/429|too many requests|rate.?limit/i.test(msg) && attempt < 2) {
-        await new Promise((r) => setTimeout(r, attempt === 0 ? 2000 : 5000));
+      if (/429|too many requests|rate.?limit/i.test(msg) && attempt < 3) {
+        await new Promise((r) => setTimeout(r, [3000, 8000, 15000][attempt]));
         continue;
       }
       throw err;
@@ -393,6 +394,9 @@ function plannerSystemPrompt(
     '   - KEEP GOING: never pause mid-task to ask permission ("shall I continue?") and never stop after a',
     '     few steps — keep issuing actions until the task is truly complete. Stop ONLY when a REQUIRED detail',
     '     is missing (then ask) or the task is finished (then confirm).',
+    '   - SUCCESS TOAST = DONE: when the observation reports a success toast or marker ("Settings Applied",',
+    '     "Stock Added", "✅ …"), reply with the FINAL {"answer":"…"} confirmation right away — do NOT run',
+    '     extra read/verify steps after the app already confirmed success.',
     '   - Fill fields in a logical order, then click the submit/create button only when everything needed is filled.',
     '   - If required details are MISSING (e.g. which company? which employees?), stop and ask with',
     '     {"answer":"…question…"} — list exactly what you need. The user replies, then you resume.',
@@ -482,7 +486,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: `Message too long (max ${MAX_CONTENT} characters)` }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, deletedAt: true } });
+    const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, role: true, deletedAt: true } });
     if (!user || user.deletedAt) {
       return NextResponse.json({ success: false, error: 'Valid user required' }, { status: 400 });
     }
@@ -492,6 +496,11 @@ export async function POST(request: NextRequest) {
     if (!(await isAiAllowed(userId))) {
       return NextResponse.json({ success: false, error: AI_ACCESS_DENIED }, { status: 403 });
     }
+
+    // Screen-level access for the AGENT — mirrors the human UI permissions so
+    // the assistant can say "I don't have access to Settings…" instead of
+    // silently failing halfway through a task.
+    const access = await getUserAccess(userId);
 
     const session = await db.aiChatSession.findFirst({ where: { id: sessionId, userId } });
     if (!session) {
@@ -549,12 +558,12 @@ export async function POST(request: NextRequest) {
     // Requests mentioning URLs / outside destinations are excluded — those
     // must get a polite refusal, not a substitute navigation.
     const externalIntent = /https?:\/\/|www\.|\b(google|youtube|facebook|instagram|whatsapp\.com|twitter|x\.com|linkedin|chrome|browser|internet)\b/i.test(content);
-    const actionIntent = /\b(open|go to|goto|take me to|show me|navigate|bring me|switch to|jump to|create|make|fill|add)\b/i.test(content) && !externalIntent;
+    const actionIntent = /\b(open|go to|goto|take me to|show me|navigate|bring me|switch to|jump to|create|make|fill|add|change|update|set|rename|edit|modify|delete|remove|approve|reject|issue|mark|assign|transfer|restore|renew|save|submit|toggle|grant|revoke|enable|disable|clear|empty|cancel|record|register|close|upload)\b/i.test(content) && !externalIntent;
     if (actionIntent) {
       contextMessages.push({
         role: 'user',
         content:
-          '[REMINDER] This request asks you to ACT inside the app. Your ENTIRE reply must be a single JSON object WITH an "action" key, e.g. {"action":{"type":"navigate","view":"documents"},"thought":"…"} — or, ONLY if details are missing, {"answer":"…question…"}. Writing a sentence or a step line (⚙️/🖱️/✍️) describing what you would do is FORBIDDEN for this request.',
+          '[REMINDER] This request asks you to ACT inside the app. Your ENTIRE reply must be a single JSON object WITH an "action" key, e.g. {"action":{"type":"navigate","view":"documents"},"thought":"…"} — or, ONLY if details are missing, {"answer":"…question…"}. Writing a sentence or a step line (⚙️/🖱️/✍️/🛠️/📦) describing what you would do is FORBIDDEN for this request. When the user says "change X to Y", Y is the value — copy it VERBATIM into the fill action.',
       });
       // VALUE BINDING — messages that carry explicit "FIELD = VALUE" pairs must
       // have those values copied verbatim into fill actions. Weak models tend
@@ -567,16 +576,27 @@ export async function POST(request: NextRequest) {
         });
       }
     }
+    if (access.deniedViews.length > 0) {
+      contextMessages.push({
+        role: 'user',
+        content: `[ACCESS] This account is NOT the super admin. Screens BEYOND this account's permissions: ${access.deniedViews.join(', ')}. If the user's request needs any of those screens (for example changing app settings, branding/currency, or admin permissions), do NOT attempt it — reply {"answer":"…"} clearly saying you don't have access to that area and that the super admin must do it or grant the permission.`,
+      });
+    }
     if (agentObservation) {
       // The macro reports success in its observation — tell the model the task
       // is COMPLETE so it confirms instead of burning extra read/click turns.
       const macroDone = agentObservation.includes('✅ NOC generated');
+      // A denied navigation is FINAL — the account may not open that screen,
+      // so the only correct reply is a clear "I don't have access" answer.
+      const accessDenied = agentObservation.includes('ACCESS DENIED');
       contextMessages.push({
         role: 'user',
         content: `[AGENT OBSERVATION] Result of your last action:\n${agentObservation}\n\n${
           macroDone
             ? 'The task is COMPLETE — the NOC was generated successfully. Reply NOW with {"answer":"…"} confirming the result (mention the NOC number and the client in our we-voice). Do NOT run any more actions.'
-            : 'The task is IN PROGRESS. Your ENTIRE reply must be a single JSON object WITH an "action" key for the next step ({"action":{"type":"…",…},"thought":"…") — or {"answer":"…"} ONLY to ask a missing-detail question or confirm completion. NEVER write a step line (⚙️/🖱️/✍️) — return the raw action JSON instead.'
+            : accessDenied
+              ? 'The task CANNOT continue — this account does not have access to that screen. Reply NOW with {"answer":"…"} telling the user clearly that you don\u2019t have access to that area (super admin only / permission not granted) and that the super admin must do it or grant the permission. Do NOT attempt any workaround and do NOT run more actions toward that screen.'
+              : 'The task is IN PROGRESS. Your ENTIRE reply must be a single JSON object WITH an "action" key for the next step ({"action":{"type":"…",…},"thought":"…") — or {"answer":"…"} ONLY to ask a missing-detail question or confirm completion. NEVER write a step line (⚙️/🖱️/✍️) — return the raw action JSON instead.'
         }`,
       });
     }
@@ -601,7 +621,9 @@ export async function POST(request: NextRequest) {
     // Both first-turn action requests and mid-task observation turns are covered.
     let planJson = extractJsonObject(planRaw);
 
-    const STEP_LINE_RE = /^[\u2699\uFE0F\uD83D\uDDFB\u270D\uD83D\uDD3C\uD83D\uDC41\u23F3\u2712]/u;
+    // A "step line" answer (⚙️/🖱️/✍️/🛠️/📦…) is the model PRETENDING to act —
+    // any leading emoji marks that pattern now, not just a hand-picked set.
+    const STEP_LINE_RE = /^\p{Extended_Pictographic}/u;
     const looksFinal = (s: string) =>
       /✅|\b(done|completed|created|finished|generated|added|submitted|deleted|saved|opened|already|need|which|what is|please provide)\b/i.test(s);
 
@@ -617,11 +639,13 @@ export async function POST(request: NextRequest) {
       !agentObservation &&
       content &&
       actionIntent &&
-      planJson !== null &&
-      planJson.action === undefined &&
-      planJson.sql === undefined &&
-      typeof planJson.answer === 'string' &&
-      !!planJson.answer.trim();
+      (planJson === null ||
+        (planJson.action === undefined &&
+          planJson.sql === undefined &&
+          ((typeof planJson.answer === 'string' &&
+            !!planJson.answer.trim() &&
+            (STEP_LINE_RE.test(planJson.answer.trim()) || !looksFinal(planJson.answer.trim()))) ||
+            planJson.answer === undefined)));
 
     if (midTaskStall || firstTurnStall) {
       const stern =

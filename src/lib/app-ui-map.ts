@@ -59,6 +59,45 @@ export const VIEW_LABELS: Record<string, string> = {
   profile: 'Profile',
 };
 
+// ── View access (shared by page routing AND the AI agent) ────────────────────
+// The agent must obey exactly the same permission rules as the human UI: when
+// it cannot open a screen it must SAY so ("I don't have access…") instead of
+// silently failing mid-task.
+export const ALWAYS_VISIBLE_VIEWS: readonly string[] = ['dashboard', 'profile'];
+
+export const RESTRICTED_VIEWS: readonly string[] = [
+  'employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy',
+  'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail',
+  'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests',
+  'notifications', 'admins', 'all_logs', 'documents', 'noc_view', 'settings',
+];
+
+// Views whose permission slug differs from their view id.
+export const VIEW_PERMISSION_MAP: Record<string, string> = {
+  employee_hours_ledger: 'employee_hours',
+  advance: 'accounts',
+  all_logs: 'admins',
+  noc_view: 'documents',
+};
+
+// Screens that CHANGE app-wide / account configuration. Even a permission-
+// granted admin cannot save them (the settings PATCH API is super-admin-only),
+// so the agent treats them as super-admin-only outright.
+export const SUPER_ADMIN_ONLY_VIEWS: readonly string[] = ['settings', 'admins'];
+
+export function permissionSlugForView(view: string): string {
+  return VIEW_PERMISSION_MAP[view] ?? view;
+}
+
+/** Mirror of page.tsx's isViewAllowed, usable from the agent executor too. */
+export function isViewAllowedFor(role: string | undefined, grantedSlugs: readonly string[], view: string): boolean {
+  if (!role) return false;
+  if (role === 'super_admin') return true;
+  if ((ALWAYS_VISIBLE_VIEWS as readonly string[]).includes(view)) return true;
+  if (RESTRICTED_VIEWS.includes(view)) return grantedSlugs.includes(permissionSlugForView(view));
+  return false;
+}
+
 /**
  * Deterministic "where do I …?" directions, one per screen. The planner's
  * navigate choice on a where-question tells us WHICH screen it meant; the
@@ -128,12 +167,13 @@ export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only mo
 
 [admins] Admin Management — create/edit admin users, roles, online presence, and per-menu permissions (expand a row: grouped permission switches, Grant/Revoke All). Includes the "AI Assistant" toggle that grants or blocks an admin's access to the AI assistant. [all_logs] All Logs — full audit trail of user actions.
 
-[settings] Settings (Super Admin only) — two-column layout. Branding (company logo upload, glowing brand text, company name) | Currency picker; below, the full-width AI Assistant section: identity on the left (assistant name + live previews) and Model provider on the right (API key, base URL, searchable model dropdown loaded from the provider, saved key shown masked only). Applies app-wide instantly.
+[settings] Settings (Super Admin only) — two-column layout. Branding card: "Company logo" (upload/remove buttons), the input labelled "Brand text (glowing short name)" (the short glowing sidebar title, e.g. ASM), and the input labelled "Company name" (full name). Currency card: a grid of currency buttons (AED, USD, …) — click one to pick it. AI Assistant card (full width): "Assistant name" input, API key, Base URL, Model. The single "Apply Settings" button (top right) saves EVERYTHING — it stays grey/disabled until a field changes, so fill first, then click it. Applies app-wide instantly. AGENT NOTE: "company short name" = the "Brand text (glowing short name)" input; "company name" = the "Company name" input. There is NO form on this page — pressing Enter does nothing; the ONLY way to save is clicking "Apply Settings", and a "Settings Applied" toast confirms the save.
 
 [profile] Profile — the signed-in user's own profile.
 
 Rules for the agent:
 - OBSERVE FIRST: when you arrive on any page, run "read" BEFORE your first click — the read lists a TABS line (which tab is ACTIVE) and the buttons actually on screen. Never click a button you have not seen in a fresh read.
+- ACCESS: your navigation obeys the account's permissions. If a navigate observation says ACCESS DENIED, do NOT retry and do not work around it — immediately tell the user in plain words that you don't have access to that screen and the super admin must do it or grant the permission. Never claim a restricted action (e.g. changing app settings) succeeded when it did not.
 - TAB OWNERSHIP: pages with tabs (Materials Registry, Documents, Advances, Cancellations…) show DIFFERENT buttons per tab and open on their first tab by default. Match the request to the right tab; if the button you need is not on the active tab, click that tab, read again, then act. "+ New Entry" (Tokens tab) creates employee tokens; material/stock adds live under the "Stock Management" tab's "Add Stock".
 - Navigate ONLY with the view keys above. There is no way — and no permission — to open anything outside this app.
 - You can operate EVERY control a human can: all sidebar menus, page buttons, tabs, dropdowns, switches/checkboxes and every modal dialog. Add/Edit forms across the app open as modals or dedicated screens; delete and other destructive actions show a confirmation popup (SweetAlert) — complete it by clicking the red/confirm button, or press Escape to cancel.

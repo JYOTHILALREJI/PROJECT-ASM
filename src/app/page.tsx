@@ -39,6 +39,7 @@ import { usePresenceHeartbeat } from '@/hooks/use-presence-heartbeat';
 import { PageTransition } from '@/components/motion';
 import { CommandPalette } from '@/components/layout/command-palette';
 import { RoboAssistant } from '@/components/ai/robo-assistant';
+import { ALWAYS_VISIBLE_VIEWS, RESTRICTED_VIEWS, VIEW_PERMISSION_MAP } from '@/lib/app-ui-map';
 
 type AppState = 'checking' | 'needs_setup' | 'unauthenticated' | 'authenticated';
 
@@ -94,11 +95,8 @@ function LoadingScreen() {
   );
 }
 
-// Menus always visible to all authenticated users (including admin)
-const ALWAYS_VISIBLE_VIEWS: AppView[] = ['dashboard', 'profile'];
-
-// Views that only super_admin can access by default (admin needs explicit permission)
-const RESTRICTED_VIEWS: AppView[] = ['employees', 'employee_add', 'employee_batch_add', 'sites', 'attendance', 'attendance_copy', 'accounts', 'advance', 'consolidated_salary', 'employee_hours_ledger', 'employee_detail', 'camps', 'camp_detail', 'uniform_registry', 'leave_requests', 'cancellation_requests', 'notifications', 'admins', 'all_logs', 'documents', 'noc_view', 'settings'];
+// View access lists (ALWAYS_VISIBLE_VIEWS / RESTRICTED_VIEWS / VIEW_PERMISSION_MAP)
+// live in src/lib/app-ui-map.ts so the AI agent enforces exactly the same rules.
 
 function MainLayout() {
   const { currentView, setCurrentView, selectedEmployeeId, setSelectedEmployeeId, selectedNocId, setSelectedNocId, sidebarOpen, setSidebarOpen } = useAppStore();
@@ -123,6 +121,7 @@ function MainLayout() {
   React.useEffect(() => {
     if (!user || user.role === 'super_admin') {
       setAdminPermissions([]);
+      useAuthStore.getState().setPermissions([]);
       return;
     }
     const fetchPermissions = async () => {
@@ -139,6 +138,8 @@ function MainLayout() {
               .map((p: { slug: string }) => p.slug),
           ];
           setAdminPermissions([...new Set(grantedSlugs)]);
+          // Mirror into the auth store so the AI agent enforces the same rules.
+          useAuthStore.getState().setPermissions([...new Set(grantedSlugs)]);
         }
       } catch {
         // Fallback: try legacy menu-permissions API
@@ -147,6 +148,7 @@ function MainLayout() {
           const data = await res.json();
           if (data.success) {
             setAdminPermissions(data.data.allowedMenus || []);
+            useAuthStore.getState().setPermissions(data.data.allowedMenus || []);
           }
         } catch {
           // silent
@@ -159,15 +161,7 @@ function MainLayout() {
     return () => clearInterval(interval);
   }, [user]);
 
-  // Map sub-views to their permission slug.
-  // Most views use their own slug directly (e.g. 'accounts' → 'accounts').
-  // These mappings are for views whose ID differs from their permission slug.
-  const VIEW_PERMISSION_MAP: Record<string, string> = {
-    employee_hours_ledger: 'employee_hours', // View ID ≠ permission slug
-    advance: 'accounts', // Advance is a sub-feature of Accounts
-    all_logs: 'admins', // All Logs is a sub-feature of Admin Management
-    noc_view: 'documents', // NOC viewer rides on the Documents permission
-  };
+  // (VIEW_PERMISSION_MAP lives in app-ui-map.ts now — shared with the agent.)
 
   // Load global app settings (currency, company name) once per session —
   // every page reads them through useSettingsStore.

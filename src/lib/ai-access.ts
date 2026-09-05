@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { AGENT_VIEWS, RESTRICTED_VIEWS, SUPER_ADMIN_ONLY_VIEWS, VIEW_LABELS, permissionSlugForView } from '@/lib/app-ui-map';
 
 // AI Assistant access gate.
 //
@@ -41,3 +42,41 @@ export async function isAiAllowed(userId: string): Promise<boolean> {
 }
 
 export const AI_ACCESS_DENIED = 'The AI assistant is not enabled for your account. Ask the super admin to turn on the "AI Assistant" permission in Admin Management.';
+
+/**
+ * Which app screens may THIS user's AI agent open? Mirrors the human UI rules
+ * (page.tsx isViewAllowed): super admins can open everything; a normal admin
+ * gets the always-visible screens plus the restricted ones they were granted,
+ * and Settings / Admin Management are super-admin-only outright (their save
+ * APIs reject non-super-admins anyway).
+ *
+ * Returns the denied views as human labels so the planner can be told — in one
+ * line — where it must refuse to go and SAY so instead of failing mid-task.
+ */
+export async function getUserAccess(userId: string): Promise<{ isSuperAdmin: boolean; deniedViews: string[] }> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true, deletedAt: true },
+  });
+  if (!user || user.deletedAt) return { isSuperAdmin: false, deniedViews: [...AGENT_VIEWS] };
+  if (user.role === 'super_admin') return { isSuperAdmin: true, deniedViews: [] };
+
+  const [grants, legacy] = await Promise.all([
+    db.adminPermission.findMany({
+      where: { adminId: userId, deletedAt: null, permission: { deletedAt: null } },
+      select: { permission: { select: { slug: true } } },
+    }),
+    db.adminMenuPermission.findMany({
+      where: { userId, allowed: true, deletedAt: null },
+      select: { menuKey: true },
+    }),
+  ]);
+  const granted = new Set<string>([...grants.map((g) => g.permission.slug), ...legacy.map((l) => l.menuKey)]);
+
+  const deniedViews = AGENT_VIEWS.filter((view) => {
+    if (SUPER_ADMIN_ONLY_VIEWS.includes(view)) return true;
+    if (!RESTRICTED_VIEWS.includes(view)) return false;
+    return !granted.has(permissionSlugForView(view));
+  });
+  return { isSuperAdmin: false, deniedViews: deniedViews.map((v) => VIEW_LABELS[v] ?? v) };
+}

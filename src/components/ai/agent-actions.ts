@@ -16,7 +16,8 @@
 //     local caps) and used only as match text / input values.
 
 import { useAppStore } from '@/store/app-store';
-import { AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
+import { useAuthStore } from '@/store/auth-store';
+import { AGENT_VIEWS, VIEW_LABELS, isViewAllowedFor } from '@/lib/app-ui-map';
 import { todayDMY } from '@/components/documents/shared';
 
 export interface AgentAction {
@@ -246,10 +247,20 @@ async function clickByTextVerified(text: string): Promise<string> {
   const before = norm(document.querySelector('main h1, main h2')?.textContent || '').slice(0, 60);
   const result = clickByText(text);
   if (!result.startsWith('Clicked')) return result;
-  await sleep(900); // let React open dialogs / switch views
+  await sleep(900); // let React open dialogs / switch views / fire toasts
   const after = norm(document.querySelector('main h1, main h2')?.textContent || '').slice(0, 60);
   const dialogs = document.querySelectorAll('[role="dialog"]').length;
-  return `${result} Screen heading is now: "${after || before}".${dialogs > 0 ? ` ${dialogs} dialog(s) now open.` : ''}`;
+  // Toasts / status banners tell the model whether the click actually
+  // SUCCEEDED ("Settings Applied", "Stock Added"…) — without them it cannot
+  // confirm completion and keeps "verifying" forever.
+  const toasts = (Array.from(document.querySelectorAll('[role="status"], [role="alert"]')) as HTMLElement[])
+    .filter(isVisible)
+    .map((t) => norm(t.textContent || ''))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' | ')
+    .slice(0, 300);
+  return `${result} Screen heading is now: "${after || before}".${dialogs > 0 ? ` ${dialogs} dialog(s) now open.` : ''}${toasts ? ` Page toast: "${toasts}".` : ''}`;
 }
 
 // ── fill ─────────────────────────────────────────────────────────────────────
@@ -288,6 +299,27 @@ function findField(field: string): HTMLInputElement | HTMLTextAreaElement | null
         next = next.nextElementSibling;
       }
       return null;
+    })() ||
+    // Word-overlap fallback (last resort): users say "company short name" while
+    // the label reads "Brand text (glowing short name)". Score every visible
+    // field by shared content words — at least 2 shared words AND covering at
+    // least half the query words. Ties keep the first field in DOM order.
+    (() => {
+      const STOP = new Set(['the', 'a', 'an', 'of', 'and', 'to', 'in', 'field']);
+      const qWords = t.split(' ').filter((w) => w && !STOP.has(w));
+      if (qWords.length < 2) return null;
+      let best: HTMLInputElement | HTMLTextAreaElement | null = null;
+      let bestScore = 0;
+      for (const el of visible) {
+        const words = new Set(`${byLabel(el)} ${norm(el.placeholder || '')} ${norm(el.name || '')}`.split(' ').filter(Boolean));
+        let score = 0;
+        for (const w of qWords) if (words.has(w)) score += 1;
+        if (score >= 2 && score / qWords.length >= 0.5 && score > bestScore) {
+          best = el;
+          bestScore = score;
+        }
+      }
+      return best;
     })() ||
     null
   );
@@ -389,10 +421,23 @@ async function selectOption(field: string, option: string): Promise<string> {
   return `Selected "${norm(target.textContent || '').slice(0, 60)}" in ${norm(trigger.textContent || '').slice(0, 40) || field}.`;
 }
 
-// ── navigate ─────────────────────────────────────────────────────────────────
+// ── navigate ───────────────────────────────────────────────────────────────
 async function navigate(view: string): Promise<string> {
   if (!(AGENT_VIEWS as readonly string[]).includes(view)) {
     return `Navigation to "${view}" is not allowed — only in-app screens: ${AGENT_VIEWS.join(', ')}.`;
+  }
+  // PERMISSION GATE — the agent obeys exactly the same access rules as the
+  // human UI. When the screen is beyond this account, say so clearly so the
+  // model can tell the user "I don't have access" instead of failing silently.
+  const { user, permissions } = useAuthStore.getState();
+  if (user && !isViewAllowedFor(user.role, permissions, view)) {
+    const label = VIEW_LABELS[view] ?? view;
+    const superOnly = view === 'settings' || view === 'admins';
+    return `ACCESS DENIED: the "${label}" screen is ${
+      superOnly ? 'reserved for the super admin' : 'not permitted for this account'
+    }. Do NOT retry and do not work around it — tell the user you don't have access to ${label}${
+      superOnly ? ' (super admin only)' : ''
+    } and that the super admin must do it or grant the permission.`;
   }
   const store = useAppStore.getState();
   // Detach detail views when leaving them so their fallback screens render.
