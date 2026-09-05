@@ -10,7 +10,7 @@ import { logActivity } from '@/lib/activity-logger';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { date, status = 'present', employeeIds, siteId, actorUserId, actorDisplayName } = body;
+    const { date, status = 'present', employeeIds, siteId, siteName, actorUserId, actorDisplayName } = body;
 
     if (!date) {
       return NextResponse.json(
@@ -48,10 +48,41 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Optional single-site restriction by NAME (AI agent attendance_mark) ──
+    // Resolves the site from the name (exact first, then substring) and limits
+    // the mark to employees whose current site it is. The resolved site also
+    // becomes the record-attribution site, mirroring the siteId path.
+    let restrictSiteId: string | null = null;
+    if (!siteId && typeof siteName === 'string' && siteName.trim()) {
+      const wanted = siteName.trim();
+      const siteRow =
+        (await db.site.findFirst({ where: { deletedAt: null, name: wanted }, select: { id: true, name: true } })) ??
+        (await db.site.findFirst({
+          where: { deletedAt: null, name: { contains: wanted } },
+          select: { id: true, name: true },
+        }));
+      if (!siteRow) {
+        return NextResponse.json(
+          { success: false, error: `No site found matching "${wanted}"` },
+          { status: 404 }
+        );
+      }
+      restrictSiteId = siteRow.id;
+      bulkSiteId = siteRow.id;
+      bulkSiteName = siteRow.name;
+    }
+
     // Build the where clause: either specific employeeIds or all active employees
     const whereClause: Record<string, unknown> = { status: 'active' };
     if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
       whereClause.id = { in: employeeIds };
+    } else if (restrictSiteId) {
+      // Single-site restriction: match the FK first, fall back to the legacy
+      // name-only column for employees whose currentSiteId was never set.
+      whereClause.OR = [
+        { currentSiteId: restrictSiteId },
+        ...(bulkSiteName ? [{ currentSite: bulkSiteName }] : []),
+      ];
     }
 
     const employees = await db.employee.findMany({
@@ -177,6 +208,7 @@ export async function POST(request: NextRequest) {
         skipped,
         errors: errors.length > 0 ? errors : undefined,
         versionCaptures,
+        sites: versionCaptures.map((v) => v.siteName).filter(Boolean),
       },
     });
   } catch (error: unknown) {

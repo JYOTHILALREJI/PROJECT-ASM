@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { callLLM, extractJsonObject, credentialsFromMap, type LlmMessage } from '@/lib/ai-client';
+import { callLLM, extractJsonObject, credentialsFromMap, envAIConfigured, type LlmMessage } from '@/lib/ai-client';
 import { getDbSchemaDoc } from '@/lib/db-schema-doc';
 import { APP_UI_MAP, AGENT_VIEWS, VIEW_LABELS, VIEW_HINTS } from '@/lib/app-ui-map';
 import { isAiAllowed, AI_ACCESS_DENIED, getUserAccess } from '@/lib/ai-access';
@@ -84,7 +84,7 @@ function redactSecrets(rows: Record<string, unknown>[]): Record<string, unknown>
 // and additionally confines clicks/fills to the app's own page DOM.
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create' | 'stock_add';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create' | 'stock_add' | 'attendance_mark';
   view?: string;
   text?: string;
   field?: string;
@@ -110,6 +110,11 @@ export interface AgentAction {
   size?: string;
   quantity?: number;
   minQuantity?: number;
+  // attendance_mark payload — a one-shot bulk attendance mark. status is
+  // present/absent; date defaults to today; an optional site name restricts
+  // the mark to that one site (omit it for ALL sites).
+  status?: string;
+  site?: string;
 }
 
 function clampStr(v: unknown, max: number): string | null {
@@ -204,6 +209,17 @@ function validateAgentAction(raw: unknown): AgentAction | null {
       };
       return { type: 'stock_add', itemName, size, quantity: intOrUndef(a.quantity), minQuantity: intOrUndef(a.minQuantity) };
     }
+    case 'attendance_mark': {
+      // One-shot bulk attendance mark. Status is present/absent (default
+      // present), date is optional (client defaults to today), site is an
+      // optional single-site restriction (client resolves it by name).
+      const status = clampStr(a.status, 10)?.toLowerCase() || 'present';
+      if (!['present', 'absent'].includes(status)) return null;
+      const date = clampStr(a.date, 10);
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+      const site = clampStr(a.site, 80);
+      return { type: 'attendance_mark', status, date: date ?? undefined, site: site ?? undefined };
+    }
     default:
       return null;
   }
@@ -234,6 +250,8 @@ function describeAction(action: AgentAction): string {
       return `🛠️ Creating the NOC for **${action.client}**${action.project ? ` · ${action.project}` : ''} (${action.employees?.length ?? 0} employees)…`;
     case 'stock_add':
       return `📦 Adding stock — **${action.itemName}**${action.size ? ` (size ${action.size})` : ''}${action.quantity ? ` × ${action.quantity}` : ''}…`;
+    case 'attendance_mark':
+      return `🗓️ Marking all employees **${action.status === 'absent' ? 'Absent' : 'Present'}**${action.site ? ` at **${action.site}**` : ' across ALL sites'}${action.date ? ` for ${action.date}` : ' for today'}…`;
   }
 }
 
@@ -244,8 +262,9 @@ function truncate(text: string, cap: number): string {
 /**
  * callLLM with automatic retry on provider rate-limits (HTTP 429). The agent
  * loop makes many calls in bursts — a hard-fail on the first 429 kills a
- * half-done task, so back off and try again (4 attempts, ~30s total window —
- * provider cooldowns are short but longer than the old 2s/5s ladder).
+ * half-done task, so back off and try again (5 attempts, ~95s total window —
+ * the built-in provider's quota cools down on a per-minute window, so short
+ * ladders gave up too early and surfaced the 429 to the user mid-task).
  */
 async function callLLMR(
   messages: LlmMessage[],
@@ -253,14 +272,14 @@ async function callLLMR(
   creds: Parameters<typeof callLLM>[2]
 ): Promise<string> {
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       return await callLLM(messages, opts, creds);
     } catch (err) {
       lastError = err;
       const msg = err instanceof Error ? err.message : '';
-      if (/429|too many requests|rate.?limit/i.test(msg) && attempt < 3) {
-        await new Promise((r) => setTimeout(r, [3000, 8000, 15000][attempt]));
+      if (/429|too many requests|rate.?limit/i.test(msg) && attempt < 4) {
+        await new Promise((r) => setTimeout(r, [5000, 15000, 30000, 45000][attempt]));
         continue;
       }
       throw err;
@@ -287,12 +306,30 @@ function safeJson(value: unknown): string {
   );
 }
 
+/**
+ * Human-readable identity of the model actually powering this assistant, so
+ * "which model do you use?" gets a real answer instead of a dodge:
+ *   1. the provider saved in Settings → AI Assistant (aiModel, default gpt-4o-mini);
+ *   2. the owner-level env provider (AI_MODEL, default gpt-4o-mini);
+ *   3. the built-in Z.ai provider (GLM family).
+ */
+function resolveModelIdentity(settingsMap: Record<string, string>, aiCreds: ReturnType<typeof credentialsFromMap>): string {
+  if (aiCreds && aiCreds.apiKey) {
+    return `${aiCreds.model} — the model provider connected in Settings → AI Assistant`;
+  }
+  if (envAIConfigured()) {
+    return `${(process.env.AI_MODEL || 'gpt-4o-mini').trim()} — the app's configured model provider`;
+  }
+  return 'GLM — the built-in Z.ai model';
+}
+
 function plannerSystemPrompt(
   schemaDoc: string,
   currency: string,
   today: string,
   assistantName: string,
-  companyName: string
+  companyName: string,
+  modelIdentity: string
 ): string {
   return [
     `You are "${assistantName}", the AI companion inside ${companyName} — a workforce-management web app`,
@@ -300,6 +337,10 @@ function plannerSystemPrompt(
     'advances, leave, cancellations, uniform/materials registry, NOC documents).',
     `You and the user work for the SAME company — this data is "ours": always think "we/our".`,
     `Today's date is ${today} (Asia/Dubai). Money is displayed in ${currency}.`,
+    `IDENTITY: you are an AI assistant powered by the ${modelIdentity}. When asked which model`,
+    'or AI powers you, name it plainly (e.g. "I\'m powered by GLM, the built-in Z.ai model").',
+    'Answer identity questions (your name, your model, what you are) directly from this context —',
+    'NEVER query the database for them and never dodge with a vague "the model that powers me".',
     '',
     'You have TWO superpowers: (1) read-only SQL over the app database, and (2) acting as an',
     'AGENT inside the app. You can do EVERYTHING the user could do by hand: move between ALL',
@@ -362,6 +403,13 @@ function plannerSystemPrompt(
     '     and saves in a single step — do NOT walk that flow manually and NEVER use the "+ New Entry" button',
     '     for material/stock requests (that button belongs to the Tokens tab and creates an employee TOKEN,',
     '     not stock). If itemName is missing, ask for it with {"answer":"…"} first.',
+    '   ATTENDANCE RULE: for ANY request to mark attendance for MANY employees ("mark all employees present',
+    '     for today in all sites", "mark everyone absent on 05-09-2026", "mark all present at Site X") reply',
+    '     with ONE attendance_mark action: {"type":"attendance_mark","status":"present","date":"YYYY-MM-DD"}',
+    '     (+ "site":"<site name>" ONLY when the user named ONE specific site). Omit "date" for today. It',
+    '     marks every eligible employee across ALL sites in one deterministic step and reports per-site',
+    '     counts — do NOT navigate to Attendance and click per-site "Mark all as Present" buttons one by one',
+    '     (the page shows EVERY site\u2019s own copy of that button, so clicking by text hits the first site only).',
     '   Agent rules:',
     '   - OBSERVE FIRST (critical): whenever you arrive on a page (or a task starts on a screen you have not',
     '     read yet), your NEXT action MUST be {"type":"read"}. Study what is ACTUALLY on screen — especially',
@@ -394,9 +442,15 @@ function plannerSystemPrompt(
     '   - KEEP GOING: never pause mid-task to ask permission ("shall I continue?") and never stop after a',
     '     few steps — keep issuing actions until the task is truly complete. Stop ONLY when a REQUIRED detail',
     '     is missing (then ask) or the task is finished (then confirm).',
-    '   - SUCCESS TOAST = DONE: when the observation reports a success toast or marker ("Settings Applied",',
-    '     "Stock Added", "✅ …"), reply with the FINAL {"answer":"…"} confirmation right away — do NOT run',
-    '     extra read/verify steps after the app already confirmed success.',
+    '   - MULTI-TARGET CONTINUATION (critical): when the request spans MULTIPLE targets ("all sites",',
+    '     "every site", "each camp", several named pages/records…), completing ONE target is NOT completing',
+    '     the task. A success toast that covers only ONE target means PARTIAL progress: immediately issue',
+    '     the next action for the REMAINING targets, and only reply with the final {"answer":"…"} once',
+    '     EVERY target is done — then summarize per target (site by site, item by item).',
+    '   - SUCCESS TOAST = DONE only for SINGLE-target requests: when the observation reports a success toast',
+    '     or marker ("Settings Applied", "Stock Added", "✅ …") and the request concerned ONE thing, reply',
+    '     with the FINAL {"answer":"…"} confirmation right away — do NOT run extra read/verify steps. For',
+    '     multi-target requests the MULTI-TARGET CONTINUATION rule above overrides this.',
     '   - Fill fields in a logical order, then click the submit/create button only when everything needed is filled.',
     '   - If required details are MISSING (e.g. which company? which employees?), stop and ask with',
     '     {"answer":"…question…"} — list exactly what you need. The user replies, then you resume.',
@@ -419,6 +473,7 @@ function plannerSystemPrompt(
     '  user: "Create an NOC for M/S Proscape, 5 workers, Dubai Marina" → {"action":{"type":"noc_create","client":"M/S PROSCAPE LLC","employees":["SEED WORKER 001","SEED WORKER 002","SEED WORKER 003","SEED WORKER 004","SEED WORKER 005"],"city":"Dubai"},"thought":"start the one-shot NOC flow"}',
     '  user: "HELP ME CREATE THIS NOC CLIENT: M/S NPC LLC PROJECT: NPC SHOBHA EMPLOYEES: SEED WORKER 001 … 005" → {"action":{"type":"noc_create","client":"M/S NPC LLC","project":"NPC SHOBHA","employees":["SEED WORKER 001","SEED WORKER 002","SEED WORKER 003","SEED WORKER 004","SEED WORKER 005"]},"thought":"pasted NOC request"}',
     '  user: "HELP ME ADD MATERIAL, SAFETY VEST SIZE :M, QUANTITY 50" → {"action":{"type":"stock_add","itemName":"SAFETY VEST","size":"M","quantity":50},"thought":"one-shot stock add"}',
+    '  user: "mark all employees present for today in all sites" → {"action":{"type":"attendance_mark","status":"present"},"thought":"one-shot all-sites bulk mark for today"}',
     '',
     APP_UI_MAP,
     '',
@@ -431,13 +486,16 @@ function responderSystemPrompt(
   currency: string,
   today: string,
   assistantName: string,
-  companyName: string
+  companyName: string,
+  modelIdentity: string
 ): string {
   return [
     `You are "${assistantName}", the friendly AI companion inside ${companyName} — a workforce-management app.`,
     `You know everything about the company and you and the user are on the SAME team: always speak as "we/our".`,
     `Say "We have 6 sites", NEVER "You have 6 sites". Warm, confident, human — a colleague who knows the numbers by heart.`,
     `Today is ${today} (Asia/Dubai). Money is displayed in ${currency} (e.g. ${currency} 1,250.00).`,
+    `IDENTITY: you are an AI assistant powered by the ${modelIdentity}. If asked which model/AI powers`,
+    'you, answer plainly with that model name (never a vague "the model that powers me").',
     '',
     'Answer the user using ONLY the QUERY RESULTS observation provided (never invent data).',
     'Structure every data answer in two parts:',
@@ -540,6 +598,9 @@ export async function POST(request: NextRequest) {
     // Model provider saved by the super admin in Settings → AI Assistant.
     // null → env credentials, then the built-in provider.
     const aiCreds = credentialsFromMap(settingsMap);
+    // What actually powers the assistant right now — injected into both prompts
+    // so "which model do you use?" gets a real, specific answer.
+    const modelIdentity = resolveModelIdentity(settingsMap, aiCreds);
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date());
 
     // ── Pass 1: planner ────────────────────────────────────────────────
@@ -582,10 +643,27 @@ export async function POST(request: NextRequest) {
         content: `[ACCESS] This account is NOT the super admin. Screens BEYOND this account's permissions: ${access.deniedViews.join(', ')}. If the user's request needs any of those screens (for example changing app settings, branding/currency, or admin permissions), do NOT attempt it — reply {"answer":"…"} clearly saying you don't have access to that area and that the super admin must do it or grant the permission.`,
       });
     }
+    // ── Multi-target detection (hoisted — used by the observation reminder AND
+    // the premature-final guard below). Multi-target requests ("all sites",
+    // "every site"…) must NOT end when a success toast covers only one target
+    // — the classic failure was marking site 1's attendance and stopping. The
+    // original request only rides the FIRST turn (content), so on observation
+    // turns also scan the session history for the multi-target phrasing.
+    const multiTargetRe = /\b(all|every)\s+(the\s+)?(sites?|camps?|locations?|branches?)\b|\beach\s+(site|camp|location)\b|\bin\s+all\s+sites\b|\ball\s+(my|the)?\s?employees\b/i;
+    const multiTargetRequest =
+      multiTargetRe.test(content) ||
+      history.some((m) => m.role === 'user' && multiTargetRe.test(m.content));
+    // Macro success markers mean the WHOLE job finished in one shot — never
+    // treated as partial progress.
+    const macroDone = agentObservation.includes('✅ NOC generated') || agentObservation.includes('✅ Bulk attendance complete');
+    // Success-looking observation during a multi-target request that is NOT a
+    // full macro completion = partial progress; a final answer now would be
+    // premature and gets one stern deterministic retry below.
+    const partialSuccess =
+      agentObservation && multiTargetRequest && !macroDone &&
+      /✅|success|complete|saved|applied|marked|added/i.test(agentObservation);
+
     if (agentObservation) {
-      // The macro reports success in its observation — tell the model the task
-      // is COMPLETE so it confirms instead of burning extra read/click turns.
-      const macroDone = agentObservation.includes('✅ NOC generated');
       // A denied navigation is FINAL — the account may not open that screen,
       // so the only correct reply is a clear "I don't have access" answer.
       const accessDenied = agentObservation.includes('ACCESS DENIED');
@@ -593,16 +671,18 @@ export async function POST(request: NextRequest) {
         role: 'user',
         content: `[AGENT OBSERVATION] Result of your last action:\n${agentObservation}\n\n${
           macroDone
-            ? 'The task is COMPLETE — the NOC was generated successfully. Reply NOW with {"answer":"…"} confirming the result (mention the NOC number and the client in our we-voice). Do NOT run any more actions.'
+            ? 'The task is COMPLETE — the macro finished the whole job successfully. Reply NOW with {"answer":"…"} confirming the result in our we-voice (for attendance: how many employees were marked, the status, the date and how many sites were covered). Do NOT run any more actions.'
             : accessDenied
               ? 'The task CANNOT continue — this account does not have access to that screen. Reply NOW with {"answer":"…"} telling the user clearly that you don\u2019t have access to that area (super admin only / permission not granted) and that the super admin must do it or grant the permission. Do NOT attempt any workaround and do NOT run more actions toward that screen.'
-              : 'The task is IN PROGRESS. Your ENTIRE reply must be a single JSON object WITH an "action" key for the next step ({"action":{"type":"…",…},"thought":"…") — or {"answer":"…"} ONLY to ask a missing-detail question or confirm completion. NEVER write a step line (⚙️/🖱️/✍️) — return the raw action JSON instead.'
+              : partialSuccess
+                ? 'MULTI-TARGET PROGRESS: the user asked for ALL sites/targets, and this success covers only SOME of them. Do NOT reply with a final confirmation yet. Your ENTIRE reply must be the next {"action":{…}} continuing with the REMAINING targets (the next site / next record). Reply {"answer":"…"} only when EVERY target is done, then summarize per target.'
+                : 'The task is IN PROGRESS. Your ENTIRE reply must be a single JSON object WITH an "action" key for the next step ({"action":{"type":"…",…},"thought":"…") — or {"answer":"…"} ONLY to ask a missing-detail question or confirm completion. NEVER write a step line (⚙️/🖱️/✍️) — return the raw action JSON instead.'
         }`,
       });
     }
 
     const plannerMessages: LlmMessage[] = [
-      { role: 'system', content: plannerSystemPrompt(schemaDoc, currency, today, assistantName, companyName) },
+      { role: 'system', content: plannerSystemPrompt(schemaDoc, currency, today, assistantName, companyName, modelIdentity) },
       ...history,
       ...contextMessages,
     ];
@@ -627,12 +707,19 @@ export async function POST(request: NextRequest) {
     const looksFinal = (s: string) =>
       /✅|\b(done|completed|created|finished|generated|added|submitted|deleted|saved|opened|already|need|which|what is|please provide)\b/i.test(s);
 
+    // Mid-task: an answer is a stall only when it does NOT read as a
+    // completion. Fake step lines ("🛠️ Updating company short name to BCC…",
+    // "⚙️ Opening…") are progress claims, never completion claims, so they are
+    // still caught — while a legitimate "✅ All done…" confirmation (which the
+    // macroDone path explicitly asks the model to write) is respected. Without
+    // this carve-out the ✅ confirmation itself tripped the stall ladder and
+    // the loop burned turns on a synthetic read after real success.
     const midTaskStall =
       agentObservation &&
       !(planJson !== null && planJson.action !== undefined) &&
       (
         planJson === null ||
-        (typeof planJson.answer === 'string' && planJson.answer.trim() && (STEP_LINE_RE.test(planJson.answer.trim()) || !looksFinal(planJson.answer.trim()))) ||
+        (typeof planJson.answer === 'string' && planJson.answer.trim() && !looksFinal(planJson.answer.trim())) ||
         (planJson.answer === undefined && planJson.sql === undefined)
       );
     const firstTurnStall =
@@ -685,6 +772,42 @@ export async function POST(request: NextRequest) {
       planJson = {
         answer: `We keep that under **${label}** — ${hint || 'open it from the sidebar'}. Want me to take you there, or just do it for you?`,
       };
+    }
+
+    // ── Premature-final guard (deterministic, multi-target) ─────────────
+    // The user's reported failure: "mark all employees present in all sites"
+    // marked ONE site, a success toast appeared, and the model answered
+    // "done" — leaving every other site unmarked. The MULTI-TARGET PROGRESS
+    // reminder is a strong nudge, but weak models still answer finally after
+    // a per-target toast. So: during a multi-target request, when the
+    // observation shows partial success and the plan is a FINAL answer (no
+    // action/sql), give ONE stern retry demanding the next action for the
+    // remaining targets. A genuinely-final retry answer is then respected
+    // (e.g. the model re-checked and every target really is done).
+    if (
+      partialSuccess &&
+      planJson !== null &&
+      planJson.action === undefined &&
+      planJson.sql === undefined &&
+      typeof planJson.answer === 'string' &&
+      planJson.answer.trim()
+    ) {
+      const retryRaw = await callLLMR(
+        [
+          ...plannerMessages,
+          {
+            role: 'user',
+            content:
+              'Your "final" answer is PREMATURE: the user asked for ALL sites/targets and the last observation reports only PARTIAL progress (one target done, a per-target success toast — not the whole job). The remaining targets still need work. Reply again with ONLY the next {"action":{…},"thought":"…"} continuing with the REMAINING targets. Reply {"answer":"…"} ONLY if you are certain every target is already complete (then say per-target what was done).',
+          },
+        ],
+        { temperature: 0 },
+        aiCreds
+      );
+      const retryPlan = extractJsonObject(retryRaw);
+      if (retryPlan !== null && (retryPlan.action !== undefined || retryPlan.sql !== undefined)) {
+        planJson = retryPlan;
+      }
     }
 
     // ── Agent step? Checked BEFORE the SQL/answer paths — an action reply
@@ -823,7 +946,7 @@ export async function POST(request: NextRequest) {
                   [
                     {
                       role: 'system',
-                      content: plannerSystemPrompt(schemaDoc, currency, today, assistantName, companyName),
+                      content: plannerSystemPrompt(schemaDoc, currency, today, assistantName, companyName, modelIdentity),
                     },
                     ...history,
                     ...contextMessages,
@@ -874,7 +997,7 @@ export async function POST(request: NextRequest) {
       answerText = directAnswer;
     } else {
       const responderMessages: LlmMessage[] = [
-        { role: 'system', content: responderSystemPrompt(currency, today, assistantName, companyName) },
+        { role: 'system', content: responderSystemPrompt(currency, today, assistantName, companyName, modelIdentity) },
         ...history,
         ...contextMessages,
         {

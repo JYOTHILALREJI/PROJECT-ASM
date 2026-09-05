@@ -169,7 +169,15 @@ export async function PUT(request: NextRequest) {
     }
 
     const updated = await loadSettings();
-    return NextResponse.json({ success: true, data: { settings: updated } });
+    // Mirror the GET shape: the raw key NEVER travels back to the client —
+    // only its masked form. (Returning the raw key both leaked the secret and
+    // wiped aiApiKeyMasked in the store, making a saved key "vanish" from the
+    // Settings page right after Apply.)
+    const { aiApiKey: savedKey, ...clientUpdated } = updated;
+    return NextResponse.json({
+      success: true,
+      data: { settings: { ...clientUpdated, aiApiKeyMasked: maskApiKey(savedKey) } },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });

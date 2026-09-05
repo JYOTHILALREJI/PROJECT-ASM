@@ -845,3 +845,26 @@ Stage Summary:
 - The agent can no longer FAKE progress: any emoji-led "step line" answer is detected and retried into a real action, action verbs like change/update/rename now trigger the action protocol, and a success toast immediately closes the task with a confirmation.
 - The agent now respects the account's permissions end-to-end: non-super-admins get a clear, upfront "I don't have access to Settings/Admins (super admin only)…" answer, mid-task denials are terminal with an honest explanation, and nothing claims success when it did not happen.
 - Settings is fully agent-operable: exact control names in the UI map, word-overlap field matching, Enter-proof guidance, toast-verified saves — the user's exact request (company short name → BCC) is applied and verified in the DB, public API and sidebar.
+
+---
+Task ID: 21-d
+Agent: Super Z (main)
+Task: Three fixes — (1) Nova dodged "which model do you use now?" without naming the model; (2) saving API settings made the API key vanish from the Settings page + user wanted a separate save button for the AI settings card; (3) agent asked to "mark all employees present for today in all sites" marked only the FIRST site then stopped.
+
+Work Log:
+- Root-caused (2): PUT /api/settings returned the RAW aiApiKey (and no mask) — the store spread it over DEFAULT_SETTINGS, wiping aiApiKeyMasked, so the "Saved …" placeholder disappeared; also a secret-leak. PUT now mirrors GET: strips aiApiKey, returns aiApiKeyMasked.
+- Settings page: dedicated "Save AI settings" button on the AI Assistant card (saves aiName/aiBaseUrl/aiModel/key only, keeps branding edits intact via resetAiDraft), plus persistent key state badges — "Saved ••••••••XXXX" (green) / "typed — not saved yet" (amber) / "will be removed on save" (red) so the saved key is always visible.
+- Root-caused (3): the Attendance page renders ONE "Mark all as Present" button PER SITE; a text click hits the first site, its success toast fired the SUCCESS TOAST=DONE rule → task ended after site 1.
+- New one-shot agent action attendance_mark (server-validated: status present/absent, date optional→today Asia/Dubai, optional site name). Client macro navigates to Attendance, calls the same /api/attendance/bulk-mark endpoint the page buttons use (no employeeIds → ALL active employees; response now also lists covered sites), fires asm:attendance-updated; attendance-page listens and refetches the grid. bulk-mark API gained optional siteName (exact→substring match, restricts employees to that site).
+- Planner prompts: ATTENDANCE RULE (use one attendance_mark, never walk per-site buttons), MULTI-TARGET CONTINUATION rule, SUCCESS TOAST=DONE now carved out for multi-target requests; IDENTITY line injected into planner AND responder prompts via resolveModelIdentity (saved provider model → env AI_MODEL → "GLM — the built-in Z.ai model") so "which model" gets a real answer and never a SQL query.
+- Deterministic guards in route.ts: multiTargetRequest detection scans content AND history (observations turns carry no content); partialSuccess observation → MULTI-TARGET PROGRESS reminder; NEW premature-final guard: during multi-target requests a final answer after partial success gets one stern retry demanding the next action.
+- Fixed a Task 21-c regression: midTaskStall flagged ANY emoji-leading answer (incl. legitimate "✅ All done…" completions the macroDone path asks for) — mid-task stall now requires !looksFinal; first-turn stays strict.
+- callLLMR 429 backoff widened to 5 attempts/5s–45s (~95s window) — the built-in provider's per-minute quota killed tasks mid-flight before.
+- Tests: scripts/test-task21d.py (parts A/B/C — 27 checks) all green via scripts/mock-llm.py, a deterministic OpenAI-compatible mock provider (also E2E-proves the bring-your-own-LLM path; mock echoes the identity line extracted from the system prompt to prove injection). agent-browser E2E: full agent loop on "mark all employees present for today in all sites" → ONE attendance_mark step → final "✅ All done…" → DB: 202/202 active employees present for 2026-09-05 across 6 sites. Settings E2E: typed key → "typed — not saved yet" → Save AI settings → "AI Settings Applied" + "Saved ••••••••9999" badge; GET/PUT verified key never travels raw. Screenshot: scripts/qa-task21d-settings-aisave.png.
+- NOTE: the built-in Z.ai provider was hard rate-limited (429) for a long stretch during testing; tests ran through the mock provider instead. Dev server was killed twice by the environment (not app crashes) — restarted via scripts/dev-server.sh.
+- Cleanup: mock provider settings removed (aiApiKey/baseUrl/model empty → built-in), test sessions deleted, browser closed.
+
+Stage Summary:
+- User-visible: Nova names its model; API key persists visibly with its own save button; all-sites attendance completes in one agent step with per-run counts; multi-target tasks never end after the first site's toast.
+- Files: src/app/api/settings/route.ts, src/components/settings/settings-page.tsx, src/app/api/ai/chat/route.ts, src/app/api/attendance/bulk-mark/route.ts, src/components/ai/agent-actions.ts, src/components/attendance/attendance-page.tsx, src/lib/app-ui-map.ts; scripts/test-task21d.py, scripts/mock-llm.py.
+- eslint 0 errors; tsc 54 = exact baseline.

@@ -1426,7 +1426,14 @@ export function AttendancePage() {
       }
     };
     fetchAttendance();
-    return () => { cancelled = true; };
+    // The AI agent's one-shot attendance_mark macro fires this event after its
+    // bulk call so an open grid reflects the new statuses immediately (same
+    // refetch the page's own bulk-mark buttons trigger through state updates).
+    window.addEventListener('asm:attendance-updated', fetchAttendance);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('asm:attendance-updated', fetchAttendance);
+    };
   }, [yearStr, monthStr]);
 
   // Fetch site assignments (EmpCountSitePerMonth) for the viewed month.

@@ -21,7 +21,7 @@ import { AGENT_VIEWS, VIEW_LABELS, isViewAllowedFor } from '@/lib/app-ui-map';
 import { todayDMY } from '@/components/documents/shared';
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create' | 'stock_add';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create' | 'stock_add' | 'attendance_mark';
   view?: string;
   text?: string;
   field?: string;
@@ -48,6 +48,10 @@ export interface AgentAction {
   size?: string;
   quantity?: number;
   minQuantity?: number;
+  // attendance_mark payload (server-validated): status present/absent, date
+  // optional (today), site optional (single-site restriction by name).
+  status?: string;
+  site?: string;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -694,6 +698,61 @@ async function stockAdd(a: AgentAction): Promise<string> {
   return `${log.join('\n')}\n⚠️ The save did not complete as expected.${toastText ? ` The page says: "${toastText}".` : ''} Ask the user to check the Stock Management tab.`;
 }
 
+// ── attendance_mark — deterministic one-shot bulk attendance mark ────────────
+// "Mark all employees present for today in all sites" kept stopping after the
+// FIRST site: the Attendance page renders one "Mark all as Present" button PER
+// SITE, so a text click hits the first site only, its success toast ends the
+// task, and the remaining sites stay unmarked. This macro marks every eligible
+// employee across ALL sites in ONE step through the same
+// /api/attendance/bulk-mark endpoint the page's own buttons use (no employeeIds
+// → all active employees, each record tagged with the employee's current site;
+// an optional site name restricts the mark to that one site).
+async function attendanceMark(a: AgentAction): Promise<string> {
+  const status = a.status === 'absent' ? 'absent' : 'present';
+  const site = String(a.site || '').trim();
+  const rawDate = String(a.date || '').trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+    ? rawDate
+    : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date());
+  const log: string[] = [];
+
+  // 1) Land on Attendance so the user can watch the grid fill in.
+  if (useAppStore.getState().currentView !== 'attendance') {
+    log.push(await navigate('attendance'));
+    await sleep(700);
+  }
+
+  // 2) One bulk call — the same endpoint the per-site buttons use.
+  const body: Record<string, unknown> = { date, status };
+  if (site) body.siteName = site;
+  const res = await fetch('/api/attendance/bulk-mark', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+
+  // 3) Refresh the grid so the new statuses are visible immediately.
+  window.dispatchEvent(new Event('asm:attendance-updated'));
+
+  if (!data.success) {
+    return `⚠️ The bulk mark failed: ${String(data.error || 'the server rejected the request').slice(0, 200)}.${log.length ? ` ${log.join(' ')}` : ''}`;
+  }
+  const updated = Number(data.data?.updated ?? 0);
+  const skipped = Number(data.data?.skipped ?? 0);
+  const total = Number(data.data?.total ?? 0);
+  const sites: string[] = Array.isArray(data.data?.sites) ? data.data.sites.filter(Boolean) : [];
+  const scope = site ? `site "${site}"` : 'ALL sites';
+  if (total === 0) {
+    return `No active employees were found to mark ${status} for ${date} at ${scope}.${log.length ? ` ${log.join(' ')}` : ''}`;
+  }
+  const sitePart = sites.length > 0 ? ` Covered: ${sites.slice(0, 12).join(', ')}${sites.length > 12 ? ` +${sites.length - 12} more` : ''}.` : '';
+  return [
+    ...log,
+    `✅ Bulk attendance complete — ${updated} employee(s) marked as ${status === 'absent' ? 'Absent' : 'Present (10h)'} for ${date} across ${scope}.${sitePart}${skipped > 0 ? ` ${skipped} skipped (already marked or protected overtime).` : ''} The Attendance grid has been refreshed.`,
+  ].join(' ');
+}
+
 // ── press_key ──────────────────────────────────────────────────────────────
 // Enter submits the focused form/button; Escape closes the topmost Radix /
 // SweetAlert modal or popover; Tab moves focus. Dispatched on the active
@@ -838,6 +897,8 @@ export async function executeAgentAction(action: AgentAction): Promise<string> {
         return await nocCreate(action);
       case 'stock_add':
         return await stockAdd(action);
+      case 'attendance_mark':
+        return await attendanceMark(action);
       default:
         return 'Unknown action type.';
     }

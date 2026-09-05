@@ -95,6 +95,7 @@ export function SettingsPage() {
   const [modelsError, setModelsError] = useState('');
   const [modelsOpen, setModelsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingAi, setSavingAi] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,16 +122,19 @@ export function SettingsPage() {
     });
 
   const keyDirty = keyInput.trim() !== '' || keyRemoved;
-  const dirty =
+  // The AI Assistant card (assistant name + model provider) has its OWN save
+  // button, so the super admin can apply AI changes without touching branding.
+  const aiDirty =
+    (draft !== null &&
+      (aiName !== settings.aiName || aiBaseUrl !== settings.aiBaseUrl || aiModel !== settings.aiModel)) ||
+    keyDirty;
+  const brandingDirty =
     draft !== null &&
     (companyName !== settings.companyName ||
       brandName !== settings.brandName ||
       brandLogo !== settings.brandLogo ||
-      currency !== settings.currency ||
-      aiName !== settings.aiName ||
-      aiBaseUrl !== settings.aiBaseUrl ||
-      aiModel !== settings.aiModel ||
-      keyDirty);
+      currency !== settings.currency);
+  const dirty = brandingDirty || aiDirty;
 
   const handleLogoFile = async (file: File | undefined | null) => {
     if (!file) return;
@@ -154,6 +158,64 @@ export function SettingsPage() {
     }
   };
 
+  /** Shared persistence — every save path funnels through the store call. */
+  const persist = async (payload: Partial<Omit<AppSettings, 'aiApiKeyMasked'>> & { aiApiKey?: string }) => {
+    if (!user?.id) return { success: false, error: 'Not signed in' };
+    return updateSettings(payload, user.id);
+  };
+
+  const validateAi = (): string | null => {
+    if (!aiName.trim()) return 'Assistant name cannot be empty.';
+    if (aiBaseUrl.trim() && !/^https?:\/\//i.test(aiBaseUrl.trim())) return 'Base URL must start with http:// or https://';
+    return null;
+  };
+
+  /** Reset ONLY the AI parts of the draft — branding edits stay untouched. */
+  const resetAiDraft = () => {
+    const s = useSettingsStore.getState().settings;
+    setDraft((d) => (d ? { ...d, aiName: s.aiName, aiBaseUrl: s.aiBaseUrl, aiModel: s.aiModel } : null));
+    setKeyInput('');
+    setKeyRemoved(false);
+    setModelsState('idle');
+    setModels([]);
+    setModelsOpen(false);
+    setModelsError('');
+  };
+
+  const buildAiPayload = (): Partial<Omit<AppSettings, 'aiApiKeyMasked'>> & { aiApiKey?: string } => {
+    const payload: Partial<Omit<AppSettings, 'aiApiKeyMasked'>> & { aiApiKey?: string } = {
+      aiName: aiName.trim(),
+      aiBaseUrl: aiBaseUrl.trim(),
+      aiModel: aiModel.trim(),
+    };
+    // Only touch the saved key when the user typed a new one or removed it —
+    // the masked value from GET must never be written back.
+    if (keyInput.trim()) payload.aiApiKey = keyInput.trim();
+    else if (keyRemoved) payload.aiApiKey = '';
+    return payload;
+  };
+
+  /** Dedicated save for the AI Assistant card (name + model provider + key). */
+  const handleSaveAi = async () => {
+    const problem = validateAi();
+    if (problem) {
+      toast({ title: 'Validation Error', description: problem, variant: 'destructive' });
+      return;
+    }
+    setSavingAi(true);
+    const result = await persist(buildAiPayload());
+    setSavingAi(false);
+    if (result.success) {
+      resetAiDraft();
+      toast({
+        title: 'AI Settings Applied',
+        description: 'The assistant name and model provider are now live.',
+      });
+    } else {
+      toast({ title: 'Error', description: result.error || 'Failed to save AI settings', variant: 'destructive' });
+    }
+  };
+
   const handleSave = async () => {
     if (!user?.id) return;
     if (!companyName.trim()) {
@@ -164,29 +226,20 @@ export function SettingsPage() {
       toast({ title: 'Validation Error', description: 'Brand text cannot be empty.', variant: 'destructive' });
       return;
     }
-    if (!aiName.trim()) {
-      toast({ title: 'Validation Error', description: 'Assistant name cannot be empty.', variant: 'destructive' });
-      return;
-    }
-    if (aiBaseUrl.trim() && !/^https?:\/\//i.test(aiBaseUrl.trim())) {
-      toast({ title: 'Validation Error', description: 'Base URL must start with http:// or https://', variant: 'destructive' });
+    const aiProblem = validateAi();
+    if (aiProblem) {
+      toast({ title: 'Validation Error', description: aiProblem, variant: 'destructive' });
       return;
     }
     setSaving(true);
-    const payload: Partial<Omit<AppSettings, 'aiApiKeyMasked'>> & { aiApiKey?: string } = {
+    const payload = {
       companyName: companyName.trim(),
       brandName: brandName.trim(),
       brandLogo,
       currency,
-      aiName: aiName.trim(),
-      aiBaseUrl: aiBaseUrl.trim(),
-      aiModel: aiModel.trim(),
+      ...buildAiPayload(),
     };
-    // Only touch the saved key when the user typed a new one or removed it —
-    // the masked value from GET must never be written back.
-    if (keyInput.trim()) payload.aiApiKey = keyInput.trim();
-    else if (keyRemoved) payload.aiApiKey = '';
-    const result = await updateSettings(payload, user.id);
+    const result = await persist(payload);
     setSaving(false);
     if (result.success) {
       setDraft(null); // re-sync the form with the persisted settings
@@ -458,9 +511,24 @@ export function SettingsPage() {
 
           {/* AI Assistant — full width: identity on the left, model provider on the right */}
           <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-5 xl:col-span-2">
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="h-4 w-4 text-cyan-400" />
-              <h3 className="text-base font-semibold text-white">AI Assistant</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-cyan-400" />
+                <h3 className="text-base font-semibold text-white">AI Assistant</h3>
+              </div>
+              {/* Dedicated save for THIS card only — the assistant name, model
+                  provider and API key can be applied without touching branding. */}
+              <Button
+                onClick={handleSaveAi}
+                disabled={savingAi || !aiDirty || !loaded}
+                className={cn(
+                  'h-8 gap-1.5 text-xs',
+                  aiDirty ? 'bg-cyan-600 hover:bg-cyan-700 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                )}
+              >
+                {savingAi ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                Save AI settings
+              </Button>
             </div>
             <p className="text-xs text-slate-500 mb-4">
               Give your floating robot companion a name — it appears in the chat header, greetings and every reply.
@@ -527,7 +595,24 @@ export function SettingsPage() {
 
                 {/* API key */}
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="aiApiKey" className="text-slate-300">API key</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label htmlFor="aiApiKey" className="text-slate-300">API key</Label>
+                    {settings.aiApiKeyMasked && !keyRemoved && !keyInput.trim() && (
+                      <Badge className="border border-emerald-500/30 bg-emerald-500/15 text-[10px] text-emerald-300 gap-1">
+                        <Check className="h-3 w-3" /> Saved {settings.aiApiKeyMasked}
+                      </Badge>
+                    )}
+                    {!!keyInput.trim() && (
+                      <Badge className="border border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-300">
+                        typed — not saved yet
+                      </Badge>
+                    )}
+                    {keyRemoved && (
+                      <Badge className="border border-red-500/30 bg-red-500/15 text-[10px] text-red-300">
+                        will be removed on save
+                      </Badge>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <Input
                       id="aiApiKey"
