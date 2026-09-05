@@ -20,7 +20,7 @@ import { AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
 import { todayDMY } from '@/components/documents/shared';
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create' | 'stock_add';
   view?: string;
   text?: string;
   field?: string;
@@ -42,6 +42,11 @@ export interface AgentAction {
   country?: string;
   company?: string;
   employees?: string[];
+  // stock_add payload (server-validated): itemName is required.
+  itemName?: string;
+  size?: string;
+  quantity?: number;
+  minQuantity?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -105,7 +110,10 @@ function describe(el: Element): string {
   if (role === 'combobox') return `[dropdown] ${text || '(unlabelled)'}`;
   if (/^h[1-4]$/.test(tag)) return `[heading] ${text}`;
   if (tag === 'a') return `[link] ${text}`;
-  if (role === 'tab') return `[tab] ${text}`;
+  if (role === 'tab') {
+    const sel = he.getAttribute('aria-selected');
+    return `[tab] ${text}${sel === 'true' ? ' — ACTIVE' : sel === 'false' ? ' — inactive' : ''}`;
+  }
   return `[btn] ${text}`;
 }
 
@@ -128,6 +136,21 @@ function readPage(): string {
     lines.push(`OPEN MODAL${titles.length > 1 ? 'S' : ''}: ${titles.join(' | ')}.`);
   }
 
+  // Tab strips — the model must know which tab is ACTIVE before clicking
+  // tab-owned buttons (every button belongs to its own tab). Covers both the
+  // app's plain tab buttons (data-asm-tab) and Radix Tabs (role=tab).
+  const tabEls = (Array.from(
+    document.querySelectorAll('main [data-asm-tab], main [role="tab"], [role="dialog"] [data-asm-tab], [role="dialog"] [role="tab"]')
+  ) as HTMLElement[]).filter(isVisible);
+  if (tabEls.length > 0) {
+    const parts = tabEls.map((b) => {
+      const label = norm(b.textContent || '').slice(0, 32) || b.getAttribute('data-asm-tab') || b.getAttribute('aria-label') || '?';
+      const active = b.getAttribute('aria-selected') === 'true' || b.getAttribute('aria-pressed') === 'true' || b.getAttribute('data-state') === 'active';
+      return `${label} (${active ? 'ACTIVE' : 'inactive'})`;
+    });
+    lines.push(`TABS: ${parts.join(' | ')}. Each tab shows its OWN buttons — click a tab first, then read, before using its buttons.`);
+  }
+
   lines.push('Visible elements:');
 
   const nodes = Array.from(
@@ -143,6 +166,9 @@ function readPage(): string {
       break;
     }
     if (!isVisible(el)) continue;
+    // Tab buttons are already reported in the TABS line above — skip them here
+    // so they never read as ordinary buttons.
+    if (el.hasAttribute('data-asm-tab') || el.getAttribute('role') === 'tab') continue;
     const line = describe(el);
     if (line.endsWith('] ') || line.endsWith('] (unlabelled)')) continue;
     if (!lines.includes(line)) lines.push(line);
@@ -533,6 +559,96 @@ async function nocCreate(a: AgentAction): Promise<string> {
   return `${log.join('\n')}\n⚠️ Generation did not complete.${toastText ? ` The page says: "${toastText}".` : ''} Ask the user to check the form.`;
 }
 
+// ── stock_add — deterministic one-shot material/stock builder ────────────────
+// "Add material X, size M, qty 50" requests kept walking into the wrong tab:
+// the model clicked "+ New Entry" on the Tokens tab, which opens the TOKEN
+// wizard instead of the stock form. This macro performs the WHOLE flow
+// deterministically — go to Materials Registry, switch to the Stock
+// Management tab, open the inline Add Stock form, fill every field from the
+// user-provided payload (NEVER from on-screen hints), save and verify.
+async function stockAdd(a: AgentAction): Promise<string> {
+  const itemName = String(a.itemName || '').trim();
+  const size = String(a.size || '').trim();
+  const quantity = a.quantity === undefined || a.quantity === null ? '' : String(a.quantity);
+  const minQuantity = a.minQuantity === undefined || a.minQuantity === null ? '' : String(a.minQuantity);
+  const log: string[] = [];
+  const pickButton = (match: (t: string) => boolean): HTMLElement | undefined =>
+    (Array.from(document.querySelectorAll('main button')) as HTMLElement[]).filter(isVisible).find((b) => match(norm(b.textContent || '')));
+
+  // 1) Be on the Materials Registry page.
+  if (useAppStore.getState().currentView !== 'uniform_registry') {
+    log.push(await navigate('uniform_registry'));
+  }
+
+  // 2) Switch to the Stock Management tab (skip when it is already active).
+  const tabActive = (el: HTMLElement) =>
+    el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-pressed') === 'true' || el.getAttribute('data-state') === 'active';
+  const stockTab = () => (document.querySelector('main button[data-asm-tab="stock"]') as HTMLElement | null);
+  if (!stockTab() || !tabActive(stockTab()!)) {
+    const tab = stockTab() ?? pickButton((t) => t.includes('stock management'));
+    if (!tab) {
+      return `I could not find the "Stock Management" tab on the Materials Registry page. ${log.join(' ')}`;
+    }
+    press(tab);
+    await sleep(900); // let the tab render + the stock list fetch settle
+    log.push('Switched to the "Stock Management" tab.');
+  }
+
+  // 3) Open the inline Add Stock form (skip if it is already open).
+  let nameInput = findField('Item Name');
+  if (!nameInput) {
+    const addBtn = pickButton((t) => t.includes('add stock'));
+    if (!addBtn) {
+      return `The "Add Stock" button is not visible on the Stock Management tab. ${log.join(' ')}`;
+    }
+    press(addBtn);
+    await sleep(450);
+    nameInput = findField('Item Name');
+  }
+  if (!nameInput) {
+    return `The Add Stock form did not open after clicking "Add Stock". ${log.join(' ')}`;
+  }
+
+  // 4) Fill from the user's payload — never from the grey placeholders.
+  setReactValue(nameInput, itemName);
+  if (size) {
+    const el = findField('Size');
+    if (el && !isPlaceholderEcho(el, size)) setReactValue(el, size);
+  }
+  if (quantity) {
+    const el = findField('Quantity');
+    if (el && !isPlaceholderEcho(el, quantity)) setReactValue(el, quantity);
+  }
+  if (minQuantity) {
+    const el = findField('Min Qty');
+    if (el && !isPlaceholderEcho(el, minQuantity)) setReactValue(el, minQuantity);
+  }
+  log.push(`Filled: Item "${itemName}"${size ? ` · Size "${size}"` : ''}${quantity ? ` · Qty ${quantity}` : ''}${minQuantity ? ` · Min ${minQuantity}` : ''}.`);
+
+  // 5) Save, then verify: the form closes on success, the item appears in the
+  //    table and a "Stock Added" toast shows. Re-adding an existing item is an
+  //    upsert (the API adds to the quantity) — that is still a success.
+  const saveBtn = pickButton((t) => t === 'save');
+  if (!saveBtn) {
+    return `${log.join('\n')}\nI could not find the "Save" button on the Add Stock form.`;
+  }
+  press(saveBtn);
+  await sleep(1700);
+  const stillOpen = !!findField('Item Name');
+  const pageText = norm(document.querySelector('main')?.textContent || '');
+  const itemVisible = pageText.includes(norm(itemName));
+  const toastText = (Array.from(document.querySelectorAll('[role="status"]')) as HTMLElement[])
+    .filter(isVisible)
+    .map((t) => norm(t.textContent || ''))
+    .filter(Boolean)
+    .join(' | ')
+    .slice(0, 300);
+  if (!stillOpen && (itemVisible || toastText.includes('stock added'))) {
+    return `${log.join('\n')}\n✅ Stock saved: ${itemName}${size ? ` (size ${size})` : ''}${quantity ? ` — quantity ${quantity}` : ''}. Materials Registry → Stock Management now lists it (re-adding an existing item adds to its quantity).`;
+  }
+  return `${log.join('\n')}\n⚠️ The save did not complete as expected.${toastText ? ` The page says: "${toastText}".` : ''} Ask the user to check the Stock Management tab.`;
+}
+
 // ── press_key ──────────────────────────────────────────────────────────────
 // Enter submits the focused form/button; Escape closes the topmost Radix /
 // SweetAlert modal or popover; Tab moves focus. Dispatched on the active
@@ -675,6 +791,8 @@ export async function executeAgentAction(action: AgentAction): Promise<string> {
         return await scrollPage(String(action.target || 'main'), Math.max(-2000, Math.min(Number(action.dy ?? 700) || 700, 2000)));
       case 'noc_create':
         return await nocCreate(action);
+      case 'stock_add':
+        return await stockAdd(action);
       default:
         return 'Unknown action type.';
     }

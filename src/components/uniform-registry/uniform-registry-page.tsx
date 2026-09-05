@@ -1364,7 +1364,11 @@ export function UniformRegistryPage() {
       {/* Tab Toggle */}
       <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5 w-fit">
         <button
+          type="button"
           onClick={() => setActiveTab('tokens')}
+          data-asm-tab="tokens"
+          aria-pressed={activeTab === 'tokens'}
+          aria-label="Tokens tab"
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors',
             activeTab === 'tokens' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'
@@ -1374,7 +1378,11 @@ export function UniformRegistryPage() {
           Tokens
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('stock')}
+          data-asm-tab="stock"
+          aria-pressed={activeTab === 'stock'}
+          aria-label="Stock Management tab"
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors',
             activeTab === 'stock' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white'
@@ -2323,7 +2331,7 @@ function StockManagement() {
         <p className="text-sm text-slate-400">
           Manage material stock by item and size. Quantities are automatically reduced when tokens are issued.
         </p>
-        <Button onClick={() => setShowAddForm(!showAddForm)} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+        <Button onClick={() => setShowAddForm(!showAddForm)} aria-label="Add Stock" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
           <Plus className="h-4 w-4" />
           Add Stock
         </Button>
@@ -2335,19 +2343,19 @@ function StockManagement() {
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div>
                 <Label className="text-slate-300 text-xs mb-1">Item Name *</Label>
-                <Input placeholder="e.g. Uniform, Shoes" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+                <Input aria-label="Item Name" placeholder="e.g. Uniform, Shoes" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
               </div>
               <div>
                 <Label className="text-slate-300 text-xs mb-1">Size</Label>
-                <Input placeholder="e.g. L, XL, 42" value={newItemSize} onChange={(e) => setNewItemSize(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+                <Input aria-label="Size" placeholder="e.g. L, XL, 42" value={newItemSize} onChange={(e) => setNewItemSize(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
               </div>
               <div>
                 <Label className="text-slate-300 text-xs mb-1">Quantity *</Label>
-                <Input type="number" min="0" placeholder="0" value={newItemQty} onChange={(e) => setNewItemQty(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+                <Input aria-label="Quantity" type="number" min="0" placeholder="0" value={newItemQty} onChange={(e) => setNewItemQty(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
               </div>
               <div>
                 <Label className="text-slate-300 text-xs mb-1">Min Qty (alert)</Label>
-                <Input type="number" min="0" placeholder="0" value={newItemMin} onChange={(e) => setNewItemMin(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
+                <Input aria-label="Min Qty" type="number" min="0" placeholder="0" value={newItemMin} onChange={(e) => setNewItemMin(e.target.value)} className="bg-slate-900 border-slate-600 text-white" />
               </div>
             </div>
             <div className="flex gap-2 mt-3">

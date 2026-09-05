@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { callLLM, extractJsonObject, credentialsFromMap, type LlmMessage } from '@/lib/ai-client';
 import { getDbSchemaDoc } from '@/lib/db-schema-doc';
-import { APP_UI_MAP, AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
+import { APP_UI_MAP, AGENT_VIEWS, VIEW_LABELS, VIEW_HINTS } from '@/lib/app-ui-map';
 import { isAiAllowed, AI_ACCESS_DENIED } from '@/lib/ai-access';
 
 // AI Assistant chat endpoint — two-pass "grounded SQL" flow + in-app agent.
@@ -84,7 +84,7 @@ function redactSecrets(rows: Record<string, unknown>[]): Record<string, unknown>
 // and additionally confines clicks/fills to the app's own page DOM.
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create' | 'stock_add';
   view?: string;
   text?: string;
   field?: string;
@@ -105,6 +105,11 @@ export interface AgentAction {
   country?: string;
   company?: string;
   employees?: string[];
+  // stock_add payload — a one-shot material/stock add (itemName required).
+  itemName?: string;
+  size?: string;
+  quantity?: number;
+  minQuantity?: number;
 }
 
 function clampStr(v: unknown, max: number): string | null {
@@ -185,6 +190,20 @@ function validateAgentAction(raw: unknown): AgentAction | null {
         company: opt('company'),
       };
     }
+    case 'stock_add': {
+      // One-shot stock builder: itemName is required; size/quantity/minQuantity
+      // are optional. Quantity arrives as number or numeric string — coerce
+      // bounded ints so nothing unvalidated reaches the client executor.
+      const itemName = clampStr(a.itemName, 80);
+      if (!itemName) return null;
+      const size = clampStr(a.size, 24) ?? undefined;
+      const intOrUndef = (v: unknown): number | undefined => {
+        if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.min(Math.round(v), 1000000));
+        if (typeof v === 'string' && v.trim() && /^\d{1,7}$/.test(v.trim())) return Math.min(parseInt(v.trim(), 10), 1000000);
+        return undefined;
+      };
+      return { type: 'stock_add', itemName, size, quantity: intOrUndef(a.quantity), minQuantity: intOrUndef(a.minQuantity) };
+    }
     default:
       return null;
   }
@@ -213,6 +232,8 @@ function describeAction(action: AgentAction): string {
       return action.dy && action.dy < 0 ? '🖱️ Scrolling up…' : '🖱️ Scrolling down…';
     case 'noc_create':
       return `🛠️ Creating the NOC for **${action.client}**${action.project ? ` · ${action.project}` : ''} (${action.employees?.length ?? 0} employees)…`;
+    case 'stock_add':
+      return `📦 Adding stock — **${action.itemName}**${action.size ? ` (size ${action.size})` : ''}${action.quantity ? ` × ${action.quantity}` : ''}…`;
   }
 }
 
@@ -323,6 +344,8 @@ function plannerSystemPrompt(
     '     {"type":"wait","ms":800}                 wait for animations/data (max 2000)',
     '     {"type":"noc_create","client":"M/S NPC LLC","project":"NPC SHOBHA","date":"05-09-2026","employees":["SEED WORKER 001","SEED WORKER 002"]}',
     '                                              ONE-SHOT NOC BUILDER — see the NOC RULE below.',
+    '     {"type":"stock_add","itemName":"SAFETY VEST","size":"M","quantity":50,"minQuantity":10}',
+    '                                              ONE-SHOT STOCK/MATERIAL ADD — see the STOCK RULE below.',
     '   NOC RULE: for ANY request to create / prepare / make an NOC ("help me create this NOC", a pasted',
     '     WhatsApp message with client/project/employees…), reply with ONE noc_create action and extract',
     '     EVERY value VERBATIM from the user\u2019s message: client (required), project, date (DD-MM-YYYY — omit',
@@ -331,7 +354,23 @@ function plannerSystemPrompt(
     '     manually with navigate/click/fill steps — noc_create does the whole flow (opens the wizard, fills',
     '     every field, adds every employee, generates the NOC) in a single step. If the client name or the',
     '     employee list is missing, ask for it with {"answer":"…"} first.',
+    '   STOCK RULE: for ANY request to add material / stock / inventory ("HELP ME ADD MATERIAL, SAFETY VEST',
+    '     SIZE :M, QUANTITY 50", "add 20 helmets to stock") reply with ONE stock_add action and extract every',
+    '     value VERBATIM from the user\u2019s message: itemName (required), size, quantity, minQuantity when',
+    '     given. It opens Materials Registry, switches to the STOCK MANAGEMENT tab, fills the Add Stock form',
+    '     and saves in a single step — do NOT walk that flow manually and NEVER use the "+ New Entry" button',
+    '     for material/stock requests (that button belongs to the Tokens tab and creates an employee TOKEN,',
+    '     not stock). If itemName is missing, ask for it with {"answer":"…"} first.',
     '   Agent rules:',
+    '   - OBSERVE FIRST (critical): whenever you arrive on a page (or a task starts on a screen you have not',
+    '     read yet), your NEXT action MUST be {"type":"read"}. Study what is ACTUALLY on screen — especially',
+    '     the TABS line — before clicking anything. The read output tells you which tab is ACTIVE and which',
+    '     buttons exist; never click a button you have not seen in a fresh read.',
+    '   - TAB OWNERSHIP: pages with tabs show DIFFERENT buttons per tab, and the first tab is active by',
+    '     default. Match the request to the right tab FIRST: if the button you need is not on the active tab,',
+    '     click that tab (it is a button too), read again, THEN act. Example: Materials Registry opens on the',
+    '     Tokens tab where "+ New Entry" creates an employee token — adding material/stock instead belongs to',
+    '     the "Stock Management" tab with its own "Add Stock" button.',
     '   - FULL COVERAGE: every screen, every button, every modal is within your reach. Multi-step',
     '     tasks are expected — a typical flow is: navigate → read → click (opens a modal) → read',
     '     (the modal\u2019s fields are listed too, with an OPEN MODAL line) → fill/select/toggle each field',
@@ -343,8 +382,9 @@ function plannerSystemPrompt(
     '   - Dropdowns that open a search box: the select action types your option into it automatically.',
     '   - TRIGGER: whenever the user asks you to DO something — "open/go to/take me to X", "create an NOC",',
     '     "fill in this form", "click Y for me", "add this employee" — you MUST reply with an ACTION, never',
-    '     with text instructions. Only a "where is / how do I" question that does NOT ask you to act gets a',
-    '     plain {"answer":…} from the UI map.',
+    '     with text instructions. But a pure "where is / where do I / how do I" QUESTION ("where do I add',
+    '     material stock?") is NOT a request to act: answer it from the UI map with {"answer":"…"} naming the',
+    '     exact page AND tab/button (and offer to take them there) — do NOT navigate on those.',
     '   - ONE small step at a time; observe, then decide. After any click, "read" before filling.',
     '   - VALUE FIDELITY (critical): every fill/select/noc_create value MUST be copied VERBATIM from the',
     '     user\u2019s own words. NEVER fill the grey placeholder/example text you see on screen — those are hints,',
@@ -374,6 +414,7 @@ function plannerSystemPrompt(
     '  user: "how many supervisors do we have?"      → {"sql":[count, named rows],"display":"markdown table: ID | Name | Site"}',
     '  user: "Create an NOC for M/S Proscape, 5 workers, Dubai Marina" → {"action":{"type":"noc_create","client":"M/S PROSCAPE LLC","employees":["SEED WORKER 001","SEED WORKER 002","SEED WORKER 003","SEED WORKER 004","SEED WORKER 005"],"city":"Dubai"},"thought":"start the one-shot NOC flow"}',
     '  user: "HELP ME CREATE THIS NOC CLIENT: M/S NPC LLC PROJECT: NPC SHOBHA EMPLOYEES: SEED WORKER 001 … 005" → {"action":{"type":"noc_create","client":"M/S NPC LLC","project":"NPC SHOBHA","employees":["SEED WORKER 001","SEED WORKER 002","SEED WORKER 003","SEED WORKER 004","SEED WORKER 005"]},"thought":"pasted NOC request"}',
+    '  user: "HELP ME ADD MATERIAL, SAFETY VEST SIZE :M, QUANTITY 50" → {"action":{"type":"stock_add","itemName":"SAFETY VEST","size":"M","quantity":50},"thought":"one-shot stock add"}',
     '',
     APP_UI_MAP,
     '',
@@ -593,6 +634,33 @@ export async function POST(request: NextRequest) {
         // Deterministic continuation: keep the loop alive with a fresh read.
         planJson = { action: { type: 'read' } };
       }
+    }
+
+    // ── Where-question guard ─────────────────────────────────────────
+    // "Where do I add stock?" is a QUESTION, not a request to act — it must be
+    // answered with directions, never a bare navigate. Weak models navigate
+    // anyway and even a stern retry rarely flips them, so this is fully
+    // DETERMINISTIC: take the screen the planner picked and compose precise
+    // directions from the UI map's per-view hints — instant and always right.
+    // Only skipped when the message ALSO carries a strong navigation imperative
+    // ("where is attendance, take me there") — navigating is then correct.
+    const whereQuestionRe = /\b(where (do|can|should) (i|we)|where is|where are|how (do|can) (i|we))\b/i;
+    const strongImperativeRe = /\b(open|go to|take me|show me|navigate|click|press)\b/i;
+    if (
+      planJson !== null &&
+      content &&
+      !agentObservation &&
+      whereQuestionRe.test(content) &&
+      !strongImperativeRe.test(content) &&
+      planJson.action !== undefined &&
+      (planJson.action as Record<string, unknown>).type === 'navigate'
+    ) {
+      const targetView = String((planJson.action as Record<string, unknown>).view || '');
+      const label = VIEW_LABELS[targetView] ?? targetView;
+      const hint = VIEW_HINTS[targetView] ?? '';
+      planJson = {
+        answer: `We keep that under **${label}** — ${hint || 'open it from the sidebar'}. Want me to take you there, or just do it for you?`,
+      };
     }
 
     // ── Agent step? Checked BEFORE the SQL/answer paths — an action reply

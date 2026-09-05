@@ -330,6 +330,8 @@ export function DocumentsPage() {
             key={id}
             type="button"
             onClick={() => setTab(id)}
+            data-asm-tab={id}
+            aria-pressed={tab === id}
             className={cn(
               'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors border',
               tab === id ? 'bg-blue-500/15 border-blue-500/40 text-blue-300' : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40',

@@ -511,6 +511,8 @@ export function AdvancePage() {
       <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5 w-fit">
         <button
           onClick={() => setActiveTab('new')}
+          data-asm-tab="new"
+          aria-pressed={activeTab === 'new'}
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors',
             activeTab === 'new'
@@ -528,6 +530,8 @@ export function AdvancePage() {
         </button>
         <button
           onClick={() => setActiveTab('existing')}
+          data-asm-tab="existing"
+          aria-pressed={activeTab === 'existing'}
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors',
             activeTab === 'existing'

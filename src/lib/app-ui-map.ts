@@ -59,6 +59,38 @@ export const VIEW_LABELS: Record<string, string> = {
   profile: 'Profile',
 };
 
+/**
+ * Deterministic "where do I …?" directions, one per screen. The planner's
+ * navigate choice on a where-question tells us WHICH screen it meant; the
+ * hint tells the user the exact tab/button path — no LLM needed, so the
+ * directions are always precise and instant.
+ */
+export const VIEW_HINTS: Record<string, string> = {
+  dashboard: 'the stat cards, quick actions ("Add Employee", "Mark Attendance", "Accounts") and the Sites Overview',
+  employees: 'use "Add Employee" for the full form, "Batch Add" to drop many documents at once, and click a row for details',
+  employee_add: 'the full form (name, ID, trade, site, camp, bed space, rates…)',
+  employee_batch_add: 'drag & drop many employee documents at once',
+  employee_detail: 'click the employee on **Employees** — tabs hold personal info, documents, salary records, hours, advances and warnings/fines',
+  employee_hours_ledger: 'pick an employee to see their detailed hours ledger',
+  sites: 'use "Add Site"; click a site to assign trades/rates, move employees or open its attendance sheet',
+  camps: 'use "Add Camp"; click a camp for its employee table, Assign/Transfer/Remove and inline bed-space editing',
+  camp_detail: 'the employee table has Assign / Transfer / Remove and inline bed-space editing',
+  attendance: 'pick month + site, mark with the keyboard grid (P/A/C), use the bulk-mark bar or Excel export',
+  attendance_copy: 'a read-only print view of the sheet',
+  documents: 'the Dashboard tab holds "Create NOC", the NOC tab lists issued NOCs, Employee Documents handles uploads, NOC Settings has letterhead/stamps',
+  accounts: 'monthly salary accounts grouped by site with rate tiers and totals',
+  advance: 'issue advances on the "New Advance" tab and review them under "Pending for <month>"',
+  consolidated_salary: 'month/year pickers, all sites in one sheet, "Export Excel" for the workbook',
+  uniform_registry: 'switch to the **Stock Management** tab → "Add Stock" → fill Item Name / Size / Quantity / Min Qty → Save. Mind the tabs: "+ New Entry" sits on the Tokens tab and creates an employee TOKEN, not stock',
+  leave_requests: 'approve or reject on each card (days paid is editable on approval)',
+  cancellation_requests: 'approve with "Move to Recycle Bin" or "Delete Permanently"; the Recycle Bin tab restores, deletes forever or empties the bin',
+  notifications: '"Mark as read" per card; warnings and fines are issued from here',
+  admins: 'create/edit admins, per-menu permission switches and the AI Assistant toggle',
+  all_logs: 'the full audit trail of user actions',
+  settings: 'super admin only — Branding, Currency and the AI Assistant section',
+  profile: 'your own account details',
+};
+
 export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only move between these screens; view keys in brackets):
 
 [dashboard] Dashboard — workforce stat cards (idle workers, active workers), quick action buttons "Add Employee", "Mark Attendance", "Accounts", and Sites Overview cards (per-site present/absent/hours).
@@ -79,11 +111,14 @@ export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only mo
 "Employee Docs" tab: per-employee document directory with drag & drop upload, document type, issue/expiry dates and preview. "Template" tab: letterhead/company settings, NOC companies and the stamp library are managed here (NOC Settings).
 [noc_view] — a single issued NOC opened full-screen (read-only viewer with print/download and stamp toggle).
 
-[accounts] Accounts — monthly salary accounts grouped by site (search with jump-to-match), rate tiers and totals. "Advance" section/button moves to [advance]: issue salary advances (amount, deduction month/year, recurring advances with installments, balances).
+[accounts] Accounts — monthly salary accounts grouped by site (search with jump-to-match), rate tiers and totals. "Advance" section/button moves to [advance]: TWO tabs — "New Advance" (issue new advances: employee picker, amount, deduction month/year, recurring advances with installments, balances) and "Pending for <month>" (review/approve the month's pending advances).
 
 [consolidated_salary] Consolidated Salary — month/year selectors, all sites in one salary sheet with per-employee rates (standard/premium/camp-sitting tiers), site subtotals, grand total, "Export Excel" button.
 
-[uniform_registry] Materials Registry — uniform/material issue records (employee, item, size, quantity, document number, issue date). "Add Entry" button; employee picker auto-fills the saved document number; search.
+[uniform_registry] Materials Registry — TWO TABS on one page (tab strip: "Tokens" | "Stock Management"), each tab with its OWN buttons:
+  • "Tokens" tab (default/active on arrival) — uniform/material ISSUE records (employee, item, size, quantity, document number, issue date). Buttons: "+ New Entry" (opens the New Token Creation wizard — an employee issue record, NOT stock; employee picker auto-fills the saved document number), per-row View Details / Renew / Delete. Search box + All Sites filter + Reset.
+  • "Stock Management" tab — material INVENTORY. Buttons: "+ Add Stock" (opens an INLINE form — not a modal — with fields Item Name*, Size, Quantity*, Min Qty (alert) and "Save" / "Cancel" buttons), per-row minus/plus quantity steppers and a delete (confirm). Stock quantities are automatically reduced when tokens are issued.
+  AGENT NOTE: "add material / add stock / add item" requests belong to the STOCK MANAGEMENT tab — use the one-shot stock_add action (it switches tabs, opens Add Stock, fills Item Name/Size/Quantity/Min Qty, saves). NEVER click "+ New Entry" for material/stock requests — it lives on the Tokens tab and creates a TOKEN.
 
 [leave_requests] Leave Requests — leave cards with approve/reject (days paid editable on approval).
 
@@ -98,6 +133,8 @@ export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only mo
 [profile] Profile — the signed-in user's own profile.
 
 Rules for the agent:
+- OBSERVE FIRST: when you arrive on any page, run "read" BEFORE your first click — the read lists a TABS line (which tab is ACTIVE) and the buttons actually on screen. Never click a button you have not seen in a fresh read.
+- TAB OWNERSHIP: pages with tabs (Materials Registry, Documents, Advances, Cancellations…) show DIFFERENT buttons per tab and open on their first tab by default. Match the request to the right tab; if the button you need is not on the active tab, click that tab, read again, then act. "+ New Entry" (Tokens tab) creates employee tokens; material/stock adds live under the "Stock Management" tab's "Add Stock".
 - Navigate ONLY with the view keys above. There is no way — and no permission — to open anything outside this app.
 - You can operate EVERY control a human can: all sidebar menus, page buttons, tabs, dropdowns, switches/checkboxes and every modal dialog. Add/Edit forms across the app open as modals or dedicated screens; delete and other destructive actions show a confirmation popup (SweetAlert) — complete it by clicking the red/confirm button, or press Escape to cancel.
 - Pages open dialogs and dropdowns dynamically: after every click, run "read" to see what actually appeared before filling anything (modal fields are listed too, with an "OPEN MODAL" line naming the dialog).
