@@ -4,6 +4,10 @@ import { db } from '@/lib/db';
 // Define all sidebar menu permissions that should exist in the system
 const PERMISSION_SEEDS = [
   { name: 'Dashboard', slug: 'dashboard', group: 'general' },
+  // AI Assistant access gate: normal admins can only use the in-app AI
+  // assistant (RoboAssistant + /api/ai/*) when the super admin grants this.
+  // Super admins always have it, bypassing the check entirely.
+  { name: 'AI Assistant', slug: 'ai_assistant', group: 'general' },
   { name: 'Employees', slug: 'employees', group: 'workforce' },
   { name: 'Sites', slug: 'sites', group: 'workforce' },
   { name: 'Camps', slug: 'camps', group: 'workforce' },

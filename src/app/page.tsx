@@ -191,6 +191,12 @@ function MainLayout() {
     return false;
   }, [user, adminPermissions]);
 
+  // The AI assistant is permission-based: super admins always have it; a
+  // normal admin only gets the assistant when the super admin grants the
+  // "AI Assistant" permission (Admin Management). Revoke takes effect within
+  // the 15s permission poll — the face and panel simply disappear.
+  const aiAllowed = user?.role === 'super_admin' || adminPermissions.includes('ai_assistant');
+
   // Redirect admin users away from restricted views
   React.useEffect(() => {
     if (user && !isViewAllowed(currentView)) {
@@ -295,7 +301,7 @@ function MainLayout() {
       </div>
       <CommandPalette />
       <ScrollToTopButton />
-      <RoboAssistant />
+      {aiAllowed && <RoboAssistant />}
     </div>
   );
 }

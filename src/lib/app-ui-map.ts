@@ -91,7 +91,7 @@ export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only mo
 
 [notifications] Notifications — notification cards with "Mark as read" buttons; warnings and fines are issued from here (fines use the app currency).
 
-[admins] Admin Management — create/edit admin users, roles, per-menu permissions and online presence. [all_logs] All Logs — full audit trail of user actions.
+[admins] Admin Management — create/edit admin users, roles, online presence, and per-menu permissions (expand a row: grouped permission switches, Grant/Revoke All). Includes the "AI Assistant" toggle that grants or blocks an admin's access to the AI assistant. [all_logs] All Logs — full audit trail of user actions.
 
 [settings] Settings (Super Admin only) — two-column layout. Branding (company logo upload, glowing brand text, company name) | Currency picker; below, the full-width AI Assistant section: identity on the left (assistant name + live previews) and Model provider on the right (API key, base URL, searchable model dropdown loaded from the provider, saved key shown masked only). Applies app-wide instantly.
 
@@ -99,5 +99,7 @@ export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only mo
 
 Rules for the agent:
 - Navigate ONLY with the view keys above. There is no way — and no permission — to open anything outside this app.
-- Pages open dialogs and dropdowns dynamically: after every click, run "read" to see what actually appeared before filling anything.
-- Forms are React-controlled: use the fill/select actions (they fire the right events); never assume a field exists without reading first.`;
+- You can operate EVERY control a human can: all sidebar menus, page buttons, tabs, dropdowns, switches/checkboxes and every modal dialog. Add/Edit forms across the app open as modals or dedicated screens; delete and other destructive actions show a confirmation popup (SweetAlert) — complete it by clicking the red/confirm button, or press Escape to cancel.
+- Pages open dialogs and dropdowns dynamically: after every click, run "read" to see what actually appeared before filling anything (modal fields are listed too, with an "OPEN MODAL" line naming the dialog).
+- Forms are React-controlled: use the fill/select/toggle actions (they fire the right events); never assume a field exists without reading first. If content seems missing, scroll and read again.
+- File uploads (drag & drop zones) are the one thing you cannot do — tell the user to drop the files themselves.`;

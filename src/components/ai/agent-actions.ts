@@ -20,13 +20,18 @@ import { AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
 import { todayDMY } from '@/components/documents/shared';
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'noc_create';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create';
   view?: string;
   text?: string;
   field?: string;
   value?: string;
   option?: string;
   ms?: number;
+  // press_key: 'enter' | 'escape' | 'tab'
+  key?: string;
+  // scroll: 'main' (default) or 'dialog' — the open modal's scroll area
+  target?: string;
+  dy?: number;
   // noc_create payload (server-validated): client + employees are required.
   client?: string;
   project?: string;
@@ -73,6 +78,19 @@ function describe(el: Element): string {
   const tag = el.tagName.toLowerCase();
   const role = he.getAttribute('role') || '';
   const text = norm(he.textContent || '').slice(0, 60);
+  if (tag === 'input' && (el as HTMLInputElement).type === 'checkbox') {
+    const i = el as HTMLInputElement;
+    const lab = inputLabel(i) || text;
+    return `[checkbox] ${lab || '(unlabelled)'} — ${i.checked ? 'TICKED' : 'unticked'}`;
+  }
+  if (role === 'switch') {
+    const on = he.getAttribute('aria-checked') === 'true' || he.getAttribute('data-state') === 'checked';
+    return `[switch] ${text || he.getAttribute('aria-label') || '(unlabelled)'} — ${on ? 'ON' : 'OFF'}`;
+  }
+  if (role === 'checkbox') {
+    const on = he.getAttribute('aria-checked') === 'true' || he.getAttribute('data-state') === 'checked';
+    return `[checkbox] ${text || '(unlabelled)'} — ${on ? 'TICKED' : 'unticked'}`;
+  }
   if (tag === 'input' || tag === 'textarea') {
     const i = el as HTMLInputElement;
     const kind = i.type && i.type !== 'text' ? ` type=${i.type}` : '';
@@ -95,17 +113,33 @@ function describe(el: Element): string {
 function readPage(): string {
   const view = useAppStore.getState().currentView;
   const heading = document.querySelector('main h1, main h2');
-  const lines: string[] = [`Current screen: "${view}"${heading ? ` — ${norm(heading.textContent || '').slice(0, 70)}` : ''}.`, 'Visible elements:'];
+  const lines: string[] = [`Current screen: "${view}"${heading ? ` — ${norm(heading.textContent || '').slice(0, 70)}` : ''}.`];
+
+  // Open modal dialogs — the agent must know one is up (its own fields are
+  // merged into the element list below, exactly like the page behind it).
+  const dialogs = (Array.from(document.querySelectorAll('[role="dialog"]')) as HTMLElement[]).filter(isVisible);
+  if (dialogs.length > 0) {
+    const titles = dialogs.map((d) => {
+      const labelledBy = d.getAttribute('aria-labelledby');
+      const viaRef = labelledBy ? document.getElementById(labelledBy)?.textContent : null;
+      const h = d.querySelector('h1, h2, h3, h4');
+      return norm((viaRef || h?.textContent || d.getAttribute('aria-label') || '').slice(0, 60)) || '(untitled)';
+    });
+    lines.push(`OPEN MODAL${titles.length > 1 ? 'S' : ''}: ${titles.join(' | ')}.`);
+  }
+
+  lines.push('Visible elements:');
 
   const nodes = Array.from(
     document.querySelectorAll(
-      'aside h1, aside h2, aside button, main h1, main h2, main h3, main h4, main button, main a[href], main [role="button"], main [role="tab"], main [role="menuitem"], main input, main textarea, main select, main [role="combobox"]'
+      'aside h1, aside h2, aside button, main h1, main h2, main h3, main h4, main button, main a[href], main [role="button"], main [role="tab"], main [role="menuitem"], main [role="switch"], main [role="checkbox"], main input:not([type=checkbox]), main textarea, main select, main [role="combobox"], '
+      + '[role="dialog"] h2, [role="dialog"] h3, [role="dialog"] h4, [role="dialog"] button, [role="dialog"] [role="button"], [role="dialog"] [role="tab"], [role="dialog"] [role="menuitem"], [role="dialog"] [role="switch"], [role="dialog"] [role="checkbox"], [role="dialog"] input:not([type=checkbox]), [role="dialog"] textarea, [role="dialog"] select, [role="dialog"] [role="combobox"]'
     )
   ) as HTMLElement[];
 
   for (const el of nodes) {
-    if (lines.length >= 90) {
-      lines.push('…(more elements exist — click or scroll to see them)');
+    if (lines.length >= 120) {
+      lines.push('…(more elements exist — use the scroll action, then read again)');
       break;
     }
     if (!isVisible(el)) continue;
@@ -113,8 +147,21 @@ function readPage(): string {
     if (line.endsWith('] ') || line.endsWith('] (unlabelled)')) continue;
     if (!lines.includes(line)) lines.push(line);
   }
+
+  // Native checkboxes hidden inside styled labels (shadcn pattern) never pass
+  // the visibility probe themselves — describe them through their label text.
+  const labelled = (Array.from(document.querySelectorAll('main label, [role="dialog"] label')) as HTMLElement[])
+    .filter(isVisible)
+    .filter((l) => l.querySelector('input[type="checkbox"]'));
+  for (const l of labelled) {
+    if (lines.length >= 120) break;
+    const cb = l.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+    const line = `[option] ${norm(l.textContent || '').slice(0, 60)} — ${cb?.checked ? 'TICKED' : 'unticked'}`;
+    if (!lines.includes(line)) lines.push(line);
+  }
+
   let out = lines.join('\n');
-  if (out.length > 3500) out = `${out.slice(0, 3500)}\n…(truncated)`;
+  if (out.length > 4200) out = `${out.slice(0, 4200)}\n…(truncated)`;
   return out;
 }
 
@@ -234,6 +281,19 @@ function setReactValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectEl
   el.dispatchEvent(new Event('blur', { bubbles: true }));
 }
 
+/**
+ * VALUE FIDELITY GUARD — placeholders are hints, never values.
+ * Weak models echo a field's grey placeholder ("e.g. NPC-Umm Al Quwain")
+ * back into the field when the user never provided a value. Deterministically
+ * refuse that at the executor level and tell the model to ask the user.
+ */
+function isPlaceholderEcho(el: HTMLInputElement | HTMLTextAreaElement, value: string): boolean {
+  const ph = (el.placeholder || '').trim();
+  if (ph.length < 3) return false;
+  const stripped = norm(ph).replace(/^e\.g\.\s*/, '');
+  return norm(value) === norm(ph) || norm(value) === stripped;
+}
+
 function fillField(field: string, value: string): string {
   const el = findField(field);
   if (!el) {
@@ -243,6 +303,11 @@ function fillField(field: string, value: string): string {
       .map((e) => describe(e))
       .join('\n');
     return `No input matching "${field}" is visible right now.\nVisible inputs:\n${sample || '(none)'}`;
+  }
+  if (isPlaceholderEcho(el, value)) {
+    return `REFUSED: "${value.slice(0, 60)}" is the grey PLACEHOLDER of "${
+      inputLabel(el).slice(0, 60) || field
+    }" — it is an on-screen hint, NOT a value from the user. Never type placeholder text. If the user did not provide this value, STOP filling and ask them for it.`;
   }
   setReactValue(el, value);
   return `Filled "${inputLabel(el).slice(0, 60) || field}" with "${value.slice(0, 80)}".`;
@@ -273,6 +338,17 @@ async function selectOption(field: string, option: string): Promise<string> {
   if (!trigger) return `No dropdown matching "${field}" is visible right now.`;
   press(trigger);
   await sleep(350);
+  // Searchable comboboxes (shadcn Command-based pickers) render a search box
+  // inside the popup — type the option into it to filter, then pick the match.
+  const popupInput = (
+    Array.from(
+      document.querySelectorAll('[role="listbox"] input, [cmdk-root] input, [data-radix-popper-content-wrapper] input')
+    ) as HTMLInputElement[]
+  ).filter(isVisible)[0];
+  if (popupInput) {
+    setReactValue(popupInput, String(option));
+    await sleep(500);
+  }
   const options = (Array.from(document.querySelectorAll('[role="option"]')) as HTMLElement[]).filter(isVisible);
   const target =
     options.find((o) => norm(o.textContent || '') === t) ||
@@ -349,7 +425,7 @@ async function nocCreate(a: AgentAction): Promise<string> {
   const fillOptional = (field: string, value: string) => {
     if (!value) return;
     const el = findField(field);
-    if (el) setReactValue(el, value);
+    if (el && !isPlaceholderEcho(el, value)) setReactValue(el, value);
   };
   fillOptional('Project Name', project);
   fillOptional('NOC Date', date);
@@ -457,6 +533,123 @@ async function nocCreate(a: AgentAction): Promise<string> {
   return `${log.join('\n')}\n⚠️ Generation did not complete.${toastText ? ` The page says: "${toastText}".` : ''} Ask the user to check the form.`;
 }
 
+// ── press_key ──────────────────────────────────────────────────────────────
+// Enter submits the focused form/button; Escape closes the topmost Radix /
+// SweetAlert modal or popover; Tab moves focus. Dispatched on the active
+// element (or body) exactly like a real keypress.
+async function pressKeyAction(key: string): Promise<string> {
+  const map: Record<string, { key: string; code: string; keyCode: number }> = {
+    enter: { key: 'Enter', code: 'Enter', keyCode: 13 },
+    escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+    tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  };
+  const k = map[key.toLowerCase()];
+  if (!k) return `Unsupported key "${key}" — use enter, escape or tab.`;
+  const target = (
+    document.activeElement && document.activeElement !== document.body
+      ? document.activeElement
+      : document.body
+  ) as HTMLElement;
+  const init = { bubbles: true, cancelable: true, ...k, view: window };
+  target.dispatchEvent(new KeyboardEvent('keydown', init));
+  target.dispatchEvent(new KeyboardEvent('keyup', init));
+  // Enter on a focused button still needs the click for React handlers.
+  if (key.toLowerCase() === 'enter' && target.tagName === 'BUTTON') target.click();
+  await sleep(400);
+  const dialogs = (Array.from(document.querySelectorAll('[role="dialog"]')) as HTMLElement[]).filter(isVisible).length;
+  return `Pressed ${k.key}.${dialogs > 0 ? ` ${dialogs} modal(s) open on screen.` : ''}`;
+}
+
+// ── toggle ───────────────────────────────────────────────────────────────
+// Flip a checkbox / switch matched by its visible text. Covers shadcn/radix
+// switches (button[role=switch]), radix checkboxes and native checkboxes
+// (including sr-only inputs inside styled labels).
+async function toggleField(field: string): Promise<string> {
+  const t = norm(field);
+  const switchState = (el: HTMLElement) =>
+    el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-state') === 'checked';
+
+  // 1) Switch / checkbox buttons (Radix)
+  const buttons = (
+    Array.from(
+      document.querySelectorAll(
+        'main button[role="switch"], [role="dialog"] button[role="switch"], main button[role="checkbox"], [role="dialog"] button[role="checkbox"]'
+      )
+    ) as HTMLElement[]
+  ).filter(isVisible);
+  const btn =
+    buttons.find((el) => norm(el.textContent || '').includes(t) || norm(el.getAttribute('aria-label') || '').includes(t)) ||
+    buttons.find((el) => t.includes(norm(el.getAttribute('aria-label') || '')) && !!el.getAttribute('aria-label'));
+  if (btn) {
+    const before = switchState(btn);
+    press(btn);
+    await sleep(250);
+    const after = switchState(btn);
+    const label = norm(btn.textContent || '').slice(0, 60) || btn.getAttribute('aria-label') || field;
+    return `${after === before ? 'Tried to toggle' : 'Toggled'} "${label}" — now ${after ? 'ON' : 'OFF'}${after === before ? ' (state did not change — it may be read-only).' : '.'}`;
+  }
+
+  // 2) Native checkbox inside a visible label (shadcn pattern — the input
+  //    itself is sr-only, the click must land on the input or its label).
+  const labels = (
+    Array.from(document.querySelectorAll('main label, [role="dialog"] label')) as HTMLElement[]
+  )
+    .filter(isVisible)
+    .filter((l) => l.querySelector('input[type="checkbox"]'));
+  const hit = labels.find((l) => norm(l.textContent || '').includes(t));
+  const cb = hit ? (hit.querySelector('input[type="checkbox"]') as HTMLInputElement | null) : null;
+  if (cb && !cb.disabled) {
+    const before = cb.checked;
+    cb.click();
+    await sleep(200);
+    if (cb.checked === before) {
+      cb.click(); // styled checkboxes sometimes swallow the first synthetic click
+      await sleep(200);
+    }
+    return `Toggled "${norm(hit!.textContent || '').slice(0, 60)}" — now ${cb.checked ? 'TICKED' : 'unticked'}.`;
+  }
+  if (cb && cb.disabled) {
+    return `The "${norm(hit!.textContent || '').slice(0, 60)}" checkbox is disabled and cannot be changed.`;
+  }
+
+  // 3) Any visible checkbox matched by label/name attributes.
+  const inputs = (
+    Array.from(document.querySelectorAll('main input[type="checkbox"], [role="dialog"] input[type="checkbox"]')) as HTMLInputElement[]
+  ).filter((c) => !c.disabled && (norm(inputLabel(c)).includes(t) || norm(c.name).includes(t)));
+  if (inputs[0]) {
+    const before = inputs[0].checked;
+    inputs[0].click();
+    await sleep(200);
+    return `Toggled "${inputLabel(inputs[0]).slice(0, 60) || t}" — now ${inputs[0].checked ? 'TICKED' : 'unticked'}.${inputs[0].checked === before ? ' (state did not change)' : ''}`;
+  }
+  return `No checkbox or switch matching "${field}" is visible right now.`;
+}
+
+// ── scroll ───────────────────────────────────────────────────────────────
+// Long pages and modals hide content below the fold — scroll, then "read"
+// again to discover the newly visible elements.
+async function scrollPage(target: string, dy: number): Promise<string> {
+  const dialog = (Array.from(document.querySelectorAll('[role="dialog"]')) as HTMLElement[]).filter(isVisible)[0];
+  if (target === 'dialog') {
+    if (!dialog) return 'No modal is open — scroll the page with {"type":"scroll","target":"main"} instead.';
+    const scroller = (
+      Array.from(dialog.querySelectorAll<HTMLElement>('*')).find((n) => {
+        const s = window.getComputedStyle(n);
+        return n.scrollHeight > n.clientHeight + 40 && /(auto|scroll)/.test(s.overflowY);
+      })
+    ) ?? dialog;
+    scroller.scrollBy({ top: dy, behavior: 'instant' as ScrollBehavior });
+    await sleep(250);
+    return `Scrolled inside the modal ${dy > 0 ? 'down' : 'up'} by ${Math.abs(dy)}px (scrollTop ${Math.round(scroller.scrollTop)}).`;
+  }
+  const main = document.querySelector('main');
+  main?.scrollBy({ top: dy, behavior: 'instant' as ScrollBehavior });
+  window.scrollBy({ top: dy, behavior: 'instant' as ScrollBehavior });
+  await sleep(250);
+  const top = (main as HTMLElement | null)?.scrollTop ?? 0;
+  return `Scrolled the page ${dy > 0 ? 'down' : 'up'} by ${Math.abs(dy)}px (main scrollTop now ${Math.round(top)}).`;
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 export async function executeAgentAction(action: AgentAction): Promise<string> {
   try {
@@ -474,6 +667,12 @@ export async function executeAgentAction(action: AgentAction): Promise<string> {
       case 'wait':
         await sleep(Math.min(Math.max(action.ms ?? 600, 100), 2000));
         return 'Waited.';
+      case 'press_key':
+        return await pressKeyAction(String(action.key || ''));
+      case 'toggle':
+        return await toggleField(String(action.field || ''));
+      case 'scroll':
+        return await scrollPage(String(action.target || 'main'), Math.max(-2000, Math.min(Number(action.dy ?? 700) || 700, 2000)));
       case 'noc_create':
         return await nocCreate(action);
       default:

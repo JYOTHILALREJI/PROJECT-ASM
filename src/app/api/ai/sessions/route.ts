@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { isAiAllowed, AI_ACCESS_DENIED } from '@/lib/ai-access';
 
 // AI Assistant chat sessions.
 //
@@ -35,6 +36,12 @@ export async function GET(request: NextRequest) {
     const user = await assertUser(userId);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Valid userId is required' }, { status: 400 });
+    }
+
+    // Permission gate — same policy as /api/ai/chat: the assistant is usable
+    // only by the super admin and accounts with the "AI Assistant" grant.
+    if (!(await isAiAllowed(userId))) {
+      return NextResponse.json({ success: false, error: AI_ACCESS_DENIED }, { status: 403 });
     }
 
     // Ownership check when a specific session is requested

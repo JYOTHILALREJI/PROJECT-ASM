@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { callLLM, extractJsonObject, credentialsFromMap, type LlmMessage } from '@/lib/ai-client';
 import { getDbSchemaDoc } from '@/lib/db-schema-doc';
 import { APP_UI_MAP, AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
+import { isAiAllowed, AI_ACCESS_DENIED } from '@/lib/ai-access';
 
 // AI Assistant chat endpoint — two-pass "grounded SQL" flow + in-app agent.
 //
@@ -83,13 +84,16 @@ function redactSecrets(rows: Record<string, unknown>[]): Record<string, unknown>
 // and additionally confines clicks/fills to the app's own page DOM.
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'noc_create';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'press_key' | 'toggle' | 'scroll' | 'noc_create';
   view?: string;
   text?: string;
   field?: string;
   value?: string;
   option?: string;
   ms?: number;
+  key?: string;
+  target?: string;
+  dy?: number;
   // noc_create payload — a one-shot, fully-validated NOC draft description
   // extracted VERBATIM from the user's message (client + employees required).
   client?: string;
@@ -141,6 +145,19 @@ function validateAgentAction(raw: unknown): AgentAction | null {
       const ms = typeof a.ms === 'number' && a.ms > 0 ? Math.min(Math.round(a.ms), 2000) : 600;
       return { type: 'wait', ms };
     }
+    case 'press_key': {
+      const key = clampStr(a.key, 10)?.toLowerCase();
+      return key && ['enter', 'escape', 'tab'].includes(key) ? { type: 'press_key', key } : null;
+    }
+    case 'toggle': {
+      const field = clampStr(a.field, 120);
+      return field ? { type: 'toggle', field } : null;
+    }
+    case 'scroll': {
+      const target = clampStr(a.target, 10);
+      const dy = typeof a.dy === 'number' && Math.abs(a.dy) >= 100 ? Math.max(-2000, Math.min(Math.round(a.dy), 2000)) : 700;
+      return { type: 'scroll', target: target === 'dialog' ? 'dialog' : 'main', dy };
+    }
     case 'noc_create': {
       // One-shot NOC builder: client + at least one employee are required;
       // everything else is optional (date defaults to today on the client).
@@ -188,6 +205,12 @@ function describeAction(action: AgentAction): string {
       return `🔽 Selecting **${action.option}** in **${action.field}**…`;
     case 'wait':
       return '⏳ Giving the page a moment…';
+    case 'press_key':
+      return `⌨️ Pressing **${action.key === 'escape' ? 'Esc' : (action.key || '').toUpperCase()}**…`;
+    case 'toggle':
+      return `☑️ Toggling **${action.field}**…`;
+    case 'scroll':
+      return action.dy && action.dy < 0 ? '🖱️ Scrolling up…' : '🖱️ Scrolling down…';
     case 'noc_create':
       return `🛠️ Creating the NOC for **${action.client}**${action.project ? ` · ${action.project}` : ''} (${action.employees?.length ?? 0} employees)…`;
   }
@@ -195,6 +218,33 @@ function describeAction(action: AgentAction): string {
 
 function truncate(text: string, cap: number): string {
   return text.length <= cap ? text : `${text.slice(0, cap)}\n…(truncated)`;
+}
+
+/**
+ * callLLM with automatic retry on provider rate-limits (HTTP 429). The agent
+ * loop makes many calls in bursts — a hard-fail on the first 429 kills a
+ * half-done task, so back off briefly and try again (3 attempts total).
+ */
+async function callLLMR(
+  messages: LlmMessage[],
+  opts: { temperature: number },
+  creds: Parameters<typeof callLLM>[2]
+): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await callLLM(messages, opts, creds);
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : '';
+      if (/429|too many requests|rate.?limit/i.test(msg) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, attempt === 0 ? 2000 : 5000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('AI provider failed');
 }
 
 /**
@@ -230,8 +280,9 @@ function plannerSystemPrompt(
     `Today's date is ${today} (Asia/Dubai). Money is displayed in ${currency}.`,
     '',
     'You have TWO superpowers: (1) read-only SQL over the app database, and (2) acting as an',
-    'AGENT inside the app — you can move between screens, read what is on screen, click buttons',
-    'and fill forms for the user. You can NEVER go outside the app.',
+    'AGENT inside the app. You can do EVERYTHING the user could do by hand: move between ALL',
+    'menus and pages, open every button, work inside every modal dialog and popup, fill forms,',
+    'flip switches and checkboxes, confirm or cancel prompts. You can NEVER go outside the app.',
     '',
     'Reply with ONLY a minified JSON object — no prose, no markdown fences — exactly ONE of:',
     '',
@@ -266,6 +317,9 @@ function plannerSystemPrompt(
     '     {"type":"fill","field":"Client Name","value":"M/S PROSCAPE LLC"}',
     '                                              type into an input matched by label/placeholder/name',
     '     {"type":"select","field":"Company","option":"PROSCAPE"}  pick an option in a dropdown',
+    '     {"type":"press_key","key":"enter"}      press Enter / Escape / Tab (submit, close a modal or popup, move on)',
+    '     {"type":"toggle","field":"Notifications"}   flip a checkbox or switch matched by its visible text',
+    '     {"type":"scroll","target":"main","dy":700}    scroll the page (or "dialog" — the open modal) to reach below-the-fold content',
     '     {"type":"wait","ms":800}                 wait for animations/data (max 2000)',
     '     {"type":"noc_create","client":"M/S NPC LLC","project":"NPC SHOBHA","date":"05-09-2026","employees":["SEED WORKER 001","SEED WORKER 002"]}',
     '                                              ONE-SHOT NOC BUILDER — see the NOC RULE below.',
@@ -278,6 +332,15 @@ function plannerSystemPrompt(
     '     every field, adds every employee, generates the NOC) in a single step. If the client name or the',
     '     employee list is missing, ask for it with {"answer":"…"} first.',
     '   Agent rules:',
+    '   - FULL COVERAGE: every screen, every button, every modal is within your reach. Multi-step',
+    '     tasks are expected — a typical flow is: navigate → read → click (opens a modal) → read',
+    '     (the modal\u2019s fields are listed too, with an OPEN MODAL line) → fill/select/toggle each field',
+    '     → click the primary save/create button → if a confirmation popup appears ("Are you sure?",',
+    '     delete prompts), click its confirm button; if a mistake popup appears, press Escape and retry.',
+    '   - Long pages hide elements below the fold: if the button/field you need is not in the read',
+    '     output, scroll (target main or dialog) and read again — never claim something does not exist',
+    '     before scrolling.',
+    '   - Dropdowns that open a search box: the select action types your option into it automatically.',
     '   - TRIGGER: whenever the user asks you to DO something — "open/go to/take me to X", "create an NOC",',
     '     "fill in this form", "click Y for me", "add this employee" — you MUST reply with an ACTION, never',
     '     with text instructions. Only a "where is / how do I" question that does NOT ask you to act gets a',
@@ -383,6 +446,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Valid user required' }, { status: 400 });
     }
 
+    // Permission gate — the AI assistant is usable only by the super admin
+    // and by accounts the super admin granted the "AI Assistant" permission.
+    if (!(await isAiAllowed(userId))) {
+      return NextResponse.json({ success: false, error: AI_ACCESS_DENIED }, { status: 403 });
+    }
+
     const session = await db.aiChatSession.findFirst({ where: { id: sessionId, userId } });
     if (!session) {
       return NextResponse.json({ success: false, error: 'Session not found' }, { status: 404 });
@@ -439,15 +508,23 @@ export async function POST(request: NextRequest) {
     // Requests mentioning URLs / outside destinations are excluded — those
     // must get a polite refusal, not a substitute navigation.
     const externalIntent = /https?:\/\/|www\.|\b(google|youtube|facebook|instagram|whatsapp\.com|twitter|x\.com|linkedin|chrome|browser|internet)\b/i.test(content);
-    if (
-      /\b(open|go to|goto|take me to|show me|navigate|bring me|switch to|jump to|create|make|fill|add)\b/i.test(content) &&
-      !externalIntent
-    ) {
+    const actionIntent = /\b(open|go to|goto|take me to|show me|navigate|bring me|switch to|jump to|create|make|fill|add)\b/i.test(content) && !externalIntent;
+    if (actionIntent) {
       contextMessages.push({
         role: 'user',
         content:
           '[REMINDER] This request asks you to ACT inside the app. Your ENTIRE reply must be a single JSON object WITH an "action" key, e.g. {"action":{"type":"navigate","view":"documents"},"thought":"…"} — or, ONLY if details are missing, {"answer":"…question…"}. Writing a sentence or a step line (⚙️/🖱️/✍️) describing what you would do is FORBIDDEN for this request.',
       });
+      // VALUE BINDING — messages that carry explicit "FIELD = VALUE" pairs must
+      // have those values copied verbatim into fill actions. Weak models tend
+      // to echo the on-screen placeholder instead of the user's own value.
+      if (/[A-Za-z][A-Za-z ]{1,30}\s*[=:]\s*\S/.test(content)) {
+        contextMessages.push({
+          role: 'user',
+          content:
+            '[VALUE BINDING] The user\'s message contains explicit field values (KEY = VALUE or KEY: VALUE). For every fill action, copy each VALUE EXACTLY as written after the = or : — e.g. for "Site Name = QA Agent Site 21" reply {"action":{"type":"fill","field":"Site Name","value":"QA Agent Site 21"}}. NEVER use the grey placeholder/example text visible on the screen as a value — those are hints, and the executor will refuse them.',
+        });
+      }
     }
     if (agentObservation) {
       // The macro reports success in its observation — tell the model the task
@@ -468,31 +545,54 @@ export async function POST(request: NextRequest) {
       ...history,
       ...contextMessages,
     ];
-    const planRaw = await callLLM(plannerMessages, { temperature: 0 }, aiCreds);
+    const planRaw = await callLLMR(plannerMessages, { temperature: 0 }, aiCreds);
 
-    // Agent self-heal: mid-task, weak models sometimes emit a step line as
-    // their answer instead of the action JSON. One deterministic retry.
+    // ── Agent recovery ladder (deterministic, weak-model-proof) ──────────
+    // Weak models drift mid-task: they answer with a step LINE ("⚙️ Opening…"),
+    // with plain prose, or with nothing JSON-like at all — after being told to
+    // return an action. Left alone that kills the loop mid-task. Ladder:
+    //   1. one stern retry demanding the action JSON;
+    //   2. if the reply is still not an action, decide deterministically:
+    //      • a clear completion / missing-detail question is RESPECTED (final);
+    //      • anything else becomes a synthetic {"action":{"type":"read"}} so
+    //        the loop keeps moving — the next turn carries a fresh observation
+    //        plus the reminder, which is usually enough to unstick the model.
+    // Both first-turn action requests and mid-task observation turns are covered.
     let planJson = extractJsonObject(planRaw);
-    if (
+
+    const STEP_LINE_RE = /^[\u2699\uFE0F\uD83D\uDDFB\u270D\uD83D\uDD3C\uD83D\uDC41\u23F3\u2712]/u;
+    const looksFinal = (s: string) =>
+      /✅|\b(done|completed|created|finished|generated|added|submitted|deleted|saved|opened|already|need|which|what is|please provide)\b/i.test(s);
+
+    const midTaskStall =
       agentObservation &&
-      planJson !== null &&
-      typeof planJson.answer === 'string' &&
-      /^[\u2699\uFE0F\uD83D\uDDFB\u270D\uD83D\uDD3C\uD83D\uDC41\u23F3\u2712]/u.test(planJson.answer.trim())
-    ) {
-      const retryRaw = await callLLM(
-        [
-          ...plannerMessages,
-          {
-            role: 'user',
-            content:
-              'That was a step LINE, not the action JSON. Reply again with ONLY the JSON object with the "action" key for your next step — nothing else.',
-          },
-        ],
-        { temperature: 0 },
-        aiCreds
+      !(planJson !== null && planJson.action !== undefined) &&
+      (
+        planJson === null ||
+        (typeof planJson.answer === 'string' && planJson.answer.trim() && (STEP_LINE_RE.test(planJson.answer.trim()) || !looksFinal(planJson.answer.trim()))) ||
+        (planJson.answer === undefined && planJson.sql === undefined)
       );
+    const firstTurnStall =
+      !agentObservation &&
+      content &&
+      actionIntent &&
+      planJson !== null &&
+      planJson.action === undefined &&
+      planJson.sql === undefined &&
+      typeof planJson.answer === 'string' &&
+      !!planJson.answer.trim();
+
+    if (midTaskStall || firstTurnStall) {
+      const stern =
+        'You did NOT follow the action protocol. Reply again with ONLY a single minified JSON object WITH an "action" key for your next step, e.g. {"action":{"type":"read"},"thought":"…"}, {"action":{"type":"navigate","view":"employees"},"thought":"…"} or {"action":{"type":"click","text":"Add Site"},"thought":"…"}. NO prose, NO step lines, NO markdown. Only {"answer":"…"} if you are asking a missing-detail question or confirming the task is complete.';
+      const retryRaw = await callLLMR([...plannerMessages, { role: 'user', content: stern }], { temperature: 0 }, aiCreds);
       const retryPlan = extractJsonObject(retryRaw);
-      if (retryPlan !== null && retryPlan.action !== undefined) planJson = retryPlan;
+      if (retryPlan !== null && retryPlan.action !== undefined) {
+        planJson = retryPlan;
+      } else if (midTaskStall) {
+        // Deterministic continuation: keep the loop alive with a fresh read.
+        planJson = { action: { type: 'read' } };
+      }
     }
 
     // ── Agent step? Checked BEFORE the SQL/answer paths — an action reply
@@ -563,7 +663,7 @@ export async function POST(request: NextRequest) {
       planJson.sql === undefined &&
       dataQuestionRe.test(content)
     ) {
-      const retryRaw = await callLLM(
+      const retryRaw = await callLLMR(
         [
           ...plannerMessages,
           {
@@ -627,7 +727,7 @@ export async function POST(request: NextRequest) {
               const firstError = err instanceof Error ? err.message : 'Unknown SQL error';
               let healed = false;
               try {
-                const retryRaw = await callLLM(
+                const retryRaw = await callLLMR(
                   [
                     {
                       role: 'system',
@@ -692,7 +792,7 @@ export async function POST(request: NextRequest) {
           }Answer the user's question now.`,
         },
       ];
-      answerText = await callLLM(responderMessages, { temperature: 0.3 }, aiCreds);
+      answerText = await callLLMR(responderMessages, { temperature: 0.3 }, aiCreds);
     }
 
     const assistantMessage = await db.aiChatMessage.create({

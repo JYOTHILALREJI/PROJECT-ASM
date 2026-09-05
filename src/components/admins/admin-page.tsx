@@ -34,6 +34,7 @@ import {
   History,
   Link2,
   FolderOpen,
+  Bot,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -181,6 +182,9 @@ const SIDEBAR_MENUS = [
   { slug: 'leave_requests', label: 'Leave Requests', icon: FileText, group: 'workforce', alwaysVisible: false },
   { slug: 'cancellation_requests', label: 'Cancellations', icon: Ban, group: 'workforce', alwaysVisible: false },
   { slug: 'notifications', label: 'Notifications', icon: Bell, group: 'general', alwaysVisible: false },
+  // Not a sidebar menu — an access toggle the super admin flips to let a
+  // normal admin use the in-app AI assistant.
+  { slug: 'ai_assistant', label: 'AI Assistant', icon: Bot, group: 'general', alwaysVisible: false },
   { slug: 'admins', label: 'Admin Management + All Logs', icon: Shield, group: 'admin', alwaysVisible: false },
 ] as const;
 
@@ -1150,11 +1154,11 @@ export function AdminPage() {
                                                   )}>
                                                     {isEnabled ? (
                                                       <span className="flex items-center gap-1">
-                                                        <Eye className="h-3 w-3" /> Visible in sidebar
+                                                        <Eye className="h-3 w-3" /> {perm.slug === 'ai_assistant' ? 'Can use the AI assistant' : 'Visible in sidebar'}
                                                       </span>
                                                     ) : (
                                                       <span className="flex items-center gap-1">
-                                                        <EyeOff className="h-3 w-3" /> Hidden from sidebar
+                                                        <EyeOff className="h-3 w-3" /> {perm.slug === 'ai_assistant' ? 'AI assistant blocked' : 'Hidden from sidebar'}
                                                       </span>
                                                     )}
                                                   </span>

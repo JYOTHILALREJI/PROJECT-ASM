@@ -192,5 +192,38 @@ export function extractJsonObject(text: string): Record<string, unknown> | null 
       // try next candidate
     }
   }
+  // Multiple concatenated objects ("{…}\n{…}") — models sometimes emit a
+  // whole action batch at once. Parse the FIRST balanced object so the
+  // protocol stays "one action per turn" instead of failing entirely.
+  if (first !== -1) {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = first; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (esc) {
+        esc = false;
+      } else if (ch === '\\') {
+        esc = true;
+      } else if (ch === '"') {
+        inStr = !inStr;
+      } else if (!inStr) {
+        if (ch === '{') depth += 1;
+        else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            try {
+              const parsed = JSON.parse(cleaned.slice(first, i + 1));
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed as Record<string, unknown>;
+              }
+            } catch {
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
   return null;
 }

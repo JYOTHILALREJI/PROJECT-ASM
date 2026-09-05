@@ -42,7 +42,7 @@ export interface AgentJob {
 // Generous cap: NOC-sized tasks run through the one-shot noc_create macro,
 // but free-form multi-step flows (open → read → click → fill → …) still need
 // headroom. The guard pauses gracefully and offers "continue" when tripped.
-const MAX_STEPS = 28;
+const MAX_STEPS = 40;
 
 let activeJob: AgentJob | null = null;
 let version = 0;
@@ -126,6 +126,14 @@ export function startAgentJob(
 async function runJob(job: AgentJob, content: string, _initialView: string): Promise<void> {
   let observation: string | null = null;
   let firstTurn = true;
+  // Loop circuit-breaker: weak models sometimes repeat the same mutating
+  // action forever (e.g. filling a field whose value was never provided).
+  // After 3 identical consecutive mutating steps the job pauses gracefully
+  // instead of burning the step budget. read/wait are exempt — legitimate
+  // flows re-read while waiting for data.
+  const GUARDED_TYPES = new Set(['fill', 'select', 'click', 'toggle', 'navigate', 'press_key']);
+  let lastSig: string | null = null;
+  let repeats = 0;
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -168,6 +176,27 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
       firstTurn = false;
 
       if (d.action) {
+        const sig = JSON.stringify(d.action);
+        if (sig === lastSig && GUARDED_TYPES.has((d.action as { type?: string }).type || '')) {
+          repeats += 1;
+        } else {
+          repeats = 0;
+          lastSig = sig;
+        }
+        if (repeats >= 2) {
+          // Third consecutive identical mutating action — stop looping.
+          push(job, {
+            id: `loop-${Date.now()}`,
+            role: 'assistant',
+            content:
+              '⏸️ I stopped because I caught myself repeating the same step without progress — that usually means a value I need was not provided, or the element I am targeting does not exist. Tell me the value to use (or say "continue" to let me try again).',
+            createdAt: new Date().toISOString(),
+          });
+          job.status = 'done';
+          notifyCompletion(job, true);
+          emit();
+          return;
+        }
         job.agentSteps += 1;
         push(job, {
           id: d.assistantMessage.id,
