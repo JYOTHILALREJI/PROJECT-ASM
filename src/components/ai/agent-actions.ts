@@ -17,15 +17,26 @@
 
 import { useAppStore } from '@/store/app-store';
 import { AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
+import { todayDMY } from '@/components/documents/shared';
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'noc_create';
   view?: string;
   text?: string;
   field?: string;
   value?: string;
   option?: string;
   ms?: number;
+  // noc_create payload (server-validated): client + employees are required.
+  client?: string;
+  project?: string;
+  date?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  country?: string;
+  company?: string;
+  employees?: string[];
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -67,7 +78,9 @@ function describe(el: Element): string {
     const kind = i.type && i.type !== 'text' ? ` type=${i.type}` : '';
     const lab = inputLabel(i) ? ` label="${inputLabel(i).slice(0, 40)}"` : '';
     const ph = i.placeholder ? ` placeholder="${i.placeholder.slice(0, 40)}"` : '';
-    const val = i.value ? ` = "${i.value.slice(0, 40)}"` : '';
+    // Values and placeholders are deliberately marked differently so the model
+    // can never mistake grey hint text for what the field actually contains.
+    const val = i.value ? ` VALUE="${i.value.slice(0, 40)}"` : ' (empty)';
     return `[input${kind}]${lab || ''}${ph || ''}${val}`;
   }
   if (tag === 'select') return `[select] ${inputLabel(el as unknown as HTMLInputElement).slice(0, 60) || text}`;
@@ -291,6 +304,159 @@ async function navigate(view: string): Promise<string> {
   return `Navigated to the "${VIEW_LABELS[view] ?? view}" screen.${heading ? ` Heading: "${heading}".` : ''}`;
 }
 
+// ── noc_create — deterministic one-shot NOC builder ─────────────────────────
+// Walking the 5-step NOC wizard through dozens of model-driven micro-steps
+// proved fragile (weak models stalled after one or two fills, or copied the
+// form's grey placeholder text into values). This macro performs the WHOLE
+// flow deterministically: open the wizard, fill every field from the
+// user-provided payload (NEVER from on-screen hints), add every employee via
+// search → tick → "Add selected" (manual-row fallback), then generate the NOC
+// and read back its number. One action in, one rich observation out.
+async function nocCreate(a: AgentAction): Promise<string> {
+  const client = String(a.client || '').trim();
+  const project = String(a.project || '').trim();
+  const date = String(a.date || '').trim() || todayDMY();
+  const employees = (Array.isArray(a.employees) ? a.employees : []).map((e) => String(e).trim()).filter(Boolean).slice(0, 50);
+  const log: string[] = [];
+  const pickButton = (match: (t: string) => boolean): HTMLElement | undefined =>
+    (Array.from(document.querySelectorAll('main button')) as HTMLElement[]).filter(isVisible).find((b) => match(norm(b.textContent || '')));
+
+  // 1) Be on the Documents page.
+  if (useAppStore.getState().currentView !== 'documents') {
+    log.push(await navigate('documents'));
+  }
+
+  // 2) Open the wizard (unless it is already open) and clear a stale
+  //    "unsynced local changes" banner so it cannot restore old values.
+  let clientInput = findField('Client Name');
+  if (!clientInput) {
+    log.push(await clickByTextVerified('Create NOC'));
+    await sleep(500);
+    const discard = pickButton((t) => t === 'discard');
+    if (discard) {
+      press(discard);
+      log.push('Discarded an unsynced local draft banner.');
+      await sleep(250);
+    }
+    clientInput = findField('Client Name');
+  }
+  if (!clientInput) {
+    return `I could not open the NOC wizard — the Create NOC button is not reachable (missing permission, or the screen did not open). ${log.join(' ')}`;
+  }
+
+  // 3) Fill the details EXACTLY as the user provided them.
+  setReactValue(clientInput, client);
+  const fillOptional = (field: string, value: string) => {
+    if (!value) return;
+    const el = findField(field);
+    if (el) setReactValue(el, value);
+  };
+  fillOptional('Project Name', project);
+  fillOptional('NOC Date', date);
+  fillOptional('Address Line 1', String(a.address1 || ''));
+  fillOptional('Address Line 2', String(a.address2 || ''));
+  fillOptional('City', String(a.city || ''));
+  fillOptional('Country', String(a.country || ''));
+  if (a.company) await selectOption('Issuing Company', String(a.company));
+  log.push(`Filled the details: Client "${client}"${project ? `, Project "${project}"` : ''}, Date ${date}${a.city ? `, City "${a.city}"` : ''}.`);
+
+  // 4) Employees: search → tick → "Add selected"; manual row when the
+  //    database has no such employee. Already-present rows are a no-op.
+  let added = 0;
+  const addedNames: string[] = [];
+  const missing: string[] = [];
+  const rowNameInputs = () => Array.from(document.querySelectorAll('main input[placeholder="EMPLOYEE NAME"]')) as HTMLInputElement[];
+  for (const name of employees) {
+    const searchInput = findField('Search employees');
+    if (!searchInput) {
+      missing.push(name);
+      continue;
+    }
+    const rowsBefore = rowNameInputs().length;
+    setReactValue(searchInput, name);
+    await sleep(1100); // debounce (250ms) + fetch + render
+    const optionLabels = (Array.from(document.querySelectorAll('main label')) as HTMLElement[])
+      .filter(isVisible)
+      .filter((l) => l.querySelector('input[type="checkbox"]'));
+    const target = optionLabels.find((l) => norm(l.textContent || '').includes(norm(name)));
+    const checkbox = target ? (target.querySelector('input[type="checkbox"]') as HTMLInputElement | null) : null;
+    if (checkbox && checkbox.disabled) {
+      // already in the table (marked "added")
+      added += 1;
+      addedNames.push(name);
+      continue;
+    }
+    if (checkbox) {
+      // tick (verify React picked it up — retry once), then "Add selected"
+      checkbox.click();
+      await sleep(200);
+      if (!checkbox.checked) {
+        checkbox.click();
+        await sleep(200);
+      }
+      const addBtn = pickButton((t) => t.startsWith('add selected'));
+      if (addBtn) {
+        press(addBtn);
+        await sleep(450);
+        if (rowNameInputs().length > rowsBefore) {
+          added += 1;
+          addedNames.push(name);
+          setReactValue(searchInput, ''); // clear for the next search
+          await sleep(200);
+          continue;
+        }
+      }
+    }
+    // Not found in the database (or the pick failed) → add a manual row.
+    const addManually = pickButton((t) => t.includes('add manually'));
+    if (addManually) {
+      press(addManually);
+      await sleep(250);
+      const nameInputs = rowNameInputs();
+      const rowInput = nameInputs[nameInputs.length - 1];
+      if (rowInput && nameInputs.length > rowsBefore) {
+        setReactValue(rowInput, name.toUpperCase());
+        added += 1;
+        addedNames.push(`${name} (manual row — not found in the database)`);
+        setReactValue(searchInput, '');
+        await sleep(200);
+        continue;
+      }
+    }
+    missing.push(name);
+    setReactValue(searchInput, '');
+    await sleep(200);
+  }
+  log.push(
+    `Employees: ${added}/${employees.length} on the NOC table${addedNames.length ? ` (${addedNames.join(', ')})` : ''}${
+      missing.length ? ` — NOT FOUND: ${missing.join(', ')}` : ''
+    }.`
+  );
+  if (missing.length > 0) {
+    return `${log.join('\n')}\nSome employees were not found in the database and no manual row could be added, so I stopped BEFORE generating. Ask the user to check the names.`;
+  }
+
+  // 5) Generate.
+  const generateBtn = pickButton((t) => t.includes('confirm & generate'));
+  if (!generateBtn) {
+    return `${log.join('\n')}\nI could not find the "Confirm & Generate NOC" button — the form may be in an unexpected state.`;
+  }
+  press(generateBtn);
+  await sleep(2200);
+  const mainText = norm(document.querySelector('main')?.textContent || '');
+  const nocNumber = mainText.match(/noc-\d{4}-\d+/i)?.[0]?.toUpperCase();
+  if (mainText.includes('noc generated') && nocNumber) {
+    return `${log.join('\n')}\n✅ NOC generated: ${nocNumber} — ${client}${project ? ` · ${project}` : ''} · ${added} employee(s). It is stored in Documents → NOC and the page offers Print / Download PDF.`;
+  }
+  const toastText = (Array.from(document.querySelectorAll('[role="status"]')) as HTMLElement[])
+    .filter(isVisible)
+    .map((t) => norm(t.textContent || ''))
+    .filter(Boolean)
+    .join(' | ')
+    .slice(0, 400);
+  return `${log.join('\n')}\n⚠️ Generation did not complete.${toastText ? ` The page says: "${toastText}".` : ''} Ask the user to check the form.`;
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 export async function executeAgentAction(action: AgentAction): Promise<string> {
   try {
@@ -308,6 +474,8 @@ export async function executeAgentAction(action: AgentAction): Promise<string> {
       case 'wait':
         await sleep(Math.min(Math.max(action.ms ?? 600, 100), 2000));
         return 'Waited.';
+      case 'noc_create':
+        return await nocCreate(action);
       default:
         return 'Unknown action type.';
     }

@@ -83,13 +83,24 @@ function redactSecrets(rows: Record<string, unknown>[]): Record<string, unknown>
 // and additionally confines clicks/fills to the app's own page DOM.
 
 export interface AgentAction {
-  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait';
+  type: 'navigate' | 'read' | 'click' | 'fill' | 'select' | 'wait' | 'noc_create';
   view?: string;
   text?: string;
   field?: string;
   value?: string;
   option?: string;
   ms?: number;
+  // noc_create payload — a one-shot, fully-validated NOC draft description
+  // extracted VERBATIM from the user's message (client + employees required).
+  client?: string;
+  project?: string;
+  date?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  country?: string;
+  company?: string;
+  employees?: string[];
 }
 
 function clampStr(v: unknown, max: number): string | null {
@@ -130,6 +141,33 @@ function validateAgentAction(raw: unknown): AgentAction | null {
       const ms = typeof a.ms === 'number' && a.ms > 0 ? Math.min(Math.round(a.ms), 2000) : 600;
       return { type: 'wait', ms };
     }
+    case 'noc_create': {
+      // One-shot NOC builder: client + at least one employee are required;
+      // everything else is optional (date defaults to today on the client).
+      const client = clampStr(a.client, 200);
+      const employeesRaw = Array.isArray(a.employees) ? a.employees : [];
+      const employees = employeesRaw
+        .filter((e): e is string => typeof e === 'string' && !!e.trim() && e.trim().length <= 120)
+        .map((e) => e.trim())
+        .slice(0, 50);
+      if (!client || employees.length === 0) return null;
+      const opt = (k: 'project' | 'date' | 'address1' | 'address2' | 'city' | 'country' | 'company') => {
+        const v = a[k];
+        return typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : undefined;
+      };
+      return {
+        type: 'noc_create',
+        client,
+        employees,
+        project: opt('project'),
+        date: opt('date'),
+        address1: opt('address1'),
+        address2: opt('address2'),
+        city: opt('city'),
+        country: opt('country'),
+        company: opt('company'),
+      };
+    }
     default:
       return null;
   }
@@ -150,6 +188,8 @@ function describeAction(action: AgentAction): string {
       return `🔽 Selecting **${action.option}** in **${action.field}**…`;
     case 'wait':
       return '⏳ Giving the page a moment…';
+    case 'noc_create':
+      return `🛠️ Creating the NOC for **${action.client}**${action.project ? ` · ${action.project}` : ''} (${action.employees?.length ?? 0} employees)…`;
   }
 }
 
@@ -218,7 +258,7 @@ function plannerSystemPrompt(
     '   - "display" = how to present the answer, e.g. "markdown table: Name | Position | Site".',
     '',
     '2) AGENT STEP (user asks you to DO something in the app, or needs to find where something is):',
-    '   {"action":{"type":"…", …},"thought":"one short sentence why"}',
+    '   {"action":{…},"thought":"one short sentence why"}',
     '   Action types (ONE per reply — after each you get an [AGENT OBSERVATION] with the result):',
     '     {"type":"navigate","view":"<key>"}      jump to a screen — view key MUST be one from the UI map',
     '     {"type":"read"}                          list everything visible: headings, buttons, form fields',
@@ -227,12 +267,29 @@ function plannerSystemPrompt(
     '                                              type into an input matched by label/placeholder/name',
     '     {"type":"select","field":"Company","option":"PROSCAPE"}  pick an option in a dropdown',
     '     {"type":"wait","ms":800}                 wait for animations/data (max 2000)',
+    '     {"type":"noc_create","client":"M/S NPC LLC","project":"NPC SHOBHA","date":"05-09-2026","employees":["SEED WORKER 001","SEED WORKER 002"]}',
+    '                                              ONE-SHOT NOC BUILDER — see the NOC RULE below.',
+    '   NOC RULE: for ANY request to create / prepare / make an NOC ("help me create this NOC", a pasted',
+    '     WhatsApp message with client/project/employees…), reply with ONE noc_create action and extract',
+    '     EVERY value VERBATIM from the user\u2019s message: client (required), project, date (DD-MM-YYYY — omit',
+    '     it entirely if the user gave none; it defaults to today), address/city/country/company when given,',
+    '     and employees = the COMPLETE list of employee names (required, up to 50). Do NOT walk the NOC wizard',
+    '     manually with navigate/click/fill steps — noc_create does the whole flow (opens the wizard, fills',
+    '     every field, adds every employee, generates the NOC) in a single step. If the client name or the',
+    '     employee list is missing, ask for it with {"answer":"…"} first.',
     '   Agent rules:',
     '   - TRIGGER: whenever the user asks you to DO something — "open/go to/take me to X", "create an NOC",',
     '     "fill in this form", "click Y for me", "add this employee" — you MUST reply with an ACTION, never',
     '     with text instructions. Only a "where is / how do I" question that does NOT ask you to act gets a',
     '     plain {"answer":…} from the UI map.',
     '   - ONE small step at a time; observe, then decide. After any click, "read" before filling.',
+    '   - VALUE FIDELITY (critical): every fill/select/noc_create value MUST be copied VERBATIM from the',
+    '     user\u2019s own words. NEVER fill the grey placeholder/example text you see on screen — those are hints,',
+    '     not values. NEVER invent names, companies or projects. If a required value was not provided, ask',
+    '     with {"answer":"…"} instead of guessing.',
+    '   - KEEP GOING: never pause mid-task to ask permission ("shall I continue?") and never stop after a',
+    '     few steps — keep issuing actions until the task is truly complete. Stop ONLY when a REQUIRED detail',
+    '     is missing (then ask) or the task is finished (then confirm).',
     '   - Fill fields in a logical order, then click the submit/create button only when everything needed is filled.',
     '   - If required details are MISSING (e.g. which company? which employees?), stop and ask with',
     '     {"answer":"…question…"} — list exactly what you need. The user replies, then you resume.',
@@ -252,7 +309,8 @@ function plannerSystemPrompt(
     '  user: "Go to attendance"                      → {"action":{"type":"navigate","view":"attendance"},"thought":"…"}',
     '  user: "where do I create an NOC?"             → {"answer":"Documents & NOC → Create NOC …"} (question, not a request to act)',
     '  user: "how many supervisors do we have?"      → {"sql":[count, named rows],"display":"markdown table: ID | Name | Site"}',
-    '  user: "Create an NOC for M/S Proscape, 5 workers, Dubai Marina" → {"action":{"type":"navigate","view":"documents"},"thought":"start the NOC flow"}',
+    '  user: "Create an NOC for M/S Proscape, 5 workers, Dubai Marina" → {"action":{"type":"noc_create","client":"M/S PROSCAPE LLC","employees":["SEED WORKER 001","SEED WORKER 002","SEED WORKER 003","SEED WORKER 004","SEED WORKER 005"],"city":"Dubai"},"thought":"start the one-shot NOC flow"}',
+    '  user: "HELP ME CREATE THIS NOC CLIENT: M/S NPC LLC PROJECT: NPC SHOBHA EMPLOYEES: SEED WORKER 001 … 005" → {"action":{"type":"noc_create","client":"M/S NPC LLC","project":"NPC SHOBHA","employees":["SEED WORKER 001","SEED WORKER 002","SEED WORKER 003","SEED WORKER 004","SEED WORKER 005"]},"thought":"pasted NOC request"}',
     '',
     APP_UI_MAP,
     '',
@@ -392,9 +450,16 @@ export async function POST(request: NextRequest) {
       });
     }
     if (agentObservation) {
+      // The macro reports success in its observation — tell the model the task
+      // is COMPLETE so it confirms instead of burning extra read/click turns.
+      const macroDone = agentObservation.includes('✅ NOC generated');
       contextMessages.push({
         role: 'user',
-        content: `[AGENT OBSERVATION] Result of your last action:\n${agentObservation}\n\nThe task is IN PROGRESS. Your ENTIRE reply must be a single JSON object WITH an "action" key for the next step ({"action":{"type":"…",…},"thought":"…") — or {"answer":"…"} ONLY to ask a missing-detail question or confirm completion. NEVER write a step line (⚙️/🖱️/✍️) — return the raw action JSON instead.`,
+        content: `[AGENT OBSERVATION] Result of your last action:\n${agentObservation}\n\n${
+          macroDone
+            ? 'The task is COMPLETE — the NOC was generated successfully. Reply NOW with {"answer":"…"} confirming the result (mention the NOC number and the client in our we-voice). Do NOT run any more actions.'
+            : 'The task is IN PROGRESS. Your ENTIRE reply must be a single JSON object WITH an "action" key for the next step ({"action":{"type":"…",…},"thought":"…") — or {"answer":"…"} ONLY to ask a missing-detail question or confirm completion. NEVER write a step line (⚙️/🖱️/✍️) — return the raw action JSON instead.'
+        }`,
       });
     }
 
@@ -459,12 +524,26 @@ export async function POST(request: NextRequest) {
           },
         });
       }
-      // Rejected action → neutralize into a graceful direct answer.
-      delete planJson.action;
-      delete planJson.sql;
-      delete planJson.display;
-      planJson.answer =
-        'I could not perform that step — it was rejected as unsafe or unknown. You can ask me to open any of our pages (Dashboard, Employees, Sites, Camps, Attendance, Documents, Accounts, Settings…) or to fill in a form for you, and I will do it step by step.';
+      // Rejected action → neutralize into a graceful direct answer. For a
+      // noc_create that failed validation the missing pieces are known — ask
+      // for them concretely instead of the generic rejection text.
+      if (planJson.action && (planJson.action as Record<string, unknown>).type === 'noc_create') {
+        const pa = planJson.action as Record<string, unknown>;
+        const hasClient = typeof pa.client === 'string' && !!pa.client.trim();
+        const empCount = Array.isArray(pa.employees)
+          ? pa.employees.filter((e) => typeof e === 'string' && !!e.trim()).length
+          : 0;
+        const need: string[] = [];
+        if (!hasClient) need.push('the client / company name');
+        if (empCount === 0) need.push('the employee names to include (one or more)');
+        planJson.answer = `I can create that NOC right away — I just need ${need.join(' and ')}. The date is optional (I will use today unless you give one), and you can paste the request exactly as it came from WhatsApp and I will read it.`;
+      } else {
+        delete planJson.action;
+        delete planJson.sql;
+        delete planJson.display;
+        planJson.answer =
+          'I could not perform that step — it was rejected as unsafe or unknown. You can ask me to open any of our pages (Dashboard, Employees, Sites, Camps, Attendance, Documents, Accounts, Settings…) or to fill in a form for you, and I will do it step by step.';
+      }
     }
 
     // ── Live-data guard ─────────────────────────────────────────────

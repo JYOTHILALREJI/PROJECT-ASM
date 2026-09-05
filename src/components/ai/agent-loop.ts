@@ -39,7 +39,10 @@ export interface AgentJob {
   sessionPatch: { title?: string; updatedAt?: string; day?: string } | null;
 }
 
-const MAX_STEPS = 18;
+// Generous cap: NOC-sized tasks run through the one-shot noc_create macro,
+// but free-form multi-step flows (open → read → click → fill → …) still need
+// headroom. The guard pauses gracefully and offers "continue" when tripped.
+const MAX_STEPS = 28;
 
 let activeJob: AgentJob | null = null;
 let version = 0;

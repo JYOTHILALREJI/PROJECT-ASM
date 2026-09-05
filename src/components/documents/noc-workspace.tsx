@@ -767,31 +767,31 @@ export function NocWorkspace({
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Client / Company Name *</span>
-                <Input value={clientName} onChange={(e) => { setClientName(e.target.value); markDirty(); }} placeholder="M/S PROSCAPE LLC" className={cn('uppercase', inputCls)} />
+                <Input value={clientName} onChange={(e) => { setClientName(e.target.value); markDirty(); }} placeholder="M/S PROSCAPE LLC" aria-label="Client Name" className={cn('uppercase', inputCls)} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Project Name *</span>
-                <Input value={projectName} onChange={(e) => { setProjectName(e.target.value); markDirty(); }} placeholder="ARABIAN RANCHES" className={cn('uppercase', inputCls)} />
+                <Input value={projectName} onChange={(e) => { setProjectName(e.target.value); markDirty(); }} placeholder="ARABIAN RANCHES" aria-label="Project Name" className={cn('uppercase', inputCls)} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">NOC Date *</span>
-                <Input value={nocDate} onChange={(e) => { setNocDate(e.target.value); markDirty(); }} placeholder="DD-MM-YYYY" className={inputCls} inputMode="numeric" />
+                <Input value={nocDate} onChange={(e) => { setNocDate(e.target.value); markDirty(); }} placeholder="DD-MM-YYYY" aria-label="NOC Date" className={inputCls} inputMode="numeric" />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Address Line 1</span>
-                <Input value={address1} onChange={(e) => { setAddress1(e.target.value); markDirty(); }} placeholder="Business Bay-Bay Square" className={cn('uppercase', inputCls)} />
+                <Input value={address1} onChange={(e) => { setAddress1(e.target.value); markDirty(); }} placeholder="Business Bay-Bay Square" aria-label="Address Line 1" className={cn('uppercase', inputCls)} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Address Line 2</span>
-                <Input value={address2} onChange={(e) => { setAddress2(e.target.value); markDirty(); }} placeholder="Building / area" className={cn('uppercase', inputCls)} />
+                <Input value={address2} onChange={(e) => { setAddress2(e.target.value); markDirty(); }} placeholder="Building / area" aria-label="Address Line 2" className={cn('uppercase', inputCls)} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">City</span>
-                <Input value={city} onChange={(e) => { setCity(e.target.value); markDirty(); }} placeholder="Dubai" className={cn('uppercase', inputCls)} />
+                <Input value={city} onChange={(e) => { setCity(e.target.value); markDirty(); }} placeholder="Dubai" aria-label="City" className={cn('uppercase', inputCls)} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Country</span>
-                <Input value={country} onChange={(e) => { setCountry(e.target.value); markDirty(); }} placeholder="UAE" className={cn('uppercase', inputCls)} />
+                <Input value={country} onChange={(e) => { setCountry(e.target.value); markDirty(); }} placeholder="UAE" aria-label="Country" className={cn('uppercase', inputCls)} />
               </div>
             </div>
 
@@ -833,15 +833,15 @@ export function NocWorkspace({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Contact Person (footer)</span>
-                <Input value={contactPerson} onChange={(e) => { setContactPerson(e.target.value); markDirty(); }} className={inputCls} />
+                <Input value={contactPerson} onChange={(e) => { setContactPerson(e.target.value); markDirty(); }} aria-label="Contact Person" className={inputCls} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Phone</span>
-                <Input value={contactPhone} onChange={(e) => { setContactPhone(e.target.value); markDirty(); }} className={inputCls} />
+                <Input value={contactPhone} onChange={(e) => { setContactPhone(e.target.value); markDirty(); }} aria-label="Phone" className={inputCls} />
               </div>
               <div className="space-y-1">
                 <span className="text-xs font-medium text-slate-400">Email</span>
-                <Input value={contactEmail} onChange={(e) => { setContactEmail(e.target.value); markDirty(); }} className={inputCls} />
+                <Input value={contactEmail} onChange={(e) => { setContactEmail(e.target.value); markDirty(); }} aria-label="Email" className={inputCls} />
               </div>
             </div>
           </div>
@@ -859,7 +859,7 @@ export function NocWorkspace({
               </Button>
             </div>
             <div className="relative">
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name / passport / employee ID…" className={inputCls} />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name / passport / employee ID…" aria-label="Search employees" className={inputCls} />
               {options.length > 0 && (
                 <div className="absolute z-30 mt-1 w-full max-h-72 overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 shadow-2xl">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/60 bg-slate-800/95 sticky top-0">
