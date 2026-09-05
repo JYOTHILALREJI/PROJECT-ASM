@@ -97,7 +97,7 @@ export const APP_UI_MAP = `APP UI MAP (single-page app — the agent can only mo
 
 [admins] Admin Management — create/edit admin users, roles, per-menu permissions and online presence. [all_logs] All Logs — full audit trail of user actions.
 
-[settings] Settings (Super Admin only) — Branding (company logo upload, glowing brand text, company name), AI Assistant (assistant name), Currency picker. Applies app-wide instantly.
+[settings] Settings (Super Admin only) — two-column layout. Branding (company logo upload, glowing brand text, company name) | Currency picker; below, the full-width AI Assistant section: identity on the left (assistant name + live previews) and Model provider on the right (API key, base URL, searchable model dropdown loaded from the provider, saved key shown masked only). Applies app-wide instantly.
 
 [profile] Profile — the signed-in user's own profile.
 

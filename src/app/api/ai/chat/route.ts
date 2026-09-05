@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { callLLM, extractJsonObject, type LlmMessage } from '@/lib/ai-client';
+import { callLLM, extractJsonObject, credentialsFromMap, type LlmMessage } from '@/lib/ai-client';
 import { getDbSchemaDoc } from '@/lib/db-schema-doc';
 import { APP_UI_MAP, AGENT_VIEWS, VIEW_LABELS } from '@/lib/app-ui-map';
 
@@ -54,7 +54,26 @@ async function runReadonlyQuery(sql: string): Promise<Record<string, unknown>[]>
   // WITH…SELECT inside a subquery is legal in SQLite; ORDER BY is preserved.
   const wrapped = `SELECT * FROM (${sql}) LIMIT ${ROW_CAP + 1}`;
   const rows = (await db.$queryRawUnsafe(wrapped)) as Record<string, unknown>[];
-  return rows.slice(0, ROW_CAP);
+  return redactSecrets(rows.slice(0, ROW_CAP));
+}
+
+/**
+ * Secrets never reach the model, not even accidentally via SELECT * FROM
+ * AppSetting: the saved model-provider API key is redacted before the rows
+ * are serialized into the planner/responder observations.
+ */
+function redactSecrets(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  return rows.map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const r = { ...row } as Record<string, unknown>;
+    if (String(r.key ?? '').toLowerCase() === 'aiapikey') {
+      r.value = '[redacted — the API key is server-side only]';
+    }
+    for (const k of Object.keys(r)) {
+      if (k.toLowerCase().includes('apikey')) r[k] = '[redacted]';
+    }
+    return r;
+  });
 }
 
 // ── Agent action validation ──────────────────────────────────────────────────
@@ -190,6 +209,9 @@ function plannerSystemPrompt(
     '        "SELECT employeeId, fullName, position, currentSite FROM Employee WHERE isSupervisor = 1 AND deletedAt IS NULL LIMIT 200"]',
     '     (people flags are boolean columns: isSupervisor / isTeamLeader — do NOT filter by position text).',
     '   - Always include LIMIT (max 200) on row lists; aggregates need none. Prefer WHERE deletedAt IS NULL.',
+    '   - LIVE DATA RULE: even if the same (or a similar) question was answered earlier in this',
+    '     conversation, NEVER reproduce tables or numbers from history — history can be stale. Reply with',
+    '     {"sql":…} again and query the database fresh every time.',
     '   - Include human-readable names/labels — never bare IDs alone.',
     '   - COUNT(*) after a JOIN counts matched pairs, not entities: use separate queries or COUNT(DISTINCT …).',
     '   - Dates are ISO datetime strings or YYYY-MM-DD text; use date(col) when needed. Never guess columns.',
@@ -268,6 +290,9 @@ function responderSystemPrompt(
     '    (or that the lookup failed) — never fabricate numbers.',
     '  • Round money to 2 decimals with the currency code; big counts may be rounded sensibly.',
     '  • If the observation was truncated, mention that more rows exist.',
+    '  • LARGE RESULT RULE: never dump hundreds of rows into chat. When a result has more than 25 rows,',
+    '    show the first 25 (or the most important 25, e.g. top by amount/date) in the table and end with',
+    '    a line like "— showing 25 of 187; ask me to narrow it down (by site, month or name)".',
     '  • Greetings/small-talk (no observation): reply warmly in first person as the company\'s companion, 1-3 sentences.',
   ].join('\n');
 }
@@ -326,7 +351,7 @@ export async function POST(request: NextRequest) {
     const [schemaDoc, settingsRows] = await Promise.all([
       getDbSchemaDoc(),
       db.appSetting.findMany({
-        where: { key: { in: ['currency', 'aiName', 'companyName', 'brandName'] } },
+        where: { key: { in: ['currency', 'aiName', 'companyName', 'brandName', 'aiApiKey', 'aiBaseUrl', 'aiModel'] } },
         select: { key: true, value: true },
       }),
     ]);
@@ -335,6 +360,9 @@ export async function POST(request: NextRequest) {
     const currency = settingsMap.currency || 'AED';
     const assistantName = settingsMap.aiName || 'Nova';
     const companyName = settingsMap.companyName || 'Arabian Shield Manpower';
+    // Model provider saved by the super admin in Settings → AI Assistant.
+    // null → env credentials, then the built-in provider.
+    const aiCreds = credentialsFromMap(settingsMap);
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date());
 
     // ── Pass 1: planner ────────────────────────────────────────────────
@@ -375,7 +403,7 @@ export async function POST(request: NextRequest) {
       ...history,
       ...contextMessages,
     ];
-    const planRaw = await callLLM(plannerMessages, { temperature: 0 });
+    const planRaw = await callLLM(plannerMessages, { temperature: 0 }, aiCreds);
 
     // Agent self-heal: mid-task, weak models sometimes emit a step line as
     // their answer instead of the action JSON. One deterministic retry.
@@ -395,7 +423,8 @@ export async function POST(request: NextRequest) {
               'That was a step LINE, not the action JSON. Reply again with ONLY the JSON object with the "action" key for your next step — nothing else.',
           },
         ],
-        { temperature: 0 }
+        { temperature: 0 },
+        aiCreds
       );
       const retryPlan = extractJsonObject(retryRaw);
       if (retryPlan !== null && retryPlan.action !== undefined) planJson = retryPlan;
@@ -436,6 +465,39 @@ export async function POST(request: NextRequest) {
       delete planJson.display;
       planJson.answer =
         'I could not perform that step — it was rejected as unsafe or unknown. You can ask me to open any of our pages (Dashboard, Employees, Sites, Camps, Attendance, Documents, Accounts, Settings…) or to fill in a form for you, and I will do it step by step.';
+    }
+
+    // ── Live-data guard ─────────────────────────────────────────────
+    // Data questions must be answered from FRESH SQL, never from remembered
+    // history. If the planner tried to hand back a prose answer (possibly a
+    // table copied from an earlier turn) for an obvious data question, give
+    // it one stern retry demanding queries. Weak/self-hosted models need
+    // this deterministic guard — the prompt alone is not always enough.
+    const dataQuestionRe =
+      /\b(how many|how much|count (of|all)|list (all|the|me)|show (all|me all|me the)|which (sites|employees|camps|admins)|who (are|is) (our|the))\b/i;
+    if (
+      planJson !== null &&
+      content &&
+      !agentObservation &&
+      typeof planJson.answer === 'string' &&
+      planJson.answer.trim() &&
+      planJson.sql === undefined &&
+      dataQuestionRe.test(content)
+    ) {
+      const retryRaw = await callLLM(
+        [
+          ...plannerMessages,
+          {
+            role: 'user',
+            content:
+              'That was prose, but this is a LIVE DATA question — it must be answered from fresh database queries, NEVER from numbers or tables said earlier in this conversation. Reply again with ONLY {"sql":"…"} or {"sql":["…","…"],"display":"…"} against the listed tables (keep the named-breakdown rule). Only if the database genuinely cannot answer it, keep {"answer":…} with no remembered figures.',
+          },
+        ],
+        { temperature: 0 },
+        aiCreds
+      );
+      const retryPlan = extractJsonObject(retryRaw);
+      if (retryPlan !== null && retryPlan.sql !== undefined) planJson = retryPlan;
     }
 
     let sql: string | null = null;
@@ -499,7 +561,8 @@ export async function POST(request: NextRequest) {
                       content: `Your SQL failed.\nFailed SQL: ${truncate(statement, 800)}\nError: ${truncate(firstError, 400)}\nReply again with ONLY a corrected JSON object {"sql":"…"} using EXACTLY the tables and columns listed in the schema. No such-column guesses.`,
                     },
                   ],
-                  { temperature: 0 }
+                  { temperature: 0 },
+                  aiCreds
                 );
                 const retryPlan = extractJsonObject(retryRaw);
                 const retrySqlRaw =
@@ -550,7 +613,7 @@ export async function POST(request: NextRequest) {
           }Answer the user's question now.`,
         },
       ];
-      answerText = await callLLM(responderMessages, { temperature: 0.3 });
+      answerText = await callLLM(responderMessages, { temperature: 0.3 }, aiCreds);
     }
 
     const assistantMessage = await db.aiChatMessage.create({

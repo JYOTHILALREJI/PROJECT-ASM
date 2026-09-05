@@ -11,7 +11,20 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   brandName: 'ASM', // short glowing brand text shown in the sidebar / login
   brandLogo: '', // data-URL image; empty → falls back to the bundled /logo_asm.png
   aiName: 'Nova', // cute name of the AI assistant (chat header, greetings, replies)
+  // Model provider (bring your own LLM — any OpenAI-compatible API). An empty
+  // aiApiKey means "use the built-in provider". The raw key NEVER leaves the
+  // server: GET responses only ever contain aiApiKeyMasked.
+  aiApiKey: '',
+  aiBaseUrl: '', // e.g. https://api.openai.com/v1 (empty → provider default)
+  aiModel: '', // e.g. gpt-4o-mini (empty → provider default)
 };
+
+/** Mask an API key for display: keeps the last 4 chars so the owner can tell keys apart. */
+function maskApiKey(key: string): string {
+  if (!key) return '';
+  if (key.length <= 8) return '••••••••';
+  return `••••••••${key.slice(-4)}`;
+}
 
 // Whitelist: only these keys can ever be written via the API.
 const ALLOWED_KEYS = new Set(Object.keys(SETTING_DEFAULTS));
@@ -47,6 +60,18 @@ function validateValue(key: string, value: string): string | null {
     if (value.trim().length === 0) return 'Assistant name cannot be empty';
     if (value.length > 24) return 'Assistant name is too long (max 24 characters)';
   }
+  if (key === 'aiApiKey' && value.length > 300) {
+    return 'API key is too long';
+  }
+  if (key === 'aiBaseUrl') {
+    if (value.length > 200) return 'Base URL is too long (max 200 characters)';
+    if (value && !/^https?:\/\//i.test(value)) {
+      return 'Base URL must start with http:// or https://';
+    }
+  }
+  if (key === 'aiModel' && value.length > 120) {
+    return 'Model name is too long (max 120 characters)';
+  }
   return null;
 }
 
@@ -63,7 +88,12 @@ async function loadSettings(): Promise<Record<string, string>> {
 export async function GET() {
   try {
     const settings = await loadSettings();
-    return NextResponse.json({ success: true, data: { settings } });
+    // The raw API key is server-only — clients always receive the masked form.
+    const { aiApiKey, ...clientSettings } = settings;
+    return NextResponse.json({
+      success: true,
+      data: { settings: { ...clientSettings, aiApiKeyMasked: maskApiKey(aiApiKey) } },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
@@ -122,8 +152,9 @@ export async function PUT(request: NextRequest) {
         );
       }
       // brandLogo is a data-URL — never trim it (whitespace is significant in
-      // base64). Everything else is trimmed like before.
-      const value = key === 'brandLogo'
+      // base64). The API key keeps inner whitespace too (keys are exact).
+      // Everything else is trimmed like before.
+      const value = key === 'brandLogo' || key === 'aiApiKey'
         ? String(settings[key] ?? '')
         : String(settings[key] ?? '').trim();
       const validationError = validateValue(key, value);

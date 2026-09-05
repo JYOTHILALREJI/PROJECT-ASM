@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -14,6 +14,11 @@ import {
   Upload,
   Trash2,
   ImageIcon,
+  KeyRound,
+  Globe,
+  Cpu,
+  ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,7 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
-import { useSettingsStore } from '@/store/settings-store';
+import { useSettingsStore, type AppSettings } from '@/store/settings-store';
 import { CURRENCIES, formatMoney, getCurrencyDef } from '@/lib/currency';
 import { RoboFace } from '@/components/ai/robo-face';
 
@@ -75,7 +80,20 @@ export function SettingsPage() {
     brandLogo: string;
     currency: string;
     aiName: string;
+    aiBaseUrl: string;
+    aiModel: string;
   } | null>(null);
+  // Model-provider key handling: keyInput holds a NEWLY TYPED key (the saved
+  // one is never sent back to the client — only a mask). keyRemoved marks an
+  // explicit "remove the saved key" action. On Apply:
+  //   keyInput non-empty → save that key; else keyRemoved → clear; else omit.
+  const [keyInput, setKeyInput] = useState('');
+  const [keyRemoved, setKeyRemoved] = useState(false);
+  // Searchable model dropdown fed from the provider's /models endpoint.
+  const [models, setModels] = useState<string[]>([]);
+  const [modelsState, setModelsState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const [modelsError, setModelsError] = useState('');
+  const [modelsOpen, setModelsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,22 +107,30 @@ export function SettingsPage() {
   const brandLogo = draft?.brandLogo ?? settings.brandLogo;
   const currency = draft?.currency ?? settings.currency;
   const aiName = draft?.aiName ?? settings.aiName;
-  const patchDraft = (patch: Partial<{ companyName: string; brandName: string; brandLogo: string; currency: string; aiName: string }>) =>
+  const aiBaseUrl = draft?.aiBaseUrl ?? settings.aiBaseUrl;
+  const aiModel = draft?.aiModel ?? settings.aiModel;
+  const patchDraft = (patch: Partial<{ companyName: string; brandName: string; brandLogo: string; currency: string; aiName: string; aiBaseUrl: string; aiModel: string }>) =>
     setDraft({
       companyName: patch.companyName ?? companyName,
       brandName: patch.brandName ?? brandName,
       brandLogo: patch.brandLogo ?? brandLogo,
       currency: patch.currency ?? currency,
       aiName: patch.aiName ?? aiName,
+      aiBaseUrl: patch.aiBaseUrl ?? aiBaseUrl,
+      aiModel: patch.aiModel ?? aiModel,
     });
 
+  const keyDirty = keyInput.trim() !== '' || keyRemoved;
   const dirty =
     draft !== null &&
     (companyName !== settings.companyName ||
       brandName !== settings.brandName ||
       brandLogo !== settings.brandLogo ||
       currency !== settings.currency ||
-      aiName !== settings.aiName);
+      aiName !== settings.aiName ||
+      aiBaseUrl !== settings.aiBaseUrl ||
+      aiModel !== settings.aiModel ||
+      keyDirty);
 
   const handleLogoFile = async (file: File | undefined | null) => {
     if (!file) return;
@@ -142,14 +168,34 @@ export function SettingsPage() {
       toast({ title: 'Validation Error', description: 'Assistant name cannot be empty.', variant: 'destructive' });
       return;
     }
+    if (aiBaseUrl.trim() && !/^https?:\/\//i.test(aiBaseUrl.trim())) {
+      toast({ title: 'Validation Error', description: 'Base URL must start with http:// or https://', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
-    const result = await updateSettings(
-      { companyName: companyName.trim(), brandName: brandName.trim(), brandLogo, currency, aiName: aiName.trim() },
-      user.id
-    );
+    const payload: Partial<Omit<AppSettings, 'aiApiKeyMasked'>> & { aiApiKey?: string } = {
+      companyName: companyName.trim(),
+      brandName: brandName.trim(),
+      brandLogo,
+      currency,
+      aiName: aiName.trim(),
+      aiBaseUrl: aiBaseUrl.trim(),
+      aiModel: aiModel.trim(),
+    };
+    // Only touch the saved key when the user typed a new one or removed it —
+    // the masked value from GET must never be written back.
+    if (keyInput.trim()) payload.aiApiKey = keyInput.trim();
+    else if (keyRemoved) payload.aiApiKey = '';
+    const result = await updateSettings(payload, user.id);
     setSaving(false);
     if (result.success) {
       setDraft(null); // re-sync the form with the persisted settings
+      setKeyInput('');
+      setKeyRemoved(false);
+      setModelsState('idle');
+      setModels([]);
+      setModelsOpen(false);
+      setModelsError('');
       toast({
         title: 'Settings Applied',
         description: 'Your changes are now live across every page of the app.',
@@ -159,6 +205,48 @@ export function SettingsPage() {
     }
   };
 
+  // Fetch the model list from the provider so the user can pick a model from
+  // a searchable dropdown. Uses the key/base URL typed right now when present
+  // (the saved key is masked, so it is re-entered to test a replacement).
+  const handleLoadModels = async () => {
+    if (!user?.id) return;
+    setModelsState('loading');
+    setModelsError('');
+    try {
+      const body: Record<string, string> = { userId: user.id };
+      if (keyInput.trim()) body.apiKey = keyInput.trim();
+      if (aiBaseUrl.trim()) body.baseUrl = aiBaseUrl.trim();
+      const res = await fetch('/api/ai/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data?.models)) {
+        setModels(data.data.models as string[]);
+        setModelsState('loaded');
+        setModelsOpen(true);
+        if (data.data.models.length === 0) {
+          setModelsError('The provider returned an empty model list.');
+        }
+      } else {
+        setModels([]);
+        setModelsState('error');
+        setModelsError(data.error || 'Could not load the model list.');
+      }
+    } catch {
+      setModelsState('error');
+      setModelsError('Could not reach the server. Please try again.');
+    }
+  };
+
+  const filteredModels = useMemo(() => {
+    const q = aiModel.trim().toLowerCase();
+    const list = q ? models.filter((m) => m.toLowerCase().includes(q)) : models;
+    return list.slice(0, 300);
+  }, [models, aiModel]);
+  const keyActive = keyInput.trim() !== '' || (!!settings.aiApiKeyMasked && !keyRemoved);
+
   const previewDef = getCurrencyDef(currency || settings.currency);
   const previewLogo = brandLogo || '/logo_asm.png';
   const previewBrand = brandName || 'ASM';
@@ -166,7 +254,7 @@ export function SettingsPage() {
   const previewAiName = aiName || 'Nova';
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl">
+    <div className="flex w-full max-w-6xl flex-col gap-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -199,7 +287,7 @@ export function SettingsPage() {
           <Skeleton className="h-56 w-full rounded-xl bg-slate-700/50" />
         </div>
       ) : (
-        <>
+        <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
           {/* Branding */}
           <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-5">
             <div className="flex items-center gap-2 mb-1">
@@ -319,60 +407,6 @@ export function SettingsPage() {
             </div>
           </section>
 
-          {/* AI Assistant */}
-          <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-5">
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="h-4 w-4 text-cyan-400" />
-              <h3 className="text-base font-semibold text-white">AI Assistant</h3>
-            </div>
-            <p className="text-xs text-slate-500 mb-4">
-              Give your floating robot companion a name — it appears in the chat header, greetings and every reply.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-5">
-              {/* Live robo preview */}
-              <div className="flex flex-col items-center gap-2 shrink-0 sm:w-24">
-                <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60">
-                  <RoboFace size={64} status="idle" />
-                </div>
-                <p className="text-[10px] text-slate-500">Live preview</p>
-              </div>
-
-              <div className="flex flex-1 flex-col gap-4 min-w-0">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="aiName" className="text-slate-300">
-                    Assistant name
-                  </Label>
-                  <Input
-                    id="aiName"
-                    value={aiName}
-                    onChange={(e) => patchDraft({ aiName: e.target.value })}
-                    maxLength={24}
-                    placeholder="Nova"
-                    className="bg-slate-900 border-slate-700 text-white text-sm"
-                  />
-                  <p className="text-xs text-slate-500">
-                    Something cute and personal, e.g. “Nova”, “Robi” or “Zippy”. Max 24 characters.
-                  </p>
-                </div>
-
-                {/* Chat preview */}
-                <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Chat preview</p>
-                  <div className="flex items-start gap-2">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/15">
-                      <RoboFace size={22} status="idle" />
-                    </div>
-                    <div className="rounded-2xl rounded-bl-md border border-slate-600/60 bg-slate-700/50 px-3 py-1.5 text-xs text-slate-100">
-                      Hi, I&apos;m <span className="font-semibold text-white">{previewAiName}</span> 👋 — we have
-                      everything about the workforce covered. Ask me anything!
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
           {/* Currency */}
           <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-5">
             <div className="flex items-center gap-2 mb-1">
@@ -421,7 +455,240 @@ export function SettingsPage() {
               </div>
             </div>
           </section>
-        </>
+
+          {/* AI Assistant — full width: identity on the left, model provider on the right */}
+          <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-5 xl:col-span-2">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="h-4 w-4 text-cyan-400" />
+              <h3 className="text-base font-semibold text-white">AI Assistant</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Give your floating robot companion a name — it appears in the chat header, greetings and every reply.
+            </p>
+
+            <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+              {/* Identity (left column) */}
+              <div className="flex flex-col sm:flex-row gap-5">
+                {/* Live robo preview */}
+                <div className="flex flex-col items-center gap-2 shrink-0 sm:w-24">
+                  <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60">
+                    <RoboFace size={64} status="idle" />
+                  </div>
+                  <p className="text-[10px] text-slate-500">Live preview</p>
+                </div>
+
+                <div className="flex flex-1 flex-col gap-4 min-w-0">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="aiName" className="text-slate-300">
+                      Assistant name
+                    </Label>
+                    <Input
+                      id="aiName"
+                      value={aiName}
+                      onChange={(e) => patchDraft({ aiName: e.target.value })}
+                      maxLength={24}
+                      placeholder="Nova"
+                      className="bg-slate-900 border-slate-700 text-white text-sm"
+                    />
+                    <p className="text-xs text-slate-500">
+                      Something cute and personal, e.g. “Nova”, “Robi” or “Zippy”. Max 24 characters.
+                    </p>
+                  </div>
+
+                  {/* Chat preview */}
+                  <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Chat preview</p>
+                    <div className="flex items-start gap-2">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/15">
+                        <RoboFace size={22} status="idle" />
+                      </div>
+                      <div className="rounded-2xl rounded-bl-md border border-slate-600/60 bg-slate-700/50 px-3 py-1.5 text-xs text-slate-100">
+                        Hi, I&apos;m <span className="font-semibold text-white">{previewAiName}</span> 👋 — we have
+                        everything about the workforce covered. Ask me anything!
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Model provider (right column) */}
+              <div className="flex min-w-0 flex-col gap-4 rounded-xl border border-slate-700/50 bg-slate-900/40 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-cyan-400" />
+                  <h4 className="text-sm font-semibold text-white">Model provider</h4>
+                  <Badge variant="outline" className="border-slate-600 text-[10px] text-slate-400">
+                    bring your own LLM
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Connect any OpenAI-compatible provider (OpenAI, Groq, OpenRouter, DeepSeek, Ollama, LM Studio…).
+                  While no key is saved, the assistant uses the built-in provider.
+                </p>
+
+                {/* API key */}
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="aiApiKey" className="text-slate-300">API key</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="aiApiKey"
+                      type="password"
+                      autoComplete="off"
+                      value={keyInput}
+                      onChange={(e) => {
+                        setKeyInput(e.target.value);
+                        if (e.target.value) setKeyRemoved(false);
+                      }}
+                      placeholder={
+                        settings.aiApiKeyMasked && !keyRemoved
+                          ? `Saved ${settings.aiApiKeyMasked} — type to replace`
+                          : 'Paste your API key'
+                      }
+                      className="bg-slate-900 border-slate-700 text-white text-sm"
+                    />
+                    {settings.aiApiKeyMasked && !keyInput && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 shrink-0 gap-1 px-2 text-[11px] text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                        onClick={() => setKeyRemoved(true)}
+                        title="Remove the saved key — the assistant falls back to the built-in provider"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Remove
+                      </Button>
+                    )}
+                    {keyRemoved && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 shrink-0 gap-1 px-2 text-[11px] text-amber-400 hover:text-amber-300"
+                        onClick={() => setKeyRemoved(false)}
+                        title="Keep the saved key after all"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" /> Keep saved key
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Stored server-side only — shown back to you masked ({settings.aiApiKeyMasked || 'not saved yet'}).
+                  </p>
+                </div>
+
+                {/* Base URL */}
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="aiBaseUrl" className="text-slate-300">
+                    Base URL <span className="text-slate-500">(optional)</span>
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-4 w-4 shrink-0 text-slate-500" />
+                    <Input
+                      id="aiBaseUrl"
+                      value={aiBaseUrl}
+                      onChange={(e) => patchDraft({ aiBaseUrl: e.target.value })}
+                      maxLength={200}
+                      placeholder="https://api.openai.com/v1"
+                      className="bg-slate-900 border-slate-700 text-white text-sm"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500">Empty = OpenAI default endpoint.</p>
+                </div>
+
+                {/* Model — searchable dropdown fed from the provider */}
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="aiModel" className="text-slate-300">Model</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="aiModel"
+                      value={aiModel}
+                      onChange={(e) => {
+                        patchDraft({ aiModel: e.target.value });
+                        if (models.length > 0) setModelsOpen(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setModelsOpen(false);
+                      }}
+                      maxLength={120}
+                      autoComplete="off"
+                      placeholder="e.g. gpt-4o-mini — or search the list"
+                      className="bg-slate-900 border-slate-700 text-white text-sm"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0 gap-1.5 border-slate-600 bg-slate-800 text-xs text-slate-200 hover:bg-slate-700"
+                      onClick={() => void handleLoadModels()}
+                      disabled={modelsState === 'loading'}
+                    >
+                      {modelsState === 'loading' ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      Load models
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 shrink-0 px-2 text-slate-400 hover:text-white"
+                      onClick={() => setModelsOpen((o) => !o)}
+                      disabled={models.length === 0}
+                      title={models.length > 0 ? 'Show the model list' : 'Load models first'}
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {modelsState === 'error' && (
+                    <p className="text-xs text-red-400">{modelsError}</p>
+                  )}
+                  {modelsOpen && models.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl shadow-black/40">
+                      {filteredModels.length === 0 ? (
+                        <p className="px-3 py-2.5 text-xs text-slate-500">
+                          No models match “{aiModel}” — you can still Apply this name if you know it exists.
+                        </p>
+                      ) : (
+                        filteredModels.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => {
+                              patchDraft({ aiModel: m });
+                              setModelsOpen(false);
+                            }}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors',
+                              m === aiModel ? 'bg-blue-500/15 text-blue-200' : 'text-slate-200 hover:bg-slate-800'
+                            )}
+                          >
+                            <span className="truncate font-mono text-xs">{m}</span>
+                            {m === aiModel && <Check className="h-3.5 w-3.5 shrink-0" />}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500">
+                    {models.length > 0
+                      ? `${models.length} models loaded — type above to search, click to select.`
+                      : 'Load models from the provider with the pasted key, or type a model name manually.'}
+                  </p>
+                </div>
+
+                {/* Effective provider status */}
+                <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
+                  <Cpu className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                  {keyActive ? (
+                    <p className="text-xs text-slate-300">
+                      Requests will use <span className="font-semibold text-white">{aiModel.trim() || 'the provider default model'}</span>
+                      {' '}via <span className="font-mono text-slate-400">{aiBaseUrl.trim() || 'https://api.openai.com/v1'}</span>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-400">No key saved — the assistant uses the built-in provider.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
 
-    if (type && ['request', 'warning', 'fine'].includes(type)) {
+    if (type && ['request', 'warning', 'fine', 'agent'].includes(type)) {
       where.type = type;
     }
 
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validTypes = ['request', 'warning', 'fine'];
+    const validTypes = ['request', 'warning', 'fine', 'agent'];
     const notificationType = type || 'request';
 
     if (!validTypes.includes(notificationType)) {
@@ -115,7 +115,7 @@ export async function PUT(request: NextRequest) {
       // Mark all as read, optionally filtered by type
       const where: Record<string, unknown> = { read: false };
 
-      if (type && ['request', 'warning', 'fine'].includes(type)) {
+      if (type && ['request', 'warning', 'fine', 'agent'].includes(type)) {
         where.type = type;
       }
 

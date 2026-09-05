@@ -13,6 +13,7 @@ import {
   Search as SearchIcon,
   Loader2,
   UserCircle2,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -69,7 +70,7 @@ interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'request' | 'warning' | 'fine';
+  type: 'request' | 'warning' | 'fine' | 'agent';
   read: boolean;
   createdAt: string;
   updatedAt: string;
@@ -161,6 +162,12 @@ function EmptyState({ icon: Icon, message }: { icon: React.ElementType; message:
 
 /* ───────── Feed notification type visuals ───────── */
 const NOTIF_TYPE_META: Record<string, { icon: React.ElementType; avatarClass: string; badgeClass: string; label: string }> = {
+  agent: {
+    icon: Sparkles,
+    avatarClass: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+    badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+    label: 'AI Assistant',
+  },
   warning: {
     icon: AlertTriangle,
     avatarClass: 'bg-amber-500/15 text-amber-400 border-amber-500/30',

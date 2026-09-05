@@ -1,16 +1,21 @@
 // AI Assistant LLM client.
 //
 // Provider selection (in priority order):
-//   1. Any OpenAI-compatible API — fully driven by environment variables so the
-//      owner can plug in ANY model they like (OpenAI, Azure OpenAI, Groq,
-//      OpenRouter, Ollama, LM Studio, DeepSeek, Gemini-compat, …):
+//   1. Model provider saved in Settings (AppSetting.aiApiKey / aiBaseUrl /
+//      aiModel — configured by the super admin in Settings → AI Assistant).
+//      callLLM receives these pre-resolved as `creds` from the API routes.
+//   2. Any OpenAI-compatible API via environment variables (same behaviour as
+//      (1), but owner-level env instead of the Settings UI):
 //        AI_API_BASE_URL  e.g. https://api.openai.com/v1   (optional, defaults to OpenAI)
 //        AI_API_TOKEN     the bearer token (REQUIRED to activate this path)
 //        AI_MODEL         e.g. gpt-4o-mini                  (optional)
-//   2. Built-in fallback (z-ai-web-dev-sdk) used while AI_API_TOKEN is left at
-//      its placeholder value, so the assistant works out of the box.
+//   3. Built-in fallback (z-ai-web-dev-sdk) used while no real key is saved
+//      anywhere, so the assistant works out of the box.
 //
-// The token lives ONLY in env — it is never exposed to the client bundle.
+// The key lives ONLY on the server (AppSetting row / env) — it is never
+// exposed to the client bundle, and /api/settings GET returns only a mask.
+
+import { db } from '@/lib/db';
 
 const PLACEHOLDER_TOKENS = new Set([
   '',
@@ -32,6 +37,39 @@ export function envAIConfigured(): boolean {
   return !PLACEHOLDER_TOKENS.has(token);
 }
 
+/** Resolved model-provider credentials (Settings → AI Assistant → Model provider). */
+export interface AiCredentials {
+  apiKey: string;
+  baseUrl: string; // no trailing slash; defaults to OpenAI when empty
+  model: string; // defaults to gpt-4o-mini when empty
+}
+
+/** Build credentials from an already-loaded key→value settings map (no extra DB hit). */
+export function credentialsFromMap(map: Record<string, string>): AiCredentials | null {
+  const apiKey = (map.aiApiKey || '').trim();
+  if (!apiKey || PLACEHOLDER_TOKENS.has(apiKey)) return null;
+  return {
+    apiKey,
+    baseUrl: (map.aiBaseUrl || 'https://api.openai.com/v1').trim().replace(/\/+$/, ''),
+    model: (map.aiModel || 'gpt-4o-mini').trim() || 'gpt-4o-mini',
+  };
+}
+
+/**
+ * Load the super-admin-saved model provider from AppSetting rows.
+ * Returns null when no real key is saved — callers then fall back to env /
+ * the built-in provider. Server-side only (touches the database).
+ */
+export async function resolveSettingsAiCredentials(): Promise<AiCredentials | null> {
+  const rows = await db.appSetting.findMany({
+    where: { key: { in: ['aiApiKey', 'aiBaseUrl', 'aiModel'] } },
+    select: { key: true, value: true },
+  });
+  const map: Record<string, string> = {};
+  for (const row of rows) map[row.key] = row.value;
+  return credentialsFromMap(map);
+}
+
 function envBase(): string {
   const base = (process.env.AI_API_BASE_URL || 'https://api.openai.com/v1').trim();
   return base.replace(/\/+$/, ''); // strip trailing slashes
@@ -44,8 +82,12 @@ function envModel(): string {
 /** Single non-streaming chat completion against the configured provider. */
 export async function callLLM(
   messages: LlmMessage[],
-  opts?: { temperature?: number; maxTokens?: number }
+  opts?: { temperature?: number; maxTokens?: number },
+  creds?: AiCredentials | null
 ): Promise<string> {
+  if (creds && creds.apiKey) {
+    return callOpenAICompatible(messages, opts, creds);
+  }
   if (envAIConfigured()) {
     return callOpenAICompatible(messages, opts);
   }
@@ -54,10 +96,13 @@ export async function callLLM(
 
 async function callOpenAICompatible(
   messages: LlmMessage[],
-  opts?: { temperature?: number; maxTokens?: number }
+  opts?: { temperature?: number; maxTokens?: number },
+  creds?: AiCredentials
 ): Promise<string> {
-  const token = (process.env.AI_API_TOKEN || '').trim();
-  const url = `${envBase()}/chat/completions`;
+  const token = creds?.apiKey || (process.env.AI_API_TOKEN || '').trim();
+  const baseUrl = (creds?.baseUrl || envBase()).replace(/\/+$/, '');
+  const model = creds?.model || envModel();
+  const url = `${baseUrl}/chat/completions`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
   try {
@@ -68,7 +113,7 @@ async function callOpenAICompatible(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        model: envModel(),
+        model,
         messages,
         temperature: opts?.temperature ?? 0.2,
         max_tokens: opts?.maxTokens ?? 1500,
@@ -78,7 +123,7 @@ async function callOpenAICompatible(
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`AI provider returned ${res.status} (${envModel()}). ${text.slice(0, 300)}`);
+      throw new Error(`AI provider returned ${res.status} (${model}). ${text.slice(0, 300)}`);
     }
     const data = (await res.json()) as {
       choices?: Array<{ message?: { content?: string } }>;

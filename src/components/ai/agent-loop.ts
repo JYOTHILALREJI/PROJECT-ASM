@@ -14,6 +14,7 @@
 //     the visible transcript (deduped by id against server-persisted copies).
 
 import { useAppStore } from '@/store/app-store';
+import { useSettingsStore } from '@/store/settings-store';
 import { executeAgentAction, type AgentAction } from '@/components/ai/agent-actions';
 
 export interface AgentLoopMessage {
@@ -73,6 +74,28 @@ export function isJobRunning(sessionId: string): boolean {
 function push(job: AgentJob, msg: AgentLoopMessage): void {
   job.messages.push(msg);
   emit();
+}
+
+// Notification-center integration: when the agent actually DID work (navigated,
+// clicked, filled forms), the finished/paused task also lands in the user's
+// notification feed — so it is visible even if the chat panel was folded.
+function notifyCompletion(job: AgentJob, paused: boolean): void {
+  if (job.agentSteps === 0) return; // plain chat replies never create feed noise
+  const last = [...job.messages].reverse().find((m) => m.role === 'assistant' && !m.error);
+  const preview =
+    (last?.content || '').replace(/[#*`>|]/g, '').trim().slice(0, 140) ||
+    (paused ? 'The task is partially done.' : 'Open the chat to read the result.');
+  const assistantName = useSettingsStore.getState().settings.aiName || 'Nova';
+  void fetch('/api/notifications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: job.userId,
+      title: paused ? `${assistantName} paused your task` : `${assistantName} finished your task`,
+      message: preview,
+      type: 'agent',
+    }),
+  }).catch(() => undefined); // never break the chat over a feed failure
 }
 
 export function startAgentJob(
@@ -162,6 +185,7 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
         metaRows: d.meta?.rowsFetched || 0,
       });
       job.status = 'done';
+      notifyCompletion(job, false);
       emit();
       return;
     }
@@ -174,6 +198,7 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
       createdAt: new Date().toISOString(),
     });
     job.status = 'done';
+    notifyCompletion(job, true);
     emit();
   } catch {
     push(job, {

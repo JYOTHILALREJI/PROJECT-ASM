@@ -14,6 +14,12 @@ export interface AppSettings {
   brandLogo: string;
   /** Cute name of the AI assistant (chat header, greetings and replies). */
   aiName: string;
+  /** Model provider base URL (any OpenAI-compatible API); empty → built-in default. */
+  aiBaseUrl: string;
+  /** Model id used for planner/responder calls; empty → provider default. */
+  aiModel: string;
+  /** MASKED API key (last 4 chars only) — the raw key never leaves the server. */
+  aiApiKeyMasked: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -22,6 +28,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   brandName: 'ASM',
   brandLogo: '',
   aiName: 'Nova',
+  aiBaseUrl: '',
+  aiModel: '',
+  aiApiKeyMasked: '',
 };
 
 interface SettingsState {
@@ -30,8 +39,13 @@ interface SettingsState {
   loading: boolean;
   /** Load settings from the server (no-op once loaded, unless force). */
   fetchSettings: (force?: boolean) => Promise<void>;
-  /** Super-admin only: persist new settings and apply them instantly. */
-  updateSettings: (patch: Partial<AppSettings>, userId: string) => Promise<{ success: boolean; error?: string }>;
+  /** Super-admin only: persist new settings and apply them instantly.
+   *  aiApiKey is special: a non-empty value (re)sets the saved key, an empty
+   *  string clears it, omitting it leaves the saved key untouched. */
+  updateSettings: (
+    patch: Partial<Omit<AppSettings, 'aiApiKeyMasked'>> & { aiApiKey?: string },
+    userId: string
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({

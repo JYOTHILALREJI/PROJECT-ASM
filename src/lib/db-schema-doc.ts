@@ -41,7 +41,7 @@ const TABLE_HINTS: Record<string, string> = {
   TradeRate: 'Hourly rates per trade (trade, rate).',
   EmployeeTrade: 'Trade assignments per employee (junction Employee↔TradeRate).',
   BaseRate: 'Base standard/premium hourly rates used by the allocation engine.',
-  AppSetting: 'App-wide settings key/value store: currency, companyName, brandName, brandLogo, aiName (the AI assistant name).',
+  AppSetting: 'App-wide settings key/value store: currency, companyName, brandName, brandLogo, aiName (the AI assistant name), aiBaseUrl/aiModel/aiApiKey (model provider). aiApiKey is a SECRET — never SELECT it and never include it in answers; it is redacted automatically anyway.',
   Notification: 'In-app notifications for admins (type: request|warning|fine, read flag).',
   ActivityLog: 'Audit trail of user actions (action, entity, userId, timestamp).',
   AttendanceShare: 'Share links for attendance sheets (token, expiry).',
