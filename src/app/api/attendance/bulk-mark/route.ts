@@ -72,16 +72,47 @@ export async function POST(request: NextRequest) {
       bulkSiteName = siteRow.name;
     }
 
-    // Build the where clause: either specific employeeIds or all active employees
+    // Build the where clause: either specific employeeIds or all active employees.
+    //
+    // MOVED-OUT EMPLOYEES ARE NEVER BULK-MARKED (server-enforced):
+    //   • Site-scoped marks (siteId from a grid button, or siteName from the
+    //     AI agent) can only hit employees whose CURRENT site is the target
+    //   site. The grid's Mark-all button already filters its movedAway rows
+    //   client-side; this guard stops a stale client from re-marking an
+    //   employee at a site they have left.
+    //   • Global (all-sites) marks skip site-less ("Idle") employees entirely
+    //     — they have been moved out of every site, the attendance grid never
+    //     shows them, and marking them used to write orphan records with
+    //     siteId=null that still inflated hours and salary.
     const whereClause: Record<string, unknown> = { status: 'active' };
+    let excludedNoSite = 0;
     if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
       whereClause.id = { in: employeeIds };
+      if (bulkSiteId) {
+        whereClause.AND = [
+          {
+            OR: [
+              { currentSiteId: bulkSiteId },
+              ...(bulkSiteName ? [{ currentSite: bulkSiteName }] : []),
+            ],
+          },
+        ];
+      }
     } else if (restrictSiteId) {
       // Single-site restriction: match the FK first, fall back to the legacy
       // name-only column for employees whose currentSiteId was never set.
       whereClause.OR = [
         { currentSiteId: restrictSiteId },
         ...(bulkSiteName ? [{ currentSite: bulkSiteName }] : []),
+      ];
+    } else {
+      // Global mark: employees who belong to at least one site right now.
+      excludedNoSite = await db.employee.count({
+        where: { status: 'active', AND: [{ currentSiteId: null }, { currentSite: null }] },
+      });
+      whereClause.OR = [
+        { currentSiteId: { not: null } },
+        { currentSite: { not: null } },
       ];
     }
 
@@ -206,6 +237,7 @@ export async function POST(request: NextRequest) {
         total: employees.length,
         updated,
         skipped,
+        excludedNoSite,
         errors: errors.length > 0 ? errors : undefined,
         versionCaptures,
         sites: versionCaptures.map((v) => v.siteName).filter(Boolean),

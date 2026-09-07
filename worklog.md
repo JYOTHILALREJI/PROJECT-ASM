@@ -884,3 +884,25 @@ Stage Summary:
 - User-visible: the Sheet button (preview / Download PDF / Print / snapshot) never lists moved-out employees; strength = current workforce only; on-screen grid history unchanged.
 - Files: src/components/attendance/attendance-page.tsx (attendanceSheetEmployees filter + explanatory comment).
 - eslint 0 errors; tsc 54 = exact baseline.
+
+---
+Task ID: 24
+Agent: Super Z (main)
+Task: Bulk attendance marking includes moved-out employees — "WHEN I ADD THE ATTENDANCE FOR A DAY WITH THE AGENT, IT'S MARKING THE ATTENDANCE FOR THE MOVED OUT EMPLOYEES ALSO, ALSO MARK ALL AS PRESENT BUTTON IS DOING THE SAME PLS FIX THAT AND PUSH THE CODE".
+
+Work Log:
+- Root-caused two server-side leaks in /api/attendance/bulk-mark (the endpoint both the per-site Mark-all button and the agent's attendance_mark macro call):
+  (1) GLOBAL all-sites mark (agent path, body {date,status} only) matched status:'active' → marked ALL 202 active employees INCLUDING 21 site-less (Idle, currentSiteId/currentSite NULL) ones, writing orphan records with siteId=null that still inflated hours/salary via salary sync. Confirmed in DB: 21 siteId=null present records on 2026-09-05 left by the earlier Task 21-d E2E.
+  (2) SITE-SCOPED mark with employeeIds (button path) had NO server-side membership guard — the grid button already filters movedAway rows client-side, but a stale client could re-mark a moved-out employee at their old site.
+- Fix (bulk-mark route.ts): global mark now requires a current site (OR currentSiteId/currentSite not null) and reports excludedNoSite count; site-scoped marks (siteId with employeeIds, or siteName) intersect employeeIds with site membership (currentSiteId==site OR currentSite==siteName) — moved-out employees are dropped server-side even when their ids are sent; moved-out-only id lists return clean 404.
+- Agent macro (agent-actions.ts): attendance_mark response now appends "N site-less (Idle) employee(s) NOT marked — they have been moved out of every site." so the user always sees why counts dropped (202→181).
+- UI map: [attendance] AGENT NOTE updated — moved-out employees are never marked at their old site, Idle employees skipped, excludedNoSite reported.
+- Data cleanup: 21 bogus siteId=null records on 2026-09-05 neutralized via the grid's own POST /api/attendance (status not_marked) so syncEmployeeSalaryFromAttendance recomputed hours/salary; scripts/cleanup-bogus-attendance.py.
+- Tests: scripts/test-task23.py 17/17 — global mark total=181 (was 202), excludedNoSite=21, zero siteId=null records, John Doe (moved Riyadh→Jeddah) marked ONCE at his CURRENT site; siteId+employeeIds=[John,currentEmployee] → total=1, John has no record; John-only list → 404; all test dates (09-28/29/30) neutralized after.
+- Browser E2E: Riyadh's real "Mark all as Present" button (clicked via DOM-anchored eval after refs kept shifting on re-renders) → ActivityLog "Bulk marked 27 employee(s) as present for 2026-09-07" = exactly Riyadh's current workforce; John excluded; zero siteId=null. Screenshot scripts/qa-task23-riyadh-markall.png. Today's test marks cleaned afterwards.
+- NOTE: dev server died once mid-E2E (environment, not app) — restarted via scripts/dev-server.sh; browser hung once after a 59-employee cleanup run (CDP eval timeouts) — restarted browser.
+
+Stage Summary:
+- User-visible: bulk marking (button AND agent) never touches moved-out or site-less employees; agent reports excluded counts instead of silently marking everyone; hours/salary no longer inflated by orphan siteId=null records.
+- Files: src/app/api/attendance/bulk-mark/route.ts, src/components/ai/agent-actions.ts, src/lib/app-ui-map.ts; scripts/test-task23.py, scripts/cleanup-bogus-attendance.py, scripts/qa-task23-riyadh-markall.png.
+- eslint 0 errors; tsc 54 = exact baseline.

@@ -741,15 +741,18 @@ async function attendanceMark(a: AgentAction): Promise<string> {
   const updated = Number(data.data?.updated ?? 0);
   const skipped = Number(data.data?.skipped ?? 0);
   const total = Number(data.data?.total ?? 0);
+  const excludedNoSite = Number(data.data?.excludedNoSite ?? 0);
   const sites: string[] = Array.isArray(data.data?.sites) ? data.data.sites.filter(Boolean) : [];
   const scope = site ? `site "${site}"` : 'ALL sites';
   if (total === 0) {
-    return `No active employees were found to mark ${status} for ${date} at ${scope}.${log.length ? ` ${log.join(' ')}` : ''}`;
+    const noSitePart = excludedNoSite > 0 ? ` The only ${excludedNoSite} active employee(s) left are site-less (Idle) — they have been moved out of every site, so there is nobody to mark.` : '';
+    return `No employees were found to mark ${status} for ${date} at ${scope}.${noSitePart}${log.length ? ` ${log.join(' ')}` : ''}`;
   }
   const sitePart = sites.length > 0 ? ` Covered: ${sites.slice(0, 12).join(', ')}${sites.length > 12 ? ` +${sites.length - 12} more` : ''}.` : '';
+  const excludedPart = excludedNoSite > 0 ? ` ${excludedNoSite} site-less (Idle) employee(s) NOT marked — they have been moved out of every site.` : '';
   return [
     ...log,
-    `✅ Bulk attendance complete — ${updated} employee(s) marked as ${status === 'absent' ? 'Absent' : 'Present (10h)'} for ${date} across ${scope}.${sitePart}${skipped > 0 ? ` ${skipped} skipped (already marked or protected overtime).` : ''} The Attendance grid has been refreshed.`,
+    `✅ Bulk attendance complete — ${updated} employee(s) marked as ${status === 'absent' ? 'Absent' : 'Present (10h)'} for ${date} across ${scope}.${sitePart}${excludedPart}${skipped > 0 ? ` ${skipped} skipped (already marked or protected overtime).` : ''} The Attendance grid has been refreshed.`,
   ].join(' ');
 }
 
