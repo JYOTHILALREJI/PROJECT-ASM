@@ -11,6 +11,7 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
   Send,
   X,
 } from 'lucide-react';
@@ -326,7 +327,12 @@ export function RoboAssistant() {
   // the completion effect below.
   const send = (raw?: string) => {
     const content = (raw ?? input).trim();
-    if (!content || !currentSessionId || !user?.id) return;
+    if (!content) return;
+    if (!currentSessionId || !user?.id) {
+      // Never swallow a send silently — tell the user why nothing happened.
+      toast({ title: 'Still connecting…', description: 'One moment, then send your message again.' });
+      return;
+    }
     if (isJobRunning(currentSessionId)) return;
     if (inputRef.current) inputRef.current.style.height = 'auto';
     setInput('');
@@ -402,12 +408,29 @@ export function RoboAssistant() {
   const jobForSession = activeJob && activeJob.sessionId === currentSessionId ? activeJob : null;
   const sending = !!jobForSession && jobForSession.status === 'running';
   const faceStatus: RoboStatus = sending ? 'thinking' : status;
+
   const visible = useMemo(() => {
     if (!jobForSession) return messages;
     const ids = new Set(jobForSession.messages.map((m) => m.id));
     return [...messages.filter((m) => !ids.has(m.id)), ...jobForSession.messages];
     // jobVersion bumps whenever the job mutates — recompute then.
   }, [messages, currentSessionId, jobVersion]);
+
+  // Retry/redo: an icon-only control rendered at the end of the LAST model
+  // response. It re-runs the user message that produced that response.
+  // Visible whenever the transcript ends with an assistant bubble (including
+  // error bubbles — retrying a failed exchange is exactly what you want) and
+  // no job is running.
+  const lastVisible = visible.length > 0 ? visible[visible.length - 1] : null;
+  const canRetry = !sending && !!lastVisible && lastVisible.role === 'assistant';
+  const retryUserContent = useMemo(() => {
+    if (!canRetry) return null;
+    for (let i = visible.length - 2; i >= 0; i--) {
+      const m = visible[i];
+      if (m.role === 'user' && m.content.trim()) return m.content.trim();
+    }
+    return null;
+  }, [canRetry, visible]);
 
   if (!user || !pos) return null;
 
@@ -580,6 +603,20 @@ export function RoboAssistant() {
                       </div>
                     </div>
                   )
+                )}
+
+                {/* Icon-only redo/retry for the last model response */}
+                {canRetry && retryUserContent && (
+                  <div className="flex justify-start pl-1">
+                    <button
+                      onClick={() => send(retryUserContent)}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-700 hover:text-cyan-300"
+                      title="Retry last response"
+                      aria-label="Retry last response"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 )}
 
                 {sending && (

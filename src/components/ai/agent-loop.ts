@@ -37,6 +37,8 @@ export interface AgentJob {
   agentSteps: number;
   error?: string;
   sessionPatch: { title?: string; updatedAt?: string; day?: string } | null;
+  /** Epoch ms of the last job mutation — powers the stuck-job watchdog. */
+  lastActivityAt: number;
 }
 
 // Generous cap: NOC-sized tasks run through the one-shot noc_create macro,
@@ -44,12 +46,26 @@ export interface AgentJob {
 // headroom. The guard pauses gracefully and offers "continue" when tripped.
 const MAX_STEPS = 40;
 
+// Hard client-side cap on ONE /api/ai/chat round-trip. The server's own worst
+// case is ~275s (90s planner + ~95s 429 backoff + 90s responder), so 300s only
+// ever fires when the request has genuinely wedged — without it a hung fetch
+// kept the job 'running' forever and the composer stayed blocked (the
+// "can't send messages" report).
+const FETCH_TIMEOUT_MS = 300_000;
+
+// If a 'running' job has shown NO activity for this long it is considered
+// wedged (e.g. a hung action executor) and startAgentJob discards it instead
+// of silently returning — the user can always send again. Must exceed
+// FETCH_TIMEOUT_MS so a legitimate slow-but-alive job is never discarded.
+const STUCK_JOB_MS = 6 * 60_000;
+
 let activeJob: AgentJob | null = null;
 let version = 0;
 const listeners = new Set<() => void>();
 
 const emit = () => {
   version += 1;
+  if (activeJob) activeJob.lastActivityAt = Date.now();
   listeners.forEach((l) => l());
 };
 
@@ -107,7 +123,17 @@ export function startAgentJob(
   content: string,
   view: string
 ): AgentJob | null {
-  if (activeJob && activeJob.status === 'running') return activeJob;
+  if (activeJob && activeJob.status === 'running') {
+    if (Date.now() - activeJob.lastActivityAt < STUCK_JOB_MS) return activeJob;
+    // Watchdog: the job has produced nothing for >6 minutes — it wedged.
+    // Mark it failed (so its last message renders) and let the new job take
+    // over; if the old runJob ever wakes up, its writes land on the orphaned
+    // object and are harmless.
+    console.warn('[agent-loop] discarding wedged job (no activity for >6 min):', activeJob.id);
+    activeJob.status = 'failed';
+    activeJob.error = 'timed out';
+    emit();
+  }
   const job: AgentJob = {
     id: `job-${Date.now()}`,
     userId,
@@ -116,6 +142,7 @@ export function startAgentJob(
     status: 'running',
     agentSteps: 0,
     sessionPatch: null,
+    lastActivityAt: Date.now(),
   };
   activeJob = job;
   emit();
@@ -137,18 +164,52 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: job.userId,
-          sessionId: job.sessionId,
-          ...(firstTurn ? { content } : {}),
-          ...(observation !== null ? { observation } : {}),
-          view: useAppStore.getState().currentView,
-        }),
-      });
-      const data = await res.json();
+      // Abort a wedged request so the composer can never stay blocked forever.
+      const controller = new AbortController();
+      const fetchTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      let data: {
+        success: boolean;
+        error?: string;
+        data?: {
+          userMessage?: { id: string; content: string; createdAt: string };
+          session?: { title?: string; updatedAt?: string; day?: string };
+          action?: unknown;
+          assistantMessage: { id: string; content: string; createdAt: string };
+          meta?: { rowsFetched?: number };
+        };
+      };
+      try {
+        const res = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: job.userId,
+            sessionId: job.sessionId,
+            ...(firstTurn ? { content } : {}),
+            ...(observation !== null ? { observation } : {}),
+            view: useAppStore.getState().currentView,
+          }),
+          signal: controller.signal,
+        });
+        data = await res.json();
+      } catch (fetchErr) {
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          push(job, {
+            id: `timeout-${Date.now()}`,
+            role: 'assistant',
+            content: '⏱️ I waited 5 minutes and still got no reply, so I stopped to free the chat. Please send your message again.',
+            createdAt: new Date().toISOString(),
+            error: true,
+          });
+          job.error = 'request timeout';
+          job.status = 'failed';
+          emit();
+          return;
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(fetchTimer);
+      }
       if (!data.success) {
         push(job, {
           id: `err-${Date.now()}`,
@@ -163,11 +224,25 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
         return;
       }
       const d = data.data;
+      if (!d) {
+        push(job, {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: 'The assistant returned a malformed response. Please try again.',
+          createdAt: new Date().toISOString(),
+          error: true,
+        });
+        job.error = 'malformed response';
+        job.status = 'failed';
+        emit();
+        return;
+      }
       if (firstTurn && d.userMessage) {
         // Swap the optimistic bubble for the persisted one.
+        const um = d.userMessage;
         job.messages = job.messages.map((m) =>
           m.id.startsWith('tmp-')
-            ? { id: d.userMessage.id, role: 'user', content: d.userMessage.content, createdAt: d.userMessage.createdAt }
+            ? { id: um.id, role: 'user', content: um.content, createdAt: um.createdAt }
             : m
         );
         emit();

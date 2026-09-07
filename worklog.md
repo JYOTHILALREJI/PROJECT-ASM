@@ -906,3 +906,21 @@ Stage Summary:
 - User-visible: bulk marking (button AND agent) never touches moved-out or site-less employees; agent reports excluded counts instead of silently marking everyone; hours/salary no longer inflated by orphan siteId=null records.
 - Files: src/app/api/attendance/bulk-mark/route.ts, src/components/ai/agent-actions.ts, src/lib/app-ui-map.ts; scripts/test-task23.py, scripts/cleanup-bogus-attendance.py, scripts/qa-task23-riyadh-markall.png.
 - eslint 0 errors; tsc 54 = exact baseline.
+
+---
+Task ID: agent-chat-fix
+Agent: main (Z.ai Code)
+Task: Agent chat dead — Enter key and Send button "not working", model responses garbled/mangled; add an icon-only redo/retry button at the end of the model response.
+
+Work Log:
+- Reproduced live: Enter/send DID fire but every job instantly failed with the red bubble "fetch failed" — root cause: the Task 21-d E2E run left a MOCK model provider saved in AppSetting (aiBaseUrl=http://127.0.0.1:9999/v1, sk-mock-te…, mock-model-1). While scripts/mock-llm.py was briefly up it answered with canned test JSON (the "mangled/garbled" replies); once it died, every /api/ai/chat provider call threw Node's undici TypeError "fetch failed" → chat appeared completely broken.
+- src/lib/ai-client.ts — callLLM is now a resilient chain: saved Settings provider → env provider → built-in Z.ai. Any provider failure falls through to the next (console.warn server-side) so a dead/misconfigured custom provider can NEVER brick the assistant again; when everything fails the error names every attempt and points to Settings → AI Assistant. Single-provider failure keeps the original specific message so the 429 backoff ladder still matches.
+- Data cleanup: scripts/fix-stale-mock-provider.ts deleted the 3 stale mock rows (aiApiKey/aiBaseUrl/aiModel) — built-in GLM is the active provider again.
+- src/components/ai/agent-loop.ts — composer can no longer wedge: each loop fetch gets an AbortController (300s > server worst case ~275s) that fails the job with a clear "I waited 5 minutes" bubble; AgentJob.lastActivityAt + a watchdog in startAgentJob discards a 'running' job with no activity for >6 min instead of silently blocking new sends; typed the response payload and added a malformed-response guard.
+- src/components/ai/robo-assistant.tsx — NEW icon-only RotateCcw "Retry last response" button rendered under the LAST model response (visible when the transcript ends with an assistant bubble, including error bubbles; hidden while a job runs). It re-runs the user message that produced that response. send() no longer silently no-ops: with no session yet it toasts "Still connecting…" instead of swallowing the message.
+- src/app/api/ai/chat/route.ts — the "mangled text" hardening: responder now receives at most 30 rows per query (rowsForResponder cap + explicit "showing 30 of N" instruction); models previously ignored the prompt-only LARGE RESULT RULE and dumped 200-row table soup into the 400px bubble. Full totals still recorded in meta (Fetched N rows).
+- Tests: eslint 0 errors; tsc 54 = exact baseline. Browser E2E on live data — Enter send → real grounded answer ("We have 203 employees in total"); Send BUTTON send with a deliberately re-saved broken provider → still answered via fallback ("We have 7 active sites…") proving the never-brick guarantee; Retry button click → fresh job re-ran the same question and appended a second answer; new answers end "— showing 30 of 200; ask me to narrow it down" (row cap working). Provider rows restored to clean after the fallback test. Screenshot: scripts/qa-agent-chat-fixed.png.
+
+Stage Summary:
+- Chat is fully usable again: root cause was stale E2E mock-provider settings rows, now deleted; ai-client falls back across providers so no future provider misconfiguration can kill the assistant; wedged jobs self-heal (5-min fetch abort + 6-min watchdog); icon-only retry button sits at the end of the last model response; responder output deterministically capped at 30 rows/query.
+- Note: the previous round's attendance moved-out fix (a1c7035) was already on origin; this push also carries the periodic DB auto-commit.

@@ -79,19 +79,60 @@ function envModel(): string {
   return (process.env.AI_MODEL || 'gpt-4o-mini').trim();
 }
 
-/** Single non-streaming chat completion against the configured provider. */
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Resilient provider chain: saved Settings provider → env provider → built-in.
+ *
+ * A broken custom provider must NEVER brick the assistant: if the saved
+ * OpenAI-compatible endpoint is unreachable, misconfigured or erroring, the
+ * chain falls through to the next provider so chat keeps working (the failure
+ * is logged server-side for diagnostics). Only when EVERY configured provider
+ * fails does the caller see an error — and that error names everything that
+ * was tried, so a bad Settings entry is easy to diagnose.
+ */
 export async function callLLM(
   messages: LlmMessage[],
   opts?: { temperature?: number; maxTokens?: number },
   creds?: AiCredentials | null
 ): Promise<string> {
+  const tried: string[] = [];
+
   if (creds && creds.apiKey) {
-    return callOpenAICompatible(messages, opts, creds);
+    try {
+      return await callOpenAICompatible(messages, opts, creds);
+    } catch (err) {
+      const msg = errMessage(err);
+      tried.push(`saved provider ${creds.baseUrl} (${creds.model}): ${msg}`);
+      console.warn(`[ai-client] saved model provider failed, falling back — ${msg}`);
+    }
   }
+
   if (envAIConfigured()) {
-    return callOpenAICompatible(messages, opts);
+    try {
+      return await callOpenAICompatible(messages, opts);
+    } catch (err) {
+      const msg = errMessage(err);
+      tried.push(`env provider (${envModel()}): ${msg}`);
+      console.warn(`[ai-client] env model provider failed, falling back to built-in — ${msg}`);
+    }
   }
-  return callZai(messages, opts);
+
+  try {
+    return await callZai(messages, opts);
+  } catch (err) {
+    const msg = errMessage(err);
+    // Single configured provider (the common case) → keep the original,
+    // specific message (429 rate-limit ladder in the chat route matches on it).
+    if (tried.length === 0) throw err;
+    tried.push(`built-in: ${msg}`);
+    throw new Error(
+      `The AI assistant could not get a reply from any configured model provider. Tried: ${tried.join(' · ')}. ` +
+        `If a custom provider is saved, check its URL / key / model in Settings → AI Assistant.`
+    );
+  }
 }
 
 async function callOpenAICompatible(

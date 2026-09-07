@@ -307,6 +307,22 @@ function safeJson(value: unknown): string {
 }
 
 /**
+ * Cap the rows the responder may SEE. The responder prompt already carries a
+ * LARGE RESULT RULE, but models sometimes ignored it and quoted every row
+ * (a 200-row table soup in a 400px chat bubble reads as garbled output).
+ * This makes the cap deterministic: the model can never quote rows it was
+ * never given. The observation header still states the FULL row count.
+ */
+const RESPONDER_ROW_CAP = 30;
+function rowsForResponder(rows: Record<string, unknown>[]): { rows: Record<string, unknown>[]; note: string } {
+  if (rows.length <= RESPONDER_ROW_CAP) return { rows, note: '' };
+  return {
+    rows: rows.slice(0, RESPONDER_ROW_CAP),
+    note: `\n(Only the first ${RESPONDER_ROW_CAP} of ${rows.length} rows are shown here. Do NOT invent the rest — tell the user "showing ${RESPONDER_ROW_CAP} of ${rows.length}" and offer to narrow the list by site, month or name.)`,
+  };
+}
+
+/**
  * Human-readable identity of the model actually powering this assistant, so
  * "which model do you use?" gets a real answer instead of a dodge:
  *   1. the provider saved in Settings → AI Assistant (aiModel, default gpt-4o-mini);
@@ -934,8 +950,9 @@ export async function POST(request: NextRequest) {
             try {
               const rows = await runReadonlyQuery(statement);
               totalRows += rows.length;
+              const shown = rowsForResponder(rows);
               obsParts.push(
-                `Query ${i + 1} → ${rows.length} row(s):\n${truncate(safeJson(rows), Math.ceil(OBSERVATION_CAP / sanitized.length))}`
+                `Query ${i + 1} → ${rows.length} row(s):\n${truncate(safeJson(shown.rows), Math.ceil(OBSERVATION_CAP / sanitized.length))}${shown.note}`
               );
             } catch (err) {
               // ── Self-heal: one retry where the planner sees its own SQL error ──
@@ -965,8 +982,9 @@ export async function POST(request: NextRequest) {
                   const rows = await runReadonlyQuery(retrySqlRaw);
                   executed[executed.length - 1] = retrySqlRaw;
                   totalRows += rows.length;
+                  const shown = rowsForResponder(rows);
                   obsParts.push(
-                    `Query ${i + 1} → ${rows.length} row(s):\n${truncate(safeJson(rows), Math.ceil(OBSERVATION_CAP / sanitized.length))}`
+                    `Query ${i + 1} → ${rows.length} row(s):\n${truncate(safeJson(shown.rows), Math.ceil(OBSERVATION_CAP / sanitized.length))}${shown.note}`
                   );
                   healed = true;
                 }
