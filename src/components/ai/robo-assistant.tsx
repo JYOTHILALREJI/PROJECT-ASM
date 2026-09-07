@@ -8,6 +8,7 @@ import {
   AlertCircle,
   Bot,
   Database,
+  Grip,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,6 +28,68 @@ import { toast } from '@/hooks/use-toast';
 const FACE = 76; // face hit-box (px)
 const EDGE = 8; // min distance from viewport edges
 const POS_KEY = 'asm_robo_pos_v1';
+const SIZE_KEY = 'asm_robo_size_v1';
+const MIN_W = 280; // smallest usable chat panel
+const MIN_H = 320;
+
+function defaultSize(vw: number, vh: number) {
+  return {
+    w: Math.min(400, Math.max(300, vw - 24)),
+    h: Math.min(560, Math.max(340, vh - 90)),
+  };
+}
+
+function clampSize(s: { w: number; h: number }, vw: number, vh: number) {
+  return {
+    w: Math.min(Math.max(s.w, MIN_W), Math.max(MIN_W, vw - 24)),
+    h: Math.min(Math.max(s.h, MIN_H), Math.max(MIN_H, vh - 24)),
+  };
+}
+
+// Free resizing: the panel stays anchored to the robot face, so only the
+// three OUTWARD edges/corner are grabbable — the face-adjacent edges stay
+// put and the panel grows/shrinks away from (or toward) the face.
+type ResizeDir = 'e' | 'w' | 's' | 'n' | 'se' | 'sw' | 'ne' | 'nw';
+
+const RESIZE_HANDLES: Record<ResizeDir, { area: string; cursor: string; grip?: boolean }> = {
+  e: { area: 'inset-y-3 right-0 w-1.5', cursor: 'cursor-ew-resize' },
+  w: { area: 'inset-y-3 left-0 w-1.5', cursor: 'cursor-ew-resize' },
+  s: { area: 'inset-x-3 bottom-0 h-1.5', cursor: 'cursor-ns-resize' },
+  n: { area: 'inset-x-3 top-0 h-1.5', cursor: 'cursor-ns-resize' },
+  se: { area: 'bottom-0 right-0 h-4 w-4', cursor: 'cursor-nwse-resize', grip: true },
+  sw: { area: 'bottom-0 left-0 h-4 w-4', cursor: 'cursor-nesw-resize', grip: true },
+  ne: { area: 'top-0 right-0 h-4 w-4', cursor: 'cursor-nesw-resize', grip: true },
+  nw: { area: 'top-0 left-0 h-4 w-4', cursor: 'cursor-nwse-resize', grip: true },
+};
+
+const BODY_CURSOR: Record<ResizeDir, string> = {
+  e: 'ew-resize',
+  w: 'ew-resize',
+  s: 'ns-resize',
+  n: 'ns-resize',
+  se: 'nwse-resize',
+  nw: 'nwse-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+};
+
+interface ResizeGestureState {
+  dir: ResizeDir;
+  startX: number;
+  startY: number;
+  startW: number;
+  startH: number;
+  frozenLeft: number;
+  frozenTop: number;
+  side: 'right' | 'left';
+  below: boolean;
+  // False when placement was clamped to the viewport edge (panel overlaps the
+  // face zone) — then that edge stays pinned instead of tracking the face.
+  leftFree: boolean;
+  topFree: boolean;
+  maxW: number;
+  maxH: number;
+}
 
 interface ChatMessage {
   id: string;
@@ -117,6 +180,11 @@ export function RoboAssistant() {
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null);
   const posRef = useRef<{ x: number; y: number } | null>(null);
 
+  // ── Resize state ──
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [resizeGesture, setResizeGesture] = useState<ResizeGestureState | null>(null);
+  const sizeRef = useRef<{ w: number; h: number } | null>(null);
+
   // ── Chat state ──
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -138,6 +206,10 @@ export function RoboAssistant() {
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
   useEffect(() => subscribeAgentLoop(forceUpdate), [forceUpdate]);
 
+  useEffect(() => {
+    sizeRef.current = size;
+  }, [size]);
+
   // Self-heal a wedged job: a 'running' job with no activity for >6 minutes
   // (hung action executor / lost response) would keep the composer disabled
   // forever — the startAgentJob watchdog can't fire because SEND is disabled
@@ -148,9 +220,12 @@ export function RoboAssistant() {
     return () => clearInterval(t);
   }, []);
 
-  const panelW = Math.min(400, Math.max(300, viewport.w - 24));
-  const panelH = Math.min(560, Math.max(340, viewport.h - 90));
-  const railOverlay = viewport.w < 640;
+  const effSize = size ?? defaultSize(viewport.w, viewport.h);
+  const panelW = effSize.w;
+  const panelH = effSize.h;
+  // Narrow panels fold the history rail into an overlay so the messages
+  // always keep a readable width.
+  const railOverlay = viewport.w < 640 || panelW < 360;
 
   // ── Mount: restore position, measure viewport, re-clamp on resize ──
   useEffect(() => {
@@ -158,6 +233,21 @@ export function RoboAssistant() {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       setViewport({ w: vw, h: vh });
+      setSize((prev) => {
+        if (prev) return clampSize(prev, vw, vh);
+        try {
+          const raw = localStorage.getItem(SIZE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { w: number; h: number };
+            if (typeof parsed.w === 'number' && typeof parsed.h === 'number') {
+              return clampSize(parsed, vw, vh);
+            }
+          }
+        } catch {
+          // ignore corrupt storage
+        }
+        return clampSize(defaultSize(vw, vh), vw, vh);
+      });
       setPos((prev) => {
         if (prev) return clampPos(prev, vw, vh);
         // First visit: default = bottom-right corner
@@ -251,7 +341,18 @@ export function RoboAssistant() {
 
   useEffect(() => () => {
     if (speakingTimer.current) clearTimeout(speakingTimer.current);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
   }, []);
+
+  // If the panel folds mid-resize (Esc), release the gesture state cleanly.
+  useEffect(() => {
+    if (!open && resizeGesture) {
+      setResizeGesture(null);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  }, [open, resizeGesture]);
 
   // ── Drag handlers (pointer events, click vs drag threshold) ──
   const onFacePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -300,6 +401,95 @@ export function RoboAssistant() {
       e.preventDefault();
       setOpen((o) => !o);
     }
+  };
+
+  // ── Resize handlers (pointer events on the outward edges / corner grip) ──
+  const persistSize = (s: { w: number; h: number }) => {
+    try {
+      localStorage.setItem(SIZE_KEY, JSON.stringify(s));
+    } catch {
+      // ignore
+    }
+  };
+
+  const onResizePointerDown = (dir: ResizeDir) => (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!placement || !pos) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // synthetic events (tests) have no active pointer — drag still works
+    }
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Free-edge detection: when the panel sits cleanly beside the face, the
+    // 'w'/'n' edges track pos (left = pos.x - w - 12 / top = pos.y - h - 12).
+    // When placement was clamped against the viewport edge, that edge is
+    // pinned instead so the drag never snaps.
+    const leftFree = dir.includes('w') && placement.left <= pos.x - panelW - 12 + 1;
+    const topFree = dir.includes('n') && placement.top <= pos.y - panelH - 12 + 1;
+    // Grow-leftward ('w' dirs) moves the free left edge: pos.x - w - 12 must
+    // stay ≥ 12. Grow-rightward ('e' dirs) keeps the frozen left edge and the
+    // right edge must stay ≤ vw - 12. Same logic vertically.
+    const maxW = leftFree ? pos.x - 24 : vw - 12 - placement.left;
+    const maxH = topFree ? pos.y - 24 : vh - 12 - placement.top;
+    setResizeGesture({
+      dir,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: panelW,
+      startH: panelH,
+      frozenLeft: placement.left,
+      frozenTop: placement.top,
+      side: placement.side,
+      below: placement.below,
+      leftFree,
+      topFree,
+      maxW: Math.max(MIN_W, maxW),
+      maxH: Math.max(MIN_H, maxH),
+    });
+    document.body.style.cursor = BODY_CURSOR[dir];
+    document.body.style.userSelect = 'none';
+  };
+
+  const onResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = resizeGesture;
+    if (!g) return;
+    const dx = e.clientX - g.startX;
+    const dy = e.clientY - g.startY;
+    let w = g.startW;
+    let h = g.startH;
+    if (g.dir.includes('e')) w = g.startW + dx;
+    if (g.dir.includes('w')) w = g.startW - dx;
+    if (g.dir.includes('s')) h = g.startH + dy;
+    if (g.dir.includes('n')) h = g.startH - dy;
+    w = Math.round(Math.min(Math.max(w, MIN_W), g.maxW));
+    h = Math.round(Math.min(Math.max(h, MIN_H), g.maxH));
+    setSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+  };
+
+  const onResizePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizeGesture) return;
+    setResizeGesture(null);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    if (sizeRef.current) persistSize(sizeRef.current);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture may already be released
+    }
+  };
+
+  // Double-click any handle → back to the default size.
+  const onResizeDoubleClick = () => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const next = clampSize(defaultSize(vw, vh), vw, vh);
+    setSize(next);
+    sizeRef.current = next;
+    persistSize(next);
   };
 
   // ── Session helpers ──
@@ -446,6 +636,29 @@ export function RoboAssistant() {
 
   const transformOrigin = `${placement?.side === 'right' ? 'left' : 'right'} ${placement?.below ? 'top' : 'bottom'}`;
 
+  // While a resize gesture is active the anchored edges stay frozen and the
+  // free edges track the current size (no side-flip jumps mid-drag).
+  const effLeft = resizeGesture
+    ? resizeGesture.leftFree
+      ? Math.max(12, pos.x - panelW - 12)
+      : resizeGesture.frozenLeft
+    : placement?.left ?? 0;
+  const effTop = resizeGesture
+    ? resizeGesture.topFree
+      ? Math.max(12, pos.y - panelH - 12)
+      : resizeGesture.frozenTop
+    : placement?.top ?? 0;
+  const effSide: 'right' | 'left' = resizeGesture ? resizeGesture.side : placement?.side ?? 'right';
+  const effBelow = resizeGesture ? resizeGesture.below : placement?.below ?? true;
+  const handleDirs: ResizeDir[] =
+    effSide === 'right'
+      ? effBelow
+        ? ['e', 's', 'se']
+        : ['e', 'n', 'ne']
+      : effBelow
+        ? ['w', 's', 'sw']
+        : ['w', 'n', 'nw'];
+
   return (
     <>
       {/* ── Chat panel ── */}
@@ -454,8 +667,12 @@ export function RoboAssistant() {
           <motion.div
             key="asm-ai-chat"
             data-asm-assistant
-            className="fixed z-[60] flex overflow-hidden rounded-2xl border border-slate-600/70 bg-slate-800/95 shadow-2xl shadow-black/50 backdrop-blur-md"
-            style={{ left: placement.left, top: placement.top, width: panelW, height: panelH, transformOrigin }}
+            data-asm-chat-panel
+            className={cn(
+              'fixed z-[60] flex overflow-hidden rounded-2xl border border-slate-600/70 bg-slate-800/95 shadow-2xl shadow-black/50 backdrop-blur-md',
+              resizeGesture && 'select-none ring-1 ring-cyan-400/40'
+            )}
+            style={{ left: effLeft, top: effTop, width: panelW, height: panelH, transformOrigin }}
             initial={{ opacity: 0, scale: 0.55, x: placement.side === 'right' ? -26 : 26, y: placement.below ? -20 : 20 }}
             animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
             exit={{ opacity: 0, scale: 0.55, x: placement.side === 'right' ? -26 : 26, y: placement.below ? -20 : 20 }}
@@ -524,7 +741,7 @@ export function RoboAssistant() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-white">{aiName || 'Nova'}</p>
-                  <p className="text-[10px] leading-tight text-slate-400">
+                  <p className="truncate text-[10px] leading-tight text-slate-400">
                     {sending ? 'Thinking…' : `Your ${brandName || 'ASM'} companion — online`}
                   </p>
                 </div>
@@ -552,7 +769,7 @@ export function RoboAssistant() {
               {/* Messages */}
               <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                 {visible.length === 0 && !sending && (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                  <div className="flex min-h-full flex-col items-center justify-center gap-3 py-2 text-center">
                     <RoboFace size={64} status="idle" />
                     <div>
                       <p className="text-sm font-semibold text-white">Hi, I&apos;m {aiName || 'Nova'} 👋</p>
@@ -669,11 +886,40 @@ export function RoboAssistant() {
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="mt-1 px-1 text-[10px] text-slate-500">
-                  Enter to send · Shift+Enter for a new line · drag the robot anywhere
+                <p className={cn('mt-1 px-1 text-[10px] text-slate-500', panelW < 380 && 'hidden')}>
+                  Enter to send · Shift+Enter for a new line · drag the corner grip to resize
                 </p>
               </div>
             </div>
+
+            {/* Resize handles — only the three outward edges are grabbable;
+                the face-adjacent edges stay anchored to the robot. */}
+            {handleDirs.map((dir) => {
+              const def = RESIZE_HANDLES[dir];
+              const isGrip = !!def.grip;
+              return (
+                <div
+                  key={dir}
+                  data-resize-handle={dir}
+                  onPointerDown={onResizePointerDown(dir)}
+                  onPointerMove={onResizePointerMove}
+                  onPointerUp={onResizePointerUp}
+                  onPointerCancel={onResizePointerUp}
+                  onDoubleClick={onResizeDoubleClick}
+                  className={cn(
+                    'absolute z-20 touch-none',
+                    def.area,
+                    def.cursor,
+                    isGrip
+                      ? 'flex items-center justify-center text-slate-500 hover:text-cyan-300'
+                      : 'transition-colors hover:bg-cyan-300/20'
+                  )}
+                  title={isGrip ? 'Drag to resize — double-click to reset' : 'Drag to resize'}
+                >
+                  {isGrip && <Grip className="pointer-events-none h-3 w-3" />}
+                </div>
+              );
+            })}
           </motion.div>
         )}
       </AnimatePresence>

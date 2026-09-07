@@ -947,3 +947,33 @@ Work Log:
 
 Stage Summary:
 - The whole agent surface (chat SQL, attendance macros, navigation, API validators) now accepts any letter casing; a deterministic case-relax LIKE retry plus prompt rules make "not found by case" impossible, and stale remembered answers for data questions are now caught even when replayed as bare prose. A wedged agent job can no longer lock the chat — 30s self-heal + 120s action cap + abandoned flag.
+
+---
+Task ID: agent-resizable-chat
+Agent: main (Z.ai Code)
+Task: Make the agent chat panel freely resizable (drag to any free size, contents stay aligned/responsive at every size) and push the code.
+
+Work Log:
+- Surveyed src/components/ai/robo-assistant.tsx: panel size was hard-derived from viewport (panelW 300-400, panelH 340-560), anchored to the draggable robot face with side/below auto-placement.
+- Implemented free resizing while keeping the "panel anchored to the face" model:
+  * New size state {w,h} persisted in localStorage (asm_robo_size_v1), clamped to viewport on mount + window resize (MIN 280x320, MAX vw-24 / vh-24).
+  * Pointer-event resize handles rendered on the three OUTWARD edges + corner only (the face-adjacent edges stay anchored): side=right -> e/s/se or e/n/ne; side=left -> w/s/sw or w/n/nw. Visible corner grip icon (lucide Grip) + edge strips with directional cursors and hover highlight.
+  * Gesture math freezes the placement decision (side/below/left/top) at pointerdown so nothing flips mid-drag; free edges track the pointer (left = pos.x - w - 12 etc.), anchored edges stay put; sizes clamped to [MIN, viewport-fit] derived from the frozen geometry, so post-gesture placement is stable (no jumps).
+  * Degenerate placements (panel clamped against the viewport edge, overlapping the face zone) detected via leftFree/topFree at gesture start: the pinned edge stays frozen and maxW/maxH switch to viewport-fit so drags are always continuous (fixed a snap bug found during E2E).
+  * Double-click any handle resets to the default size; body cursor + user-select locked during drag; panel gets ring highlight + select-none while resizing; gesture state cleaned up on fold (Esc) and unmount.
+- Responsive content fixes so contents align at ANY size:
+  * History rail folds to overlay when panelW < 360 (was viewport-only) so narrow panels keep readable message width; header subtitle gets truncate.
+  * Empty state uses min-h-full (scrolls instead of clipping on short panels).
+  * Footer hint now says "drag the corner grip to resize" and auto-hides below 380px panel width.
+  * Added data-asm-chat-panel + data-resize-handle attributes for stable E2E selection.
+- E2E via agent-browser (1440x900, admin login):
+  * Default open: 400x560 with handles [w,n,nw]; NW drag -> 600x710 (exact +200/+150, face-side edges anchored, persisted to localStorage).
+  * Shrink past minimum clamps exactly at 280x320; double-click resets to 400x560; reload restores a seeded 640x640.
+  * Mirrored placement (face moved to left edge): handles become [e,n/ne]; east-edge drag widens 400->600 with left edge anchored.
+  * Degenerate placement (face mid-left, panel top clamped): n-drag grows 560->656 smoothly with top pinned (regression fixed).
+  * Full chat round-trip at 600x670: ALL-CAPS "HOW MANY EMPLOYEES DO WE HAVE IN TOTAL?" -> "We have 203 employees in total." (chat pipeline untouched).
+  * Visual checks: 1185x765 (near-fullscreen) header/bubbles/table/composer all aligned; 280x320 minimum holds together; 480x800 viewport auto-clamps panel to 456 wide, fully on-screen. Screenshots: scripts/qa-resize-640.png, qa-resize-large.png, qa-resize-min.png, qa-resize-chat-large.png, qa-resize-mobile.png.
+- eslint clean; tsc at baseline 54 errors (zero new).
+
+Stage Summary:
+- Agent chat panel is now freely resizable: drag the corner grip or any outward edge to any size between 280x320 and the viewport fit; the panel stays anchored to the robot face, size persists across reloads, double-click resets, and all contents (header, history rail, messages, tables, retry button, composer) reflow correctly at every size including narrow/mobile viewports.
