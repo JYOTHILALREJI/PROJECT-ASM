@@ -868,3 +868,19 @@ Stage Summary:
 - User-visible: Nova names its model; API key persists visibly with its own save button; all-sites attendance completes in one agent step with per-run counts; multi-target tasks never end after the first site's toast.
 - Files: src/app/api/settings/route.ts, src/components/settings/settings-page.tsx, src/app/api/ai/chat/route.ts, src/app/api/attendance/bulk-mark/route.ts, src/components/ai/agent-actions.ts, src/components/attendance/attendance-page.tsx, src/lib/app-ui-map.ts; scripts/test-task21d.py, scripts/mock-llm.py.
 - eslint 0 errors; tsc 54 = exact baseline.
+
+---
+Task ID: 23
+Agent: Super Z (main)
+Task: Attendance sheet PDF includes moved-out employees — "IN ATTENDANCE SHEET, WHEN CLICKED THE SHEET BUTTON, ALL THE EMPLOYEES ARE LISTED IN IT, EVEN THE MOVED OUT EMPLOYEES ALSO, PLS MAKE SURE THAT MOVED OUT EMPLOYEES ARE NOT INCLUDED IN THE ATTENDANCE PDF SHEET".
+
+Work Log:
+- Root cause: attendance-page.tsx built attendanceSheetEmployees from employeesBySite.get(site) WITHOUT filtering — employeesBySite intentionally keeps movedAway=true rows (so the on-screen grid preserves per-site attendance history), but every one of those rows flowed into the AttendanceSheet overlay, so moved-out employees appeared in the on-screen preview, Download PDF, Print, and the share PNG snapshot (all four render from the same employee list).
+- Fix: attendanceSheetEmployees now filters `.filter((e) => !e.movedAway && e.currentSite === attendanceSheetSite.name)` (belt-and-braces: movedAway=false ⟺ currentSite===siteName in both employeesBySite passes) — a daily attendance sheet now lists only the site's CURRENT workforce; STRENGTH auto-fill = current headcount. Excel monthly register (/api/attendance/export-excel) intentionally untouched — it keeps "(moved)" labels for monthly history.
+- E2E (agent-browser, live DB): John Doe moved Riyadh→Jeddah has Sept marks at Riyadh (09-01) and Abu Dhabi (09-03/04). Riyadh sheet: 0 × John Doe, STRENGTH 27 (was 28 pre-fix); Abu Dhabi sheet: 0 × John Doe, STRENGTH 26; Jeddah sheet (his current site): 1 × John Doe row, STRENGTH 35 — current-roster regression check passed. Screenshots: scripts/qa-attendance-sheet-no-movedout.png, qa-attendance-sheet-abudhabi.png.
+- Verified sheet STRENGTH values equal each site's active currentSite count in the DB (26/27/35) — grid headers vs sheet counts now coherent.
+
+Stage Summary:
+- User-visible: the Sheet button (preview / Download PDF / Print / snapshot) never lists moved-out employees; strength = current workforce only; on-screen grid history unchanged.
+- Files: src/components/attendance/attendance-page.tsx (attendanceSheetEmployees filter + explanatory comment).
+- eslint 0 errors; tsc 54 = exact baseline.

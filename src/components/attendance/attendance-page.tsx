@@ -2286,10 +2286,19 @@ export function AttendancePage() {
       .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
   }, [allEmployeesForAdd, addEmpDialogSite, addEmpSearch]);
 
-  // Employees for the currently-open attendance sheet site
+  // Employees for the currently-open attendance sheet site.
+  //
+  // MOVED-OUT EMPLOYEES ARE EXCLUDED: employeesBySite keeps moved-away
+  // employees (movedAway=true) so the on-screen grid preserves attendance
+  // history at the old site, but the printable sheet (preview / PDF / Print /
+  // snapshot) must list only the site's CURRENT workforce — a daily
+  // attendance sheet is handed to a supervisor and should never contain
+  // people who have already left for another site.
   const attendanceSheetEmployees = useMemo(() => {
     if (!attendanceSheetSite) return [];
-    return (employeesBySite.get(attendanceSheetSite.name) || []).map((e) => ({
+    return (employeesBySite.get(attendanceSheetSite.name) || [])
+      .filter((e) => !e.movedAway && e.currentSite === attendanceSheetSite.name)
+      .map((e) => ({
       id: e.id,
       fullName: e.fullName,
       employeeId: e.employeeId,
