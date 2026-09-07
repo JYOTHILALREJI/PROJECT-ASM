@@ -924,3 +924,26 @@ Work Log:
 Stage Summary:
 - Chat is fully usable again: root cause was stale E2E mock-provider settings rows, now deleted; ai-client falls back across providers so no future provider misconfiguration can kill the assistant; wedged jobs self-heal (5-min fetch abort + 6-min watchdog); icon-only retry button sits at the end of the last model response; responder output deterministically capped at 30 rows/query.
 - Note: the previous round's attendance moved-out fix (a1c7035) was already on origin; this push also carries the periodic DB auto-commit.
+
+---
+Task ID: agent-case-insensitive
+Agent: main (Z.ai Code)
+Task: The agent is too case-sensitive — users may type everything in caps, lowercase or mixed; make the whole agent flow case-insensitive and push.
+
+Work Log:
+- Audited the full agent chain. Client-side matchers in agent-actions.ts were already case-insensitive (norm() = lowercase + whitespace collapse: click/fill/select/tab/employee-search all normalized). The REAL strict spots were server-side:
+  * Chat SQL: SQLite `=` is byte-case-sensitive — "HOW MANY EMPLOYEES IN RIYADH TOWER SITE" planned as `WHERE currentSite = 'RIYADH TOWER SITE'` matched 0 rows → "not found".
+  * /api/attendance/bulk-mark: status validated with a case-sensitive whitelist ("PRESENT" → 400) and siteName resolved with an exact-name equality first.
+  * navigate action: view key validated case-sensitively against AGENT_VIEWS.
+- Fixes:
+  * route.ts planner prompt — new CASE-INSENSITIVE MATCHING rule (never filter text with =; use LIKE or LOWER(col)=LOWER('value')); CURRENT MEMBERSHIP RULE ("employees at site X" = Employee.currentSite, NEVER the stale EmpCountSitePerMonth history — live test caught the model answering 5 from that table when the truth is 27); COUNT RULE (never wrap a LIMITed subquery in COUNT(*) — that's how "5 of 27" happened).
+  * route.ts — deterministic CASE-RELAX RETRY: when a plan matched ZERO rows and its SQL compares string literals, `=`/`!=` are rewritten to LIKE/NOT LIKE (letters-only literals) and re-run once; the responder is told the rows came from case-insensitive matching.
+  * route.ts — LIVE-DATA GUARD now also catches BARE PROSE: history-copying models replay an earlier markdown answer with NO JSON at all, which used to bypass the guard (it only saw {"answer":…}) and serve stale numbers verbatim. Verified in logs: planner copied a remembered "5 employees" table → new bare-prose branch stern-retried → model wrote fresh LOWER() SQL → correct 27. Retry message now explicitly forbids repeating earlier figures.
+  * bulk-mark + attendance POST — status normalized via trim().toLowerCase() before the whitelist; bulk-mark siteName resolution now loads site rows and compares lowercased in JS (exact first, then substring) — deterministic regardless of DB collation ("riyadh" and "RIYADH TOWER SITE" both resolve to Riyadh Tower Site).
+  * navigate action — view lowercased before the whitelist.
+- Wedged-job hardening (found during E2E): a job stuck at 'running' (lost response after a provider 429-502 / hung action executor) kept the composer disabled FOREVER because the startAgentJob watchdog can only fire on a new send — and send was disabled. Now: failStuckJob() + a 30s poll in robo-assistant force-fails any running job silent for >6 min (timeout bubble + composer freed); AgentJob.abandoned makes the orphaned runJob bail instead of resurrecting state; executeAgentAction is raced against a 120s cap so a hung action becomes an observation instead of a wedge.
+- Dev diagnostics: dev-mode logging of the planner plan and live-data retry ([ai-chat] lines in the server log) — this is how the history-copy and 429-502 wedges were diagnosed.
+- Tests: eslint 0 errors; tsc 54 = exact baseline. scripts/test-case-insensitive.py 3/3 (login; bulk-mark status="PRESENT" + siteName="RIYADH TOWER SITE" → restricted to Riyadh Tower Site; siteName="riyadh" substring → same). Browser E2E on live data: "HOW MANY EMPLOYEES ARE THERE IN RIYADH TOWER SITE? LIST THEIR NAMES" → fresh LOWER() SQL, correct 27 (was a remembered stale "5"); "what site does the employee JOHN DOE work at" (caps name vs stored "John Doe") → found: Jeddah Mall Project, ASM-2025-001. Screenshot: scripts/qa-case-insensitive-agent.png.
+
+Stage Summary:
+- The whole agent surface (chat SQL, attendance macros, navigation, API validators) now accepts any letter casing; a deterministic case-relax LIKE retry plus prompt rules make "not found by case" impossible, and stale remembered answers for data questions are now caught even when replayed as bare prose. A wedged agent job can no longer lock the chat — 30s self-heal + 120s action cap + abandoned flag.

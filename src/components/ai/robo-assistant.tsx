@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { useAppStore } from '@/store/app-store';
 import { useSettingsStore } from '@/store/settings-store';
 import { RoboFace, type RoboStatus } from '@/components/ai/robo-face';
-import { subscribeAgentLoop, getAgentJob, getJobVersion, isJobRunning, startAgentJob } from '@/components/ai/agent-loop';
+import { subscribeAgentLoop, getAgentJob, getJobVersion, isJobRunning, startAgentJob, failStuckJob } from '@/components/ai/agent-loop';
 import { toast } from '@/hooks/use-toast';
 
 // ─── Layout constants ────────────────────────────────────────────────────────
@@ -137,6 +137,16 @@ export function RoboAssistant() {
   // Refresh can't kill an in-flight task. Subscribe + force re-render.
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
   useEffect(() => subscribeAgentLoop(forceUpdate), [forceUpdate]);
+
+  // Self-heal a wedged job: a 'running' job with no activity for >6 minutes
+  // (hung action executor / lost response) would keep the composer disabled
+  // forever — the startAgentJob watchdog can't fire because SEND is disabled
+  // while a job runs. This 30s poll force-fails it so the user can continue
+  // without reloading.
+  useEffect(() => {
+    const t = setInterval(() => failStuckJob('no activity for over 6 minutes'), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const panelW = Math.min(400, Math.max(300, viewport.w - 24));
   const panelH = Math.min(560, Math.max(340, viewport.h - 90));

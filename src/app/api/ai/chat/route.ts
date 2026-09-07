@@ -130,7 +130,7 @@ function validateAgentAction(raw: unknown): AgentAction | null {
   const type = typeof a.type === 'string' ? a.type : '';
   switch (type) {
     case 'navigate': {
-      const view = clampStr(a.view, 40);
+      const view = clampStr(a.view, 40)?.toLowerCase();
       if (!view || !(AGENT_VIEWS as readonly string[]).includes(view)) return null;
       return { type: 'navigate', view };
     }
@@ -378,10 +378,22 @@ function plannerSystemPrompt(
     '       ["SELECT COUNT(*) FROM Employee WHERE isSupervisor = 1 AND deletedAt IS NULL",',
     '        "SELECT employeeId, fullName, position, currentSite FROM Employee WHERE isSupervisor = 1 AND deletedAt IS NULL LIMIT 200"]',
     '     (people flags are boolean columns: isSupervisor / isTeamLeader — do NOT filter by position text).',
+    '     COUNT RULE: the COUNT query must count the FULL filtered set — NEVER wrap a LIMITed subquery',
+    '     inside COUNT(*) (that reports the limit, not the total). LIMIT belongs ONLY on the display list.',
     '   - Always include LIMIT (max 200) on row lists; aggregates need none. Prefer WHERE deletedAt IS NULL.',
     '   - LIVE DATA RULE: even if the same (or a similar) question was answered earlier in this',
     '     conversation, NEVER reproduce tables or numbers from history — history can be stale. Reply with',
     '     {"sql":…} again and query the database fresh every time.',
+    '   - CASE-INSENSITIVE MATCHING (mandatory): users type names, sites, clients and statuses in ANY',
+    '     case — "john doe", "JOHN DOE", "Riyadh", "RIYADH TOWER SITE". SQLite comparisons with = are',
+    '     case-SENSITIVE, so NEVER filter text with = (or !=). Always match text case-insensitively with',
+    '     LIKE (case-insensitive in SQLite) or LOWER(col) = LOWER(\'value\') — e.g.',
+    '     "WHERE LOWER(fullName) = LOWER(\'john doe\')" or "WHERE currentSite LIKE \'%riyadh%\'".',
+    '     Exact stored casing is only acceptable for system values you generated yourself (ids, enums, dates).',
+    '   - CURRENT MEMBERSHIP RULE: "who/how many employees are at (or in) site X" ALWAYS means the',
+    '     CURRENT workforce — filter the Employee table on currentSite/currentSiteId (with the',
+    '     case-insensitive matching above). NEVER answer it from EmpCountSitePerMonth: that table is',
+    '     monthly site-count HISTORY and contains stale/duplicate rows, not today\\u2019s headcount.',
     '   - Include human-readable names/labels — never bare IDs alone.',
     '   - COUNT(*) after a JOIN counts matched pairs, not entities: use separate queries or COUNT(DISTINCT …).',
     '   - Dates are ISO datetime strings or YYYY-MM-DD text; use date(col) when needed. Never guess columns.',
@@ -703,6 +715,9 @@ export async function POST(request: NextRequest) {
       ...contextMessages,
     ];
     const planRaw = await callLLMR(plannerMessages, { temperature: 0 }, aiCreds);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[ai-chat] planner plan:', truncate(planRaw, 600).replace(/\n/g, ' '));
+    }
 
     // ── Agent recovery ladder (deterministic, weak-model-proof) ──────────
     // Weak models drift mid-task: they answer with a step LINE ("⚙️ Opening…"),
@@ -885,27 +900,33 @@ export async function POST(request: NextRequest) {
     // this deterministic guard — the prompt alone is not always enough.
     const dataQuestionRe =
       /\b(how many|how much|count (of|all)|list (all|the|me)|show (all|me all|me the)|which (sites|employees|camps|admins)|who (are|is) (our|the))\b/i;
-    if (
+    // Covers BOTH shapes of a remembered answer:
+    //   • prose wrapped in {"answer": …} (planJson.answer, no sql), and
+    //   • BARE PROSE with no JSON object at all — history-copying models often
+    //     replay an earlier markdown answer verbatim, and that used to slip
+    //     past this guard straight into the "planner replied in prose" path.
+    const answerOnlyPlan =
       planJson !== null &&
-      content &&
-      !agentObservation &&
       typeof planJson.answer === 'string' &&
-      planJson.answer.trim() &&
-      planJson.sql === undefined &&
-      dataQuestionRe.test(content)
-    ) {
+      !!planJson.answer.trim() &&
+      planJson.sql === undefined;
+    const bareProsePlan = planJson === null && !!planRaw.trim();
+    if (content && !agentObservation && (answerOnlyPlan || bareProsePlan) && dataQuestionRe.test(content)) {
       const retryRaw = await callLLMR(
         [
           ...plannerMessages,
           {
             role: 'user',
             content:
-              'That was prose, but this is a LIVE DATA question — it must be answered from fresh database queries, NEVER from numbers or tables said earlier in this conversation. Reply again with ONLY {"sql":"…"} or {"sql":["…","…"],"display":"…"} against the listed tables (keep the named-breakdown rule). Only if the database genuinely cannot answer it, keep {"answer":…} with no remembered figures.',
+              'That was prose, but this is a LIVE DATA question — it must be answered from fresh database queries, NEVER from numbers or tables said earlier in this conversation. Do NOT repeat any answer, table or figure that already appears above — they can be stale. Reply again with ONLY {"sql":"…"} or {"sql":["…","…"],"display":"…"} against the listed tables (keep the named-breakdown rule). Only if the database genuinely cannot answer it, keep {"answer":…} with no remembered figures.',
           },
         ],
         { temperature: 0 },
         aiCreds
       );
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[ai-chat] live-data retry:', truncate(retryRaw, 400).replace(/\n/g, ' '));
+      }
       const retryPlan = extractJsonObject(retryRaw);
       if (retryPlan !== null && retryPlan.sql !== undefined) planJson = retryPlan;
     }
@@ -1000,6 +1021,53 @@ export async function POST(request: NextRequest) {
           rowCount = totalRows;
           truncated = totalRows >= ROW_CAP;
           observation = obsParts.join('\n\n');
+
+          // ── CASE-RELAX RETRY (deterministic net) ──────────────────────────
+          // Users type names/sites in ANY case, but SQLite `=` is byte-case-
+          // sensitive — `WHERE fullName = 'JOHN DOE'` legitimately matches 0
+          // rows and the assistant would answer "not found". When a plan
+          // matched NOTHING and its SQL compares string literals, retry once
+          // with `=` swapped for LIKE (SQLite LIKE is ASCII case-insensitive)
+          // before giving up. Only literals containing letters are rewritten,
+          // so numeric/id/date comparisons are untouched.
+          if (totalRows === 0) {
+            const relaxLiteralEq = (statement: string): string | null => {
+              const relaxed = statement.replace(
+                /(!=|<>|=)\s*'([^']*[A-Za-z][^']*)'/g,
+                (_m, op: string, lit: string) => (op === '=' ? `LIKE '${lit}'` : `NOT LIKE '${lit}'`)
+              );
+              return relaxed !== statement && SQL_START_RE.test(relaxed) && !SQL_FORBIDDEN_RE.test(relaxed)
+                ? relaxed
+                : null;
+            };
+            const relaxedStatements = executed
+              .map(relaxLiteralEq)
+              .filter((s): s is string => !!s);
+            if (relaxedStatements.length > 0) {
+              try {
+                const retryParts: string[] = [];
+                let retryTotal = 0;
+                for (let i = 0; i < relaxedStatements.length; i++) {
+                  const rows = await runReadonlyQuery(relaxedStatements[i]);
+                  retryTotal += rows.length;
+                  const shown = rowsForResponder(rows);
+                  retryParts.push(
+                    `Query ${i + 1} → ${rows.length} row(s):\n${truncate(safeJson(shown.rows), Math.ceil(OBSERVATION_CAP / sanitized.length))}${shown.note}`
+                  );
+                }
+                if (retryTotal > 0) {
+                  sql = relaxedStatements.join('\n;\n');
+                  rowCount = retryTotal;
+                  truncated = retryTotal >= ROW_CAP;
+                  observation =
+                    retryParts.join('\n\n') +
+                    '\n(These rows were found with case-insensitive matching — the user typed the name in a different letter case. Use them.)';
+                }
+              } catch {
+                // case-relaxed retry failed — keep the original empty result
+              }
+            }
+          }
         }
       } else if (typeof planJson.answer === 'string' && planJson.answer.trim()) {
         directAnswer = planJson.answer.trim();

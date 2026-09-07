@@ -133,7 +133,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { employeeId, date, status, overtimeHours, siteId, actorUserId, actorDisplayName } = body;
+    const { employeeId, date, status: rawStatus, overtimeHours, siteId, actorUserId, actorDisplayName } = body;
+    const status = typeof rawStatus === 'string' ? rawStatus.trim().toLowerCase() : rawStatus; // case-insensitive ("PRESENT" → "present")
 
     if (!employeeId || !date || !status) {
       return NextResponse.json(

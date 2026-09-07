@@ -39,6 +39,8 @@ export interface AgentJob {
   sessionPatch: { title?: string; updatedAt?: string; day?: string } | null;
   /** Epoch ms of the last job mutation — powers the stuck-job watchdog. */
   lastActivityAt: number;
+  /** Set when the watchdog discards the job — the orphaned runJob must bail. */
+  abandoned?: boolean;
 }
 
 // Generous cap: NOC-sized tasks run through the one-shot noc_create macro,
@@ -90,6 +92,30 @@ export function isJobRunning(sessionId: string): boolean {
   return !!activeJob && activeJob.status === 'running' && activeJob.sessionId === sessionId;
 }
 
+/**
+ * UI-side self-heal: force-fail a 'running' job that has gone silent for over
+ * STUCK_JOB_MS. The startAgentJob watchdog alone can't rescue the composer —
+ * while a job is 'running' the send button is DISABLED, so a wedged job (hung
+ * action executor, lost response) used to lock the chat until a reload. The
+ * chat panel polls this every 30s and unblocks itself.
+ */
+export function failStuckJob(reason: string): void {
+  if (!activeJob || activeJob.status !== 'running') return;
+  if (Date.now() - activeJob.lastActivityAt < STUCK_JOB_MS) return;
+  console.warn('[agent-loop] failing stuck job:', activeJob.id, reason);
+  activeJob.abandoned = true; // the orphaned runJob must not touch state again
+  push(activeJob, {
+    id: `stuck-${Date.now()}`,
+    role: 'assistant',
+    content: '⏱️ I stopped — a step stopped responding, so I freed the chat instead of hanging. Please send your message again.',
+    createdAt: new Date().toISOString(),
+    error: true,
+  });
+  activeJob.error = reason;
+  activeJob.status = 'failed';
+  emit();
+}
+
 function push(job: AgentJob, msg: AgentLoopMessage): void {
   job.messages.push(msg);
   emit();
@@ -127,9 +153,9 @@ export function startAgentJob(
     if (Date.now() - activeJob.lastActivityAt < STUCK_JOB_MS) return activeJob;
     // Watchdog: the job has produced nothing for >6 minutes — it wedged.
     // Mark it failed (so its last message renders) and let the new job take
-    // over; if the old runJob ever wakes up, its writes land on the orphaned
-    // object and are harmless.
+    // over; the abandoned flag makes the old runJob bail when it wakes up.
     console.warn('[agent-loop] discarding wedged job (no activity for >6 min):', activeJob.id);
+    activeJob.abandoned = true;
     activeJob.status = 'failed';
     activeJob.error = 'timed out';
     emit();
@@ -224,6 +250,7 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
         return;
       }
       const d = data.data;
+      if (job.abandoned) return; // watchdog discarded this job mid-flight
       if (!d) {
         push(job, {
           id: `err-${Date.now()}`,
@@ -279,7 +306,16 @@ async function runJob(job: AgentJob, content: string, _initialView: string): Pro
           content: d.assistantMessage.content,
           createdAt: d.assistantMessage.createdAt,
         });
-        observation = await executeAgentAction(d.action as AgentAction);
+        // A hung action executor must not wedge the loop: race it against a
+        // hard cap. On timeout the loop continues with the failure as the
+        // observation so the model can react (or the step guard ends it).
+        observation = await Promise.race([
+          executeAgentAction(d.action as AgentAction),
+          new Promise<string>((resolve) =>
+            setTimeout(() => resolve('⚠️ The last action did not finish within 120 seconds — treat it as failed.'), 120_000)
+          ),
+        ]);
+        if (job.abandoned) return; // watchdog discarded this job mid-action
         continue;
       }
 

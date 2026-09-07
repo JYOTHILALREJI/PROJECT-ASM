@@ -10,7 +10,8 @@ import { logActivity } from '@/lib/activity-logger';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { date, status = 'present', employeeIds, siteId, siteName, actorUserId, actorDisplayName } = body;
+    const { date, status: rawStatus = 'present', employeeIds, siteId, siteName, actorUserId, actorDisplayName } = body;
+    const status = String(rawStatus).trim().toLowerCase(); // case-insensitive ("PRESENT" → "present")
 
     if (!date) {
       return NextResponse.json(
@@ -19,6 +20,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Status was already normalized case-insensitively at the top — every
+    // caller (page buttons, AI agent echoing the user's message) may send
+    // "PRESENT", "Absent", "Present"…
     const validStatuses = ['present', 'absent', 'no_site', 'overtime', 'camp_sitting'];
     if (!validStatuses.includes(status)) {
       return NextResponse.json(
@@ -55,12 +59,18 @@ export async function POST(request: NextRequest) {
     let restrictSiteId: string | null = null;
     if (!siteId && typeof siteName === 'string' && siteName.trim()) {
       const wanted = siteName.trim();
+      // CASE-INSENSITIVE resolution (users and the AI agent may type a site in
+      // ANY case — "riyadh", "RIYADH TOWER SITE"): load the site rows once and
+      // compare lowercased in JS — deterministic regardless of DB collation.
+      // Exact match wins, then substring containment.
+      const wantedLc = wanted.toLowerCase();
+      const siteRows = await db.site.findMany({
+        where: { deletedAt: null },
+        select: { id: true, name: true },
+      });
       const siteRow =
-        (await db.site.findFirst({ where: { deletedAt: null, name: wanted }, select: { id: true, name: true } })) ??
-        (await db.site.findFirst({
-          where: { deletedAt: null, name: { contains: wanted } },
-          select: { id: true, name: true },
-        }));
+        siteRows.find((s) => s.name.toLowerCase() === wantedLc) ??
+        siteRows.find((s) => s.name.toLowerCase().includes(wantedLc));
       if (!siteRow) {
         return NextResponse.json(
           { success: false, error: `No site found matching "${wanted}"` },
